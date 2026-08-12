@@ -7,11 +7,16 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import settings
 from src.handler import health, srt, tasks
+from src.handler.deps import get_store
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -29,7 +34,20 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router)
     app.include_router(srt.router)
     app.include_router(health.router)
-    # TODO  LOAD_ENV \
+
+    @app.on_event("startup")
+    def _scan_missing_terminal() -> None:
+        """启动时扫一遍终态 SUCCESS 任务，丢失资源的降级为 MISSING。
+
+        解决问题：服务重启后，磁盘产物已不在的"成功"任务不再被当作可用。
+        该操作幂等；运行中任务（status != SUCCESS）不会被触碰。
+        """
+        downgraded = tasks.scan_missing_terminal(get_store(), data_dir=settings.data_dir)
+        if downgraded:
+            logger.warning(
+                "启动扫描：以下任务产物已丢失，已降级为 MISSING: %s", downgraded
+            )
+
     return app
 
 

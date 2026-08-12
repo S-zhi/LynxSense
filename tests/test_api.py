@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from src.handler import tasks as tasks_routes
 from src.handler.app import app
 from src.handler.deps import get_store
-from src.store import TaskStore
+from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskStore
 
 
 @pytest.fixture
@@ -222,10 +222,162 @@ def test_success_task_exposes_outputs(client):
     data = client.get(f"/api/tasks/{cid}").json()
     assert data["outputs"]["video"] == f"/api/tasks/{cid}/download"
     assert data["outputs"]["subtitle"] == f"/api/tasks/{cid}/subtitle"
+    # 资源可用时显式标注 AVAILABLE
+    assert data["resourceStatus"] == RESOURCE_STATUS_AVAILABLE
 
 
 def test_health(client):
     assert client.get("/api/health").json() == {"ok": True}
+
+
+# ---------- issue #22：终态任务产物丢失 ----------
+
+
+def test_success_task_with_missing_video_hides_outputs(client):
+    """SUCCESS 任务但 output.mp4 不在 → outputs 必须为空，resourceStatus=MISSING。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    # 模拟服务重启：创建一个全新的 TaskStore 读同一个 db
+    fresh = TaskStore(client._store.db_path)
+    # 故意不创建任何产物文件
+    marked = tasks_routes.scan_missing_terminal(fresh, data_dir=client._tmp)
+    assert marked == [cid]
+
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["status"] == "SUCCESS"  # 任务历史状态保留
+    assert data["resourceStatus"] == RESOURCE_STATUS_MISSING
+    assert data["outputs"] is None
+    assert data["error"] == "资源已删除"
+
+
+def test_success_download_only_task_with_missing_source_hides_outputs(client):
+    """needSubtitle=False 的"仅下载"任务丢失 source.* 也算资源已丢失。"""
+    cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    # 不落 source.* 文件，直接扫
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp)
+    assert marked == [cid]
+
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["resourceStatus"] == RESOURCE_STATUS_MISSING
+    assert data["outputs"] is None
+
+
+def test_scan_missing_terminal_is_idempotent(client):
+    """重复跑扫描不会再次写库，状态保持稳定。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    assert tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp) == [cid]
+    # 第二次扫描，状态已经是 MISSING，应该返回空列表并不修改 updated_at 之外的字段
+    rec_before = client._store.get(cid)
+    assert tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp) == []
+    rec_after = client._store.get(cid)
+    # updated_at 在第二次扫描不应该被刷新（因为没有写）
+    assert rec_before.updated_at == rec_after.updated_at
+    assert rec_after.resource_status == RESOURCE_STATUS_MISSING
+
+
+def test_scan_missing_terminal_skips_non_success(client):
+    """非 SUCCESS 终态（如 FAILED）即使文件不存在也不应被降级。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="FAILED", progress=40, error="boom")
+
+    assert tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp) == []
+    rec = client._store.get(cid)
+    assert rec.status == "FAILED"
+    assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
+    assert rec.error == "boom"
+
+
+def test_scan_missing_terminal_keeps_success_when_artifacts_present(client):
+    """SUCCESS + 文件齐备时不应被误判为 MISSING。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "output.mp4").write_bytes(b"VIDEO")
+    (d / "translated.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+
+    assert tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp) == []
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["resourceStatus"] == RESOURCE_STATUS_AVAILABLE
+    assert data["outputs"]["video"] == f"/api/tasks/{cid}/download"
+
+
+def test_download_missing_video_marks_resource_missing(client):
+    """下载端点遇到 SUCCESS 任务但文件不在，应降级为 MISSING 并返回'资源已删除'。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    r = client.get(f"/api/tasks/{cid}/download")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "资源已删除"
+
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    # 详情接口同步反映新状态
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["resourceStatus"] == RESOURCE_STATUS_MISSING
+    assert data["outputs"] is None
+
+
+def test_download_missing_subtitle_marks_resource_missing(client):
+    """仅字幕缺失：下载视频成功，下载字幕时降级。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "output.mp4").write_bytes(b"VIDEO")
+    # 不写 translated.srt
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    r = client.get(f"/api/tasks/{cid}/subtitle")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "资源已删除"
+
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+
+
+def test_download_keeps_not_generated_message_for_running_task(client):
+    """非 SUCCESS 任务（流水线还在跑）下载应仍返回'尚未生成'，不动 resource_status。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="TRANSLATING", progress=50, current_step="TRANSLATING")
+
+    r = client.get(f"/api/tasks/{cid}/download")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "成品视频尚未生成"
+
+    rec = client._store.get(cid)
+    # 运行中任务不应当被降级
+    assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
+    assert rec.status == "TRANSLATING"
+
+
+def test_list_tasks_reflects_resource_missing(client):
+    """列表接口也要反映 resourceStatus，MISSING 任务的 outputs 为 None。"""
+    a = client.post("/api/tasks", json=_payload()).json()["id"]
+    b = client.post("/api/tasks", json=_payload(url="https://x/2")).json()["id"]
+
+    # a 完整，b 缺文件
+    d = client._tmp / a
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "output.mp4").write_bytes(b"VIDEO")
+    (d / "translated.srt").write_text("x", encoding="utf-8")
+    client._store.update(a, status="SUCCESS", progress=100)
+    client._store.update(b, status="SUCCESS", progress=100)
+
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp)
+    assert sorted(marked) == [b]
+
+    listed = {item["id"]: item for item in client.get("/api/tasks").json()}
+    assert listed[a]["resourceStatus"] == RESOURCE_STATUS_AVAILABLE
+    assert listed[a]["outputs"]["video"] == f"/api/tasks/{a}/download"
+    assert listed[b]["resourceStatus"] == RESOURCE_STATUS_MISSING
+    assert listed[b]["outputs"] is None
 
 
 # ---------- CORS ----------
