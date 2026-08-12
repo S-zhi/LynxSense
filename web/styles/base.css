@@ -268,6 +268,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 .btn--primary:hover:not(:disabled) { background: var(--accent-press); }
 .btn--ghost { background: var(--surface); border-color: var(--border-2); color: var(--text); }
 .btn--ghost:hover:not(:disabled) { background: var(--surface-3); }
+.btn--danger { background: var(--danger); color: #fff; border-color: transparent; }
+.btn--danger:hover:not(:disabled) { background: var(--danger-text); }
 .btn--sm { height: 32px; padding: 0 12px; font-size: 13px; }
 
 /* 图标按钮（工具栏 / 行操作） */
@@ -297,6 +299,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 }
 .select:hover { border-color: var(--border-2); }
 .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.select--sm { height: 32px; padding: 4px 28px 4px 10px; font-size: 12.5px; }
 
 /* 分段控件 */
 .segmented {

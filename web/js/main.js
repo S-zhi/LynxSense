@@ -6,6 +6,7 @@ import { initConsole } from "./ui-console.js";
 import { initQueue } from "./ui-queue.js";
 import { initPreview } from "./ui-preview.js";
 import { initProbe } from "./ui-probe.js";
+import { initStorage } from "./ui-storage.js";
 import { loadTasks, stopAll } from "./store.js";
 
 initTheme();
@@ -14,6 +15,7 @@ initConsole();
 initQueue();
 initPreview();
 initProbe();
+initStorage();
 
 loadTasks();
 

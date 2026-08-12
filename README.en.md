@@ -223,6 +223,11 @@ Interactive API docs are available at <http://localhost:8000/docs>.
 | `GET` | `/api/tasks/{id}/stream` | SSE live progress stream |
 | `GET` | `/api/srt/languages` | List source languages |
 | `GET` | `/api/srt/model-weights` | List model weights |
+| `GET` | `/api/storage/stats` | Local storage stats: total size, kind breakdown, per-task usage |
+| `POST` | `/api/storage/cleanup_preview` | Preview the impact of a cleanup (RUNNING tasks are skipped) |
+| `POST` | `/api/storage/cleanup` | Execute cleanup by filters; RUNNING tasks are always skipped |
+| `GET` | `/api/storage/retention` | Read the simplified retention policy (days=null = unlimited) |
+| `PUT` | `/api/storage/retention` | Write the simplified retention policy |
 
 `POST /api/tasks` request body:
 

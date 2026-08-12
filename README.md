@@ -223,6 +223,11 @@ uv run python -m src.core.subtitle_burner data/<task_id>/source.mp4 data/<task_i
 | `GET` | `/api/tasks/{id}/stream` | SSE 实时进度 |
 | `GET` | `/api/srt/languages` | 获取源语言列表 |
 | `GET` | `/api/srt/model-weights` | 获取模型权重列表 |
+| `GET` | `/api/storage/stats` | 本地资源统计：总占用、类别分布、按任务排序 |
+| `POST` | `/api/storage/cleanup_preview` | 预览可清理的任务与产物（运行中会被跳过） |
+| `POST` | `/api/storage/cleanup` | 执行清理：按筛选条件清理，强制跳过 RUNNING 任务 |
+| `GET` | `/api/storage/retention` | 读取简化保留策略（days=null 表示不限） |
+| `PUT` | `/api/storage/retention` | 写入简化保留策略 |
 
 `POST /api/tasks` 请求体：
 
