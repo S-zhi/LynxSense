@@ -214,3 +214,146 @@ def test_pipeline_upload_missing_source_fails(monkeypatch, tmp_path):
     with pytest.raises(orchestrator.PipelineError):
         run_pipeline(params, events.append)
     assert events[-1].status == "FAILED"
+
+
+# ---------- need_subtitle=False：仅下载/仅载入，跳过识别/翻译/烧录 ----------
+
+def test_pipeline_url_only_download_skips_subtitle_steps(monkeypatch):
+    """链接模式 + need_subtitle=False：只走 download_video，识别/翻译/烧录全跳过。"""
+    calls = []
+
+    def fake_download(url, tid, on_progress=None, **kw):
+        calls.append("download")
+        # 模拟下载内部 50% 进度，应被映射到 [0, 100] 整段（因为整条流水线只剩它）
+        if on_progress:
+            on_progress(SimpleNamespace(percent=50))
+        return SimpleNamespace(video_path=Path("/d/source.mp4"), title="URL Title")
+
+    def fail_extract(*a, **k):
+        calls.append("extract")
+        raise AssertionError("need_subtitle=False 不应调用 extract")
+
+    def fail_transcribe(*a, **k):
+        calls.append("transcribe")
+        raise AssertionError("need_subtitle=False 不应调用 transcribe")
+
+    def fail_translate(*a, **k):
+        calls.append("translate")
+        raise AssertionError("need_subtitle=False 不应调用 translate")
+
+    def fail_burn(*a, **k):
+        calls.append("burn")
+        raise AssertionError("need_subtitle=False 不应调用 burn")
+
+    monkeypatch.setattr(orchestrator, "download_video", fake_download)
+    monkeypatch.setattr(orchestrator, "extract_audio", fail_extract)
+    monkeypatch.setattr(orchestrator, "transcribe", fail_transcribe)
+    monkeypatch.setattr(orchestrator, "translate_srt", fail_translate)
+    monkeypatch.setattr(orchestrator, "burn_subtitles", fail_burn)
+
+    params = PipelineParams(
+        task_id="t1", url="https://x/v", source_lang="en", target_lang="ja",
+        mode="bilingual", burn="soft", model="medium",
+        need_subtitle=False,
+    )
+    events = []
+    result = run_pipeline(params, events.append)
+
+    assert calls == ["download"]  # 后续步骤零调用
+    assert result.status == "SUCCESS"
+    assert result.title == "URL Title"
+    # 仅下载场景：outputs 只暴露 video，不应有 subtitle 键
+    assert result.outputs == {"video": "/d/source.mp4"}
+    # 进度 50% -> 0 + 0.5*(100-0) = 50；最终 100
+    assert events[-1].progress == 100
+    assert 50 in [e.progress for e in events if e.status == "DOWNLOADING"]
+
+
+def test_pipeline_upload_only_load_skips_subtitle_steps(monkeypatch, tmp_path):
+    """上传模式 + need_subtitle=False：跳过下载和识别/翻译/烧录。"""
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"VID")
+    monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+
+    def fail_download(*a, **k):
+        raise AssertionError("need_subtitle=False + upload 不应调用 download")
+
+    def fail_extract(*a, **k):
+        raise AssertionError("need_subtitle=False 不应调用 extract")
+
+    def fail_transcribe(*a, **k):
+        raise AssertionError("need_subtitle=False 不应调用 transcribe")
+
+    def fail_translate(*a, **k):
+        raise AssertionError("need_subtitle=False 不应调用 translate")
+
+    def fail_burn(*a, **k):
+        raise AssertionError("need_subtitle=False 不应调用 burn")
+
+    monkeypatch.setattr(orchestrator, "download_video", fail_download)
+    monkeypatch.setattr(orchestrator, "extract_audio", fail_extract)
+    monkeypatch.setattr(orchestrator, "transcribe", fail_transcribe)
+    monkeypatch.setattr(orchestrator, "translate_srt", fail_translate)
+    monkeypatch.setattr(orchestrator, "burn_subtitles", fail_burn)
+
+    params = PipelineParams(
+        task_id="t1", url="clip.mp4", source_lang="auto", target_lang="zh-CN",
+        source_type="upload", need_subtitle=False, title="Clip",
+    )
+    events = []
+    result = run_pipeline(params, events.append)
+
+    # 显式给定 title 时使用它
+    assert result.status == "SUCCESS" and result.title == "Clip"
+    assert result.outputs == {"video": str(src)}
+    # 状态序列应只有 DOWNLOADING + SUCCESS
+    statuses = [e.status for e in events]
+    assert "EXTRACTING" not in statuses
+    assert "TRANSCRIBING" not in statuses
+    assert "TRANSLATING" not in statuses
+    assert "BURNING" not in statuses
+    assert statuses[-1] == "SUCCESS"
+
+
+def test_pipeline_upload_only_load_title_falls_back_to_stem(monkeypatch, tmp_path):
+    """上传 + need_subtitle=False：未给 title 时回退到源文件名 stem。"""
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"VID")
+    monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+
+    monkeypatch.setattr(orchestrator, "download_video",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应调用 download")))
+    for name in ("extract_audio", "transcribe", "translate_srt", "burn_subtitles"):
+        monkeypatch.setattr(orchestrator, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应调用 " + name)))
+
+    params = PipelineParams(
+        task_id="t1", url="clip.mp4", source_lang="auto", target_lang="zh-CN",
+        source_type="upload", need_subtitle=False,  # 未指定 title
+    )
+    result = run_pipeline(params, lambda e: None)
+    assert result.title == "source"
+
+
+def test_pipeline_url_only_download_emits_only_downloading_events(monkeypatch):
+    """need_subtitle=False 时事件序列应只有 DOWNLOADING + SUCCESS。"""
+    monkeypatch.setattr(orchestrator, "download_video",
+                        lambda url, tid, on_progress=None, **kw: SimpleNamespace(
+                            video_path=Path("/d/source.mp4"), title="T"))
+    for name in ("extract_audio", "transcribe", "translate_srt", "burn_subtitles"):
+        monkeypatch.setattr(orchestrator, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应调用 " + name)))
+
+    params = PipelineParams(
+        task_id="t1", url="https://x", source_lang="auto", target_lang="zh-CN",
+        need_subtitle=False,
+    )
+    events = []
+    run_pipeline(params, events.append)
+
+    statuses = [e.status for e in events]
+    # 不应有 EXTRACTING / TRANSCRIBING / TRANSLATING / BURNING
+    assert "EXTRACTING" not in statuses
+    assert "TRANSCRIBING" not in statuses
+    assert "TRANSLATING" not in statuses
+    assert "BURNING" not in statuses
+    # 结尾是 SUCCESS
+    assert statuses[-1] == "SUCCESS"
