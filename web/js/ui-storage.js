@@ -249,15 +249,15 @@ function renderTable() {
     const sizeTd = el("td", "storage-table__size num");
     sizeTd.textContent = formatBytes(t.size);
 
-    // 创建时间
+    // 创建时间：后端 stats 不带 createdAt，用本地 state 兜底
     const ageTd = el("td", "storage-table__age");
-    ageTd.textContent = formatAge(t.taskId);  // 后端没带 createdAt，用本地 state 兜底
+    ageTd.textContent = "—";
 
     tr.append(checkTd, titleTd, statusTd, artTd, sizeTd, ageTd);
     tbody.append(tr);
   }
 
-  // 兜底：把任务创建时间也填上
+  // 用本地 store 的 tasks 兜底填入创建时间
   fillAges();
   updateActions();
 }
@@ -280,7 +280,6 @@ function formatAgeFromMs(ms) {
   const months = Math.floor(days / 30);
   return months < 12 ? `${months} 个月前` : `${Math.floor(months / 12)} 年前`;
 }
-function formatAge(_id) { return "—"; }
 
 /* ---------- 选择 / 动作状态 ---------- */
 function toggleSelect(id, on) {
