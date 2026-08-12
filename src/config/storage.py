@@ -29,3 +29,21 @@ def ensure_task_dir(task_id: str) -> Path:
     d = task_dir(task_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def artifacts_present(task_id: str, *, data_dir: Path, need_subtitle: bool) -> bool:
+    """判断一个成功任务的产物是否还都在磁盘上。
+
+    - 完整流水线（need_subtitle=True）：output.mp4 与 translated.srt 都必须在。
+    - 仅下载模式（need_subtitle=False）：source.* 至少存在一个。
+
+    与 task_dir 一样不抛异常；目录不存在视为资源丢失。
+    该函数用于服务启动 / 下载兜底场景：发现资源缺失就把状态降级为 MISSING，
+    避免给用户暴露已经失效的下载链接。
+    """
+    d = data_dir / task_id
+    if not d.is_dir():
+        return False
+    if need_subtitle:
+        return (d / OUTPUT_VIDEO).exists() and (d / TRANSLATED_SRT).exists()
+    return any(d.glob(f"{SOURCE_VIDEO_STEM}.*"))

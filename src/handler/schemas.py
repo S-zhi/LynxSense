@@ -10,7 +10,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from src.store import TaskRecord
+from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskRecord
 
 
 class TaskCreate(BaseModel):
@@ -87,15 +87,25 @@ class TaskOut(BaseModel):
     outputs: Optional[dict]
     completedSteps: List[str] = Field(default_factory=list)
     lastErrorStep: Optional[str] = None
+
+    resourceStatus: str  # AVAILABLE | MISSING — 任务产物文件是否在盘
+
     createdAt: int
     updatedAt: int
 
 
 def to_out(rec: TaskRecord) -> TaskOut:
-    """TaskRecord(snake_case) -> TaskOut(camelCase)。"""
+    """TaskRecord(snake_case) -> TaskOut(camelCase)。
+
+    outputs 暴露规则：
+    - 任务不是 SUCCESS：None（流水线还在跑 / 失败了都不会给下载链接）
+    - SUCCESS 但 resource_status == MISSING：None（产物已被清理，不再暴露失效链接）
+    - SUCCESS + AVAILABLE：按 need_subtitle 拼出 video / subtitle 链接
+    """
     need_subtitle = bool(rec.need_subtitle)
+    resource_status = rec.resource_status or RESOURCE_STATUS_AVAILABLE
     outputs = None
-    if rec.status == "SUCCESS":
+    if rec.status == "SUCCESS" and resource_status == RESOURCE_STATUS_AVAILABLE:
         outputs = {"video": f"/api/tasks/{rec.id}/download"}
         if need_subtitle:
             outputs["subtitle"] = f"/api/tasks/{rec.id}/subtitle"
@@ -118,6 +128,13 @@ def to_out(rec: TaskRecord) -> TaskOut:
         outputs=outputs,
         completedSteps=list(rec.completed_steps or []),
         lastErrorStep=rec.last_error_step,
+
+        resourceStatus=resource_status,
+
         createdAt=rec.created_at,
         updatedAt=rec.updated_at,
     )
+
+
+# 暴露给前端 / 文档的状态字面量，避免散落字符串
+RESOURCE_STATUS_VALUES = (RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING)

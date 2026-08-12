@@ -26,6 +26,13 @@ STATUSES = (
     "FAILED",
 )
 
+# 资源可用性：与流水线 status 解耦，专门描述"任务已经成功 / 失败，
+# 但磁盘上的产物是否还在"。服务重启或运行中下载时若发现资源缺失，
+# 会把 resource_status 置为 MISSING，避免继续暴露已失效的下载链接。
+RESOURCE_STATUS_AVAILABLE = "AVAILABLE"
+RESOURCE_STATUS_MISSING = "MISSING"
+RESOURCE_STATUSES = (RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING)
+
 
 @dataclass
 class TaskRecord:
@@ -52,6 +59,7 @@ class TaskRecord:
     last_error_step: Optional[str] = None
     created_at: int = 0   # epoch 毫秒
     updated_at: int = 0
+    resource_status: str = RESOURCE_STATUS_AVAILABLE  # 产物文件是否在盘
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -126,7 +134,8 @@ class TaskStore:
                     completed_steps TEXT,
                     last_error_step TEXT,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'
                 )
                 """
             )
@@ -140,6 +149,12 @@ class TaskStore:
                 conn.execute("ALTER TABLE tasks ADD COLUMN completed_steps TEXT")
             if "last_error_step" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN last_error_step TEXT")
+
+            if "resource_status" not in cols:
+                conn.execute(
+                    "ALTER TABLE tasks ADD COLUMN resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'"
+                )
+
 
     # ---------- 增 ----------
     def create(
