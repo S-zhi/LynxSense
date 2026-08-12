@@ -163,6 +163,32 @@ const RealApi = {
       body: JSON.stringify({ days }),
     });
     if (!res.ok) throw new Error("保存保留策略失败：" + res.status);
+  // 拉取任务 current subtitles（original + translated），解析为前端可编辑结构
+  async getSubtitles(id) {
+    const res = await request(this.base, `/api/tasks/${id}/subtitles`);
+    if (!res.ok) throw new Error("读取字幕失败：" + (await errorText(res)));
+    return res.json();
+  },
+
+  // 保存编辑后的字幕到后端；version 为可选版本号（例 "v2"）
+  async saveSubtitles(id, payload) {
+    const res = await request(this.base, `/api/tasks/${id}/subtitles`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("保存字幕失败：" + (await errorText(res)));
+    return res.json();
+  },
+
+  // 基于当前 translated.srt 重新烧录成品；mode 可选覆盖任务设置
+  async reburnSubtitles(id, payload = {}) {
+    const res = await request(this.base, `/api/tasks/${id}/subtitles/burn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("重新烧录失败：" + (await errorText(res)));
     return res.json();
   },
 
@@ -189,6 +215,29 @@ const RealApi = {
 
 const MockApi = (() => {
   const STORE_KEY = "subtrans_mock_tasks_v1";
+
+  // 按 taskId 缓存 in-memory subtitles（编辑/保存即时反馈）
+  const _subtitles = {};
+
+  function _seedSubs(t) {
+    const make = (origs, trans) => ({
+      hasOriginal: !!origs, hasTranslated: !!trans,
+      original: origs || [],
+      translated: trans || [],
+    });
+    if (t.status !== "SUCCESS") return make(null, null);
+    const orig = [
+      { id: "sub_demo1", index: 1, start: 0, end: 2.4, text: "Welcome to the demo." },
+      { id: "sub_demo2", index: 2, start: 2.4, end: 5.0, text: "Today we'll learn about subtitle editing." },
+      { id: "sub_demo3", index: 3, start: 5.0, end: 7.8, text: "You can adjust timing, text, and split cues." },
+    ];
+    const tra = [
+      { id: "sub_demo1", index: 1, start: 0, end: 2.4, text: "欢迎使用示例。" },
+      { id: "sub_demo2", index: 2, start: 2.4, end: 5.0, text: "今天我们来看看字幕编辑。" },
+      { id: "sub_demo3", index: 3, start: 5.0, end: 7.8, text: "你可以调整时间、文本，或者拆分合并。" },
+    ];
+    return make(orig, tra);
+  }
 
   function seed() {
     const now = Date.now();
@@ -299,6 +348,32 @@ const MockApi = (() => {
       const out = { days, updatedAt: Date.now() };
       try { localStorage.setItem("subtrans_mock_retention", JSON.stringify(out)); } catch (e) {}
       return out;
+    // 示例模式下的字幕编辑：内存中维护一份，供前端 UI 调试
+    async getSubtitles(id) {
+      await delay(120);
+      const t = find(id);
+      if (!t) throw new Error("任务不存在");
+      const seed = MockApi._subtitles[id] || MockApi._seedSubs(t);
+      MockApi._subtitles[id] = seed;
+      return { taskId: id, title: t.title, burn: t.burn || "hard", ...seed };
+    },
+    async saveSubtitles(id, payload) {
+      await delay(160);
+      const cur = MockApi._subtitles[id] || {};
+      cur[payload.locale] = payload.entries;
+      if (payload.version) cur[`__v__${payload.locale}__${payload.version}`] = payload.entries;
+      MockApi._subtitles[id] = cur;
+      return {
+        ok: true,
+        taskId: id,
+        locale: payload.locale,
+        path: payload.version ? `${payload.locale}.${payload.version}.srt` : `${payload.locale}.srt`,
+        count: payload.entries.length,
+      };
+    },
+    async reburnSubtitles(id /* , payload */) {
+      await delay(900);
+      return { ok: true, taskId: id, mode: "hard", outputPath: "output.mp4" };
     },
     subscribeProgress(id, onUpdate) {
       const t = find(id);

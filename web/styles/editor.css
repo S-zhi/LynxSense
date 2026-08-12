@@ -1,0 +1,190 @@
+/* ============================================================
+   Subtitles AI - editor
+   字幕编辑：左侧任务列表 + 右侧视频/字幕编辑两栏
+   ============================================================ */
+
+.editor {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  margin: -6px -18px 0;
+  min-height: 540px;
+}
+
+/* ---------- 左侧任务列 ---------- */
+.editor__rail {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-panel);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+  min-height: 0;
+}
+.editor__railhead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; padding: 14px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.editor__railhead h2 { font-size: 14px; }
+.editor__hint { font-size: 11.5px; color: var(--text-3); }
+.editor__list { display: flex; flex-direction: column; gap: 4px; padding: 8px; overflow: auto; flex: 1; min-height: 0; }
+
+.editem {
+  display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center;
+  width: 100%; font: inherit;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-row); padding: 9px 10px;
+  color: var(--text); cursor: pointer;
+  text-align: left;
+  transition: background var(--dur), border-color var(--dur);
+}
+.editem:hover { background: var(--surface-2); }
+.editem.is-active { background: var(--accent-soft); border-color: var(--accent); }
+.editem__thumb {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 9px;
+  background: var(--surface-3); color: var(--text-2);
+  font-size: 16px;
+}
+.editem.is-active .editem__thumb { background: var(--surface); color: var(--accent); }
+.editem__body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.editem__title { font-size: 13px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.editem__meta { font-size: 11.5px; color: var(--text-3); }
+
+/* ---------- 右侧主区 ---------- */
+.editor__main {
+  display: flex; flex-direction: column;
+  border-radius: var(--r-panel);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+  min-width: 0; min-height: 0;
+}
+
+.editor__head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.editor__headtitle { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.editor__headtitle h2 { font-size: 14.5px; }
+.editor__sub { font-size: 11.5px; color: var(--text-3); }
+
+.editor__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.editor__sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+
+.editor__version { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.editor__versioninput {
+  font: inherit; font-size: 12px;
+  width: 100px; padding: 5px 8px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-control);
+}
+.editor__versioninput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.editor__versioninput::placeholder { color: var(--text-3); }
+
+/* locale segmented 在 actions 中复用全局 .chip 风格 */
+.editor__locale { display: inline-flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-control); padding: 3px; }
+
+/* ---------- 视频 + 字幕两栏 ---------- */
+.editor__body {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 1.6fr);
+  gap: 12px;
+  padding: 12px 14px 14px;
+  min-height: 0;
+  flex: 1;
+}
+
+.editor__video {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 0; min-height: 0;
+  border-radius: var(--r-row);
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(120% 90% at 50% 0%, #20242c 0%, #16181d 60%, #121317 100%);
+  padding: 12px;
+  overflow: hidden;
+  max-height: 360px;
+}
+.editor__video video {
+  display: block; max-width: 100%; max-height: 100%;
+  width: auto; height: auto; object-fit: contain;
+  background: #0d0e11; border-radius: 6px;
+}
+.editor__videoempty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 6px; padding: 24px 12px; color: var(--text-2);
+}
+.editor__videoempty .state__icon { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
+.editor__videoempty .state__title { color: rgba(255,255,255,0.9); }
+.editor__videoempty .state__desc { color: rgba(255,255,255,0.55); }
+
+/* ---------- 字幕条目 ---------- */
+.editor__subs {
+  display: flex; flex-direction: column; gap: 6px;
+  overflow: auto;
+  border-radius: var(--r-row);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 8px;
+  max-height: 360px;
+}
+
+.subrow {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  padding: 8px 10px 9px;
+  display: flex; flex-direction: column; gap: 6px;
+  transition: border-color var(--dur), background var(--dur);
+}
+.subrow.is-active { border-color: var(--accent); background: var(--accent-soft); }
+
+.subrow__head { display: flex; align-items: center; gap: 8px; }
+.subrow__num {
+  display: inline-grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 7px;
+  background: var(--surface-3); color: var(--text-2);
+  font-size: 11px; font-weight: 600; flex: none;
+}
+.subrow.is-active .subrow__num { background: var(--accent); color: #fff; }
+
+.subrow__times { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.subrow__time {
+  font: inherit; font-size: 12px; font-family: var(--font-mono);
+  width: 84px; padding: 4px 6px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.subrow__time:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.subrow__time.is-invalid { border-color: var(--danger); background: var(--danger-soft); color: var(--danger-text); }
+.subrow__arrow { color: var(--text-3); font-size: 12px; }
+
+.subrow__ops { display: flex; align-items: center; gap: 1px; flex: none; }
+.subrow__ops .iconbtn { width: 28px; height: 28px; font-size: 14px; }
+
+.subrow__text {
+  font: inherit; font-size: 13px; line-height: 1.5;
+  width: 100%; min-height: 36px;
+  padding: 6px 8px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  resize: vertical;
+  font-family: var(--font-sans);
+}
+.subrow__text:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 变体：保存按钮被标脏时的强调色（复用 accent 软色） */
+.btn--accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn--accent:hover { background: var(--accent-press); border-color: var(--accent-press); }
+
+/* ---------- 窄屏适配 ---------- */
+@media (max-width: 920px) {
+  .editor { grid-template-columns: 1fr; }
+  .editor__body { grid-template-columns: 1fr; }
+  .editor__video { max-height: 280px; }
+  .editor__subs { max-height: 360px; }
+}

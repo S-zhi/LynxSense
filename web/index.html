@@ -34,6 +34,9 @@
           <button class="nav__item" type="button" data-view="preview">
             <i class="ph ph-monitor-play" aria-hidden="true"></i><span>视频预览</span>
           </button>
+          <button class="nav__item" type="button" data-view="editor">
+            <i class="ph ph-text-aa" aria-hidden="true"></i><span>字幕编辑</span>
+          </button>
           <button class="nav__item" type="button" data-view="probe">
             <i class="ph ph-pulse" aria-hidden="true"></i><span>下载测试</span>
           </button>
@@ -52,6 +55,18 @@
               <span class="site-icon__hub">hub</span>
             </a>
           </div>
+        </section>
+
+        <section class="settings" aria-labelledby="settingsTitle">
+          <h2 id="settingsTitle" class="settings__title">通知</h2>
+          <label class="settings__row" for="notifyToggle">
+            <span class="settings__name">任务完成 / 失败时弹通知</span>
+            <span class="settings__switch">
+              <input id="notifyToggle" type="checkbox" />
+              <span class="settings__slider" aria-hidden="true"></span>
+            </span>
+          </label>
+          <p class="settings__hint" id="notifyHint">浏览器未授权时无法弹出通知。</p>
         </section>
 
         <div class="sidebar__foot">
@@ -170,6 +185,53 @@
               <h2>已完成</h2>
               <div class="screening__list" id="previewList"></div>
             </aside>
+          </div>
+        </section>
+
+        <!-- ============ 字幕编辑 ============ -->
+        <section class="view" data-view="editor" id="view-editor">
+          <div class="editor">
+            <aside class="editor__rail" aria-label="可选任务">
+              <div class="editor__railhead">
+                <h2>任务</h2>
+                <span class="editor__hint" id="editorHint">选一个任务开始编辑</span>
+              </div>
+              <div class="editor__list" id="editorList"></div>
+            </aside>
+
+            <section class="editor__main">
+              <header class="editor__head">
+                <div class="editor__headtitle">
+                  <h2 id="editorTitle">字幕编辑</h2>
+                  <span class="editor__sub" id="editorSub">左侧选任务，右侧编辑</span>
+                </div>
+                <div class="editor__actions" id="editorActions" hidden>
+                  <div class="editor__locale" role="tablist" aria-label="编辑语言轨道">
+                    <button class="chip is-active" data-locale="translated" type="button" role="tab">译文</button>
+                    <button class="chip" data-locale="original" type="button" role="tab">原文</button>
+                  </div>
+                  <button class="btn btn--ghost btn--sm" id="editorAdd" type="button" title="在末尾追加一条空白字幕">
+                    <i class="ph ph-plus"></i><span>新增条目</span>
+                  </button>
+                  <span class="editor__sep" aria-hidden="true"></span>
+                  <label class="editor__version" title="不填则覆盖原文件；填了则保存为版本文件">
+                    <span>版本</span>
+                    <input class="editor__versioninput" id="editorVersion" type="text" placeholder="不填=覆盖" maxlength="16" />
+                  </label>
+                  <button class="btn btn--ghost btn--sm" id="editorSave" type="button">
+                    <i class="ph ph-floppy-disk"></i><span>保存</span>
+                  </button>
+                  <button class="btn btn--primary btn--sm" id="editorReburn" type="button" title="基于当前译文重新烧录成品">
+                    <i class="ph ph-fire"></i><span>重新烧录</span>
+                  </button>
+                </div>
+              </header>
+
+              <div class="editor__body">
+                <div class="editor__video" id="editorVideo"></div>
+                <div class="editor__subs" id="editorSubs"></div>
+              </div>
+            </section>
           </div>
         </section>
 

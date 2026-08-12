@@ -27,7 +27,13 @@
 }
 .qrow:hover { border-color: var(--border-2); }
 .qrow.entering { animation: rowIn 0.34s var(--ease) backwards; }
+.qrow.is-focus { animation: rowFocus 1.6s var(--ease); border-color: var(--accent); }
 @keyframes rowIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes rowFocus {
+  0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
+  35%  { box-shadow: 0 0 0 6px var(--accent-soft); }
+  100% { box-shadow: 0 0 0 0 var(--accent-soft); }
+}
 
 /* 状态图标瓦片（非装饰性圆点，承载语义） */
 .qrow__status {
