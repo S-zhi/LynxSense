@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 from src.handler import tasks as tasks_routes
 from src.handler.app import app
 from src.handler.deps import get_store
-from src.store import TaskStore
+from src.handler.schemas import to_out
+from src.core.downloader import ProbeResult
+from src.store import TaskStore, TaskRecord
 
 
 @pytest.fixture
@@ -252,3 +254,334 @@ def test_cors_rejects_untrusted_origin(client):
     )
     assert r.status_code == 400
     assert "access-control-allow-origin" not in r.headers
+
+
+# ---------- /api/tasks/probe 探针端点 ----------
+
+def test_probe_returns_probe_result_shape(client, monkeypatch):
+    """POST /api/tasks/probe 应把 probe_video 的 ProbeResult 翻成 TaskProbeOut。"""
+    fake = ProbeResult(
+        ok=True,
+        title="P",
+        extractor="Generic",
+        duration=9.0,
+        formats_count=2,
+        webpage_url="https://x/v",
+    )
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+
+    r = client.post("/api/tasks/probe", json={"url": "https://x/v"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["title"] == "P"
+    assert data["extractor"] == "Generic"
+    assert data["duration"] == 9.0
+    assert data["formatsCount"] == 2
+    assert data["webpageUrl"] == "https://x/v"
+    assert data["reason"] is None and data["detail"] is None
+
+
+def test_probe_failure_response(client, monkeypatch):
+    """失败时透传 reason / detail。"""
+    fake = ProbeResult(ok=False, reason="yt-dlp 暂不支持这个网站或链接", detail="Unsupported URL")
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+
+    r = client.post("/api/tasks/probe", json={"url": "ftp://x/"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert data["reason"] == "yt-dlp 暂不支持这个网站或链接"
+    assert data["detail"] == "Unsupported URL"
+    assert data["formatsCount"] == 0
+
+
+def test_probe_rejects_empty_url_422(client):
+    """url 字段 min_length=1：空串应被 422 拒绝。"""
+    assert client.post("/api/tasks/probe", json={"url": ""}).status_code == 422
+
+
+def test_probe_rejects_missing_url_422(client):
+    assert client.post("/api/tasks/probe", json={}).status_code == 422
+
+
+# ---------- /api/tasks/upload 上传端点边界 ----------
+
+def _upload(client, **fields):
+    """构造上传 multipart 请求；name 字段走默认值。"""
+    defaults = {
+        "sourceLang": "en", "targetLang": "ja", "mode": "mono",
+        "burn": "hard", "model": "small", "engine": "deepseek",
+        "needSubtitle": "true",
+    }
+    defaults.update(fields)
+    return client.post(
+        "/api/tasks/upload",
+        data=defaults,
+        files={"file": (fields["_filename"], fields.get("_content", b"VIDEO"), "video/mp4")},
+    )
+
+
+def test_upload_rejects_unsupported_extension_400(client, monkeypatch):
+    """非视频扩展名应在创建记录前返回 400，且不入队、不落盘。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = _upload(client, _filename="clip.txt", _content=b"x", mode="mono")
+    assert r.status_code == 400
+    assert "不支持的视频格式" in r.json()["detail"]
+    assert enqueued == []
+
+
+def test_upload_rejects_no_extension_400(client, monkeypatch):
+    """无扩展名视为未知格式，返回 400。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = _upload(client, _filename="clip", _content=b"x")
+    assert r.status_code == 400
+    assert "未知" in r.json()["detail"]
+    assert enqueued == []
+
+
+def test_upload_normalizes_uppercase_extension(client, monkeypatch):
+    """扩展名大小写不敏感：.MP4 与 .Mp4 都应被接受。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = _upload(client, _filename="A.MP4", _content=b"VIDEO")
+    assert r.status_code == 201
+    data = r.json()
+    rec = client._store.get(data["id"])
+    assert (client._tmp / data["id"] / f"source.MP4").exists()
+    assert rec.title == "A"
+
+
+def _count_task_dirs(base: Path) -> int:
+    """统计 base 下形如 task_* 的目录数量，用于验证清理是否彻底。"""
+    return sum(1 for p in base.iterdir() if p.is_dir() and p.name.startswith("task_"))
+
+
+def test_upload_empty_file_400_and_cleanup(client, monkeypatch):
+    """0 字节文件应被拒为 400，且任务记录与产物目录应被清理。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    before = _count_task_dirs(client._tmp)
+    r = _upload(client, _filename="clip.mp4", _content=b"")
+    assert r.status_code == 400
+    assert "空" in r.json()["detail"]
+
+    # 不能留任何孤儿任务或任务目录
+    assert client.get("/api/tasks").json() == []
+    assert _count_task_dirs(client._tmp) == before
+    assert enqueued == []
+
+
+def test_upload_save_failure_500_and_cleanup(client, monkeypatch):
+    """落盘失败时记为 500，任务记录与任务目录应被清掉，避免孤儿。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    def boom(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tasks_routes.shutil, "copyfileobj", boom)
+
+    before = _count_task_dirs(client._tmp)
+    r = _upload(client, _filename="clip.mp4", _content=b"VIDEO")
+    assert r.status_code == 500
+    assert "保存上传文件失败" in r.json()["detail"]
+
+    assert client.get("/api/tasks").json() == []
+    assert _count_task_dirs(client._tmp) == before
+    assert enqueued == []
+
+
+def test_upload_uses_filename_stem_as_title(client, monkeypatch):
+    """title 取自文件名 stem（去后缀）。"""
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda tid: None)
+
+    r = _upload(client, _filename="my-clip.mp4", _content=b"VIDEO")
+    assert r.status_code == 201
+    rec = client._store.get(r.json()["id"])
+    assert rec.title == "my-clip"
+
+
+def test_upload_title_uses_stem_for_dotted_name(client, monkeypatch):
+    """以点开头的文件名（Path 中 stem 非空但带点）也应按 stem 入库。"""
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda tid: None)
+
+    # '..mp4' -> Path('..mp4').suffix == '.mp4'、stem == '.' （不会被 "" 兜底）
+    r = _upload(client, _filename="..mp4", _content=b"VIDEO")
+    assert r.status_code == 201
+    rec = client._store.get(r.json()["id"])
+    assert rec.title == "."
+
+
+def test_upload_persists_need_subtitle_false(client, monkeypatch):
+    """needSubtitle=false 应入库为 0，并能在响应里读到。"""
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda tid: None)
+
+    r = _upload(client, _filename="clip.mp4", _content=b"VIDEO", needSubtitle="false")
+    assert r.status_code == 201
+    data = r.json()
+    assert data["sourceType"] == "upload"
+    assert data["needSubtitle"] is False
+
+    rec = client._store.get(data["id"])
+    assert rec.source_type == "upload"
+    assert rec.need_subtitle == 0
+
+
+def test_upload_invalid_enum_param_422(client, monkeypatch):
+    """上传端点也对 mode/burn/engine 枚举做校验，非法值应 422。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    for bad in [{"mode": "mixed"}, {"burn": "weird"}, {"engine": "other"}]:
+        r = _upload(client, _filename="clip.mp4", _content=b"VIDEO", **bad)
+        assert r.status_code == 422, f"应被 422 拒绝: {bad}"
+    assert enqueued == []
+
+
+def test_upload_calls_enqueue_with_task_id(client, monkeypatch):
+    """上传成功时 enqueue_pipeline 收到新建的 task_id。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = _upload(client, _filename="clip.mp4", _content=b"VIDEO")
+    data = r.json()
+    assert r.status_code == 201
+    assert enqueued == [data["id"]]
+
+
+# ---------- to_out() 链路新增字段透出 ----------
+
+def test_to_out_exposes_source_type_and_need_subtitle():
+    """TaskOut 应携带 sourceType / needSubtitle，与前端契约对齐。"""
+    rec = TaskRecord(
+        id="task_abc", url="u", source_lang="en", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+        source_type="upload", need_subtitle=0,
+    )
+    out = to_out(rec)
+    assert out.sourceType == "upload"
+    assert out.needSubtitle is False
+
+
+def test_to_out_need_subtitle_field_defaults_to_true():
+    """need_subtitle 默认 1（True）应翻为 needSubtitle=true。"""
+    rec = TaskRecord(
+        id="t", url="u", source_lang="auto", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+    )
+    out = to_out(rec)
+    assert out.sourceType == "url"
+    assert out.needSubtitle is True
+
+
+def test_to_out_success_with_subtitle_when_need_subtitle_true():
+    """SUCCESS + need_subtitle=True：outputs 应同时含 video / subtitle。"""
+    rec = TaskRecord(
+        id="task_x", url="u", source_lang="auto", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+        status="SUCCESS", need_subtitle=1,
+    )
+    out = to_out(rec)
+    assert out.outputs == {
+        "video": "/api/tasks/task_x/download",
+        "subtitle": "/api/tasks/task_x/subtitle",
+    }
+
+
+def test_to_out_success_without_subtitle_when_need_subtitle_false():
+    """SUCCESS + need_subtitle=False：outputs 只含 video（仅下载场景无字幕）。"""
+    rec = TaskRecord(
+        id="task_y", url="u", source_lang="auto", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+        status="SUCCESS", need_subtitle=0,
+    )
+    out = to_out(rec)
+    assert out.outputs == {"video": "/api/tasks/task_y/download"}
+    assert "subtitle" not in out.outputs
+
+
+def test_to_out_non_success_no_outputs():
+    """非 SUCCESS 状态不应有 outputs，避免把未烧录路径暴露给前端。"""
+    rec = TaskRecord(
+        id="task_z", url="u", source_lang="auto", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+        status="BURNING", progress=90, current_step="BURNING",
+        need_subtitle=1,
+    )
+    out = to_out(rec)
+    assert out.outputs is None
+
+
+# ---------- _resolve_video 下载回退 ----------
+
+def test_resolve_video_prefers_output_mp4(client, monkeypatch, tmp_path):
+    """output.mp4 存在时优先返回它（烧录成品）。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4").write_bytes(b"SRC")
+    (d / "output.mp4").write_bytes(b"OUT")
+
+    assert tasks_routes._resolve_video(cid) == d / "output.mp4"
+
+
+def test_resolve_video_falls_back_to_source_when_no_output(client, tmp_path):
+    """output.mp4 缺失但 source.* 存在 -> 回退到 source.*。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4").write_bytes(b"SRC")
+
+    assert tasks_routes._resolve_video(cid) == d / "source.mp4"
+
+
+def test_resolve_video_supports_other_source_extension(client, tmp_path):
+    """source.* 兼容任意扩展名（mkv / mov / webm 等）。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mkv").write_bytes(b"SRC")
+
+    assert tasks_routes._resolve_video(cid) == d / "source.mkv"
+
+
+def test_resolve_video_returns_none_when_missing(client, tmp_path):
+    """目录或文件都不存在时返回 None。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    assert tasks_routes._resolve_video(cid) is None
+
+
+def test_download_409_when_only_source_no_output(client, tmp_path):
+    """仅下载模式（无 output.mp4）下走 /download 不应 409：可回退到 source.*。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4").write_bytes(b"SRC")
+
+    r = client.get(f"/api/tasks/{cid}/download")
+    assert r.status_code == 200
+    assert r.content == b"SRC"
+
+
+def test_download_subtitle_409_when_need_subtitle_false(client, tmp_path):
+    """need_subtitle=False 的任务不应能下载字幕（链路不会生成）。"""
+    cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100, need_subtitle=0)
+    # 即便前端误调，物理文件也不应被读到
+    assert client.get(f"/api/tasks/{cid}/subtitle").status_code == 409
+
+
+def test_success_task_outputs_skip_subtitle_when_need_subtitle_false(client):
+    """SUCCESS 且 needSubtitle=False 时 GET 任务的 outputs 不应含 subtitle 键。"""
+    cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100, need_subtitle=0)
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["outputs"] == {"video": f"/api/tasks/{cid}/download"}
+    assert "subtitle" not in data["outputs"]
