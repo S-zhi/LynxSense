@@ -50,6 +50,18 @@
           </div>
         </section>
 
+        <section class="settings" aria-labelledby="settingsTitle">
+          <h2 id="settingsTitle" class="settings__title">通知</h2>
+          <label class="settings__row" for="notifyToggle">
+            <span class="settings__name">任务完成 / 失败时弹通知</span>
+            <span class="settings__switch">
+              <input id="notifyToggle" type="checkbox" />
+              <span class="settings__slider" aria-hidden="true"></span>
+            </span>
+          </label>
+          <p class="settings__hint" id="notifyHint">浏览器未授权时无法弹出通知。</p>
+        </section>
+
         <div class="sidebar__foot">
           <button class="iconbtn" id="themeToggle" type="button" aria-label="切换深色 / 浅色">
             <i class="ph ph-moon" aria-hidden="true"></i>
