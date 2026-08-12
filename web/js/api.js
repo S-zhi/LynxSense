@@ -123,6 +123,46 @@ const RealApi = {
     if (!res.ok) throw new Error("打开文件夹失败：" + res.status);
   },
 
+  // ---------- 本地资源治理 ----------
+  async getStorageStats() {
+    const res = await request(this.base, "/api/storage/stats");
+    if (!res.ok) throw new Error("获取存储统计失败：" + res.status);
+    return res.json();
+  },
+
+  async previewCleanup(payload) {
+    const res = await request(this.base, "/api/storage/cleanup_preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) throw new Error("预览清理失败：" + await errorText(res));
+    return res.json();
+  },
+
+  async runCleanup(payload) {
+    const res = await request(this.base, "/api/storage/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) throw new Error("执行清理失败：" + await errorText(res));
+    return res.json();
+  },
+
+  async getRetention() {
+    const res = await request(this.base, "/api/storage/retention");
+    if (!res.ok) throw new Error("获取保留策略失败：" + res.status);
+    return res.json();
+  },
+
+  async putRetention(days) {
+    const res = await request(this.base, "/api/storage/retention", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ days }),
+    });
+    if (!res.ok) throw new Error("保存保留策略失败：" + res.status);
   // 拉取任务 current subtitles（original + translated），解析为前端可编辑结构
   async getSubtitles(id) {
     const res = await request(this.base, `/api/tasks/${id}/subtitles`);
@@ -285,6 +325,29 @@ const MockApi = (() => {
     },
     // 示例模式下模拟打开任务文件夹。
     async openFolder() { await delay(80); },
+    // 示例模式下返回空统计 / 空预览，方便 UI 演练。
+    async getStorageStats() {
+      await delay(60);
+      return { totalBytes: 0, totalTasks: 0, runnableTaskCount: 0, byKind: {}, byTask: [] };
+    },
+    async previewCleanup() {
+      await delay(60);
+      return { matchedTasks: 0, matchedBytes: 0, skippedTasks: [], targets: [] };
+    },
+    async runCleanup() {
+      await delay(60);
+      return { deletedTasks: 0, deletedBytes: 0, skippedTasks: [], partial: [] };
+    },
+    async getRetention() {
+      await delay(40);
+      try { return JSON.parse(localStorage.getItem("subtrans_mock_retention") || "null") || { days: null, updatedAt: null }; }
+      catch (e) { return { days: null, updatedAt: null }; }
+    },
+    async putRetention(days) {
+      await delay(40);
+      const out = { days, updatedAt: Date.now() };
+      try { localStorage.setItem("subtrans_mock_retention", JSON.stringify(out)); } catch (e) {}
+      return out;
     // 示例模式下的字幕编辑：内存中维护一份，供前端 UI 调试
     async getSubtitles(id) {
       await delay(120);

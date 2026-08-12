@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import settings
 
-from src.handler import health, srt, subtitle_editor, tasks
+
+from src.handler import health, srt, subtitle_editor, tasks ,storage
 
 from src.handler.deps import get_store
 
@@ -29,13 +30,14 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_allow_origins),
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "PUT", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
     # 按业务挂载路由，后续新增业务在此 include 即可
     app.include_router(tasks.router)
     app.include_router(srt.router)
+    app.include_router(storage.router)
     app.include_router(subtitle_editor.router)
     app.include_router(health.router)
 
