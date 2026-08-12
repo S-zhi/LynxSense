@@ -17,18 +17,28 @@ from typing import List, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from src.config import OUTPUT_VIDEO, SOURCE_VIDEO_STEM, TRANSLATED_SRT, task_dir
+from src.config import (
+    OUTPUT_VIDEO,
+    SOURCE_VIDEO_STEM,
+    TRANSLATED_SRT,
+    artifacts_present,
+    settings,
+    task_dir,
+)
 from src.core.downloader import probe_video
 from src.handler.deps import get_store
 from src.handler.schemas import TaskCreate, TaskOut, TaskProbeIn, TaskProbeOut, to_out
 from src.service.runner import enqueue_pipeline
-from src.store import TaskStore
+from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskStore
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 _TERMINAL = {"SUCCESS", "FAILED"}
+
+# 资源已丢失时给用户的简短、稳定错误文案，避免把文件系统异常 / 堆栈漏到 UI
+_DELETED_MESSAGE = "资源已删除"
 
 # 允许上传的本地视频扩展名（小写，含点）
 _UPLOAD_VIDEO_EXTS = {
@@ -42,6 +52,44 @@ def _require(store: TaskStore, task_id: str):
     if rec is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return rec
+
+
+def _mark_resource_missing(store: TaskStore, task_id: str, reason: str) -> None:
+    """把一个任务的 resource_status 幂等地置为 MISSING。"""
+    rec = store.get(task_id)
+    if rec is None or rec.resource_status == RESOURCE_STATUS_MISSING:
+        return
+    store.update(
+        task_id,
+        resource_status=RESOURCE_STATUS_MISSING,
+        error=reason,
+    )
+
+
+def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
+    """扫描终态 SUCCESS 任务，把磁盘产物已丢失的降级为 MISSING。
+
+    幂等：已为 MISSING 的不再处理；运行中任务（status != SUCCESS）忽略。
+    返回被降级的 task_id 列表，便于启动日志 / 测试断言。
+    """
+    data_dir = data_dir if data_dir is not None else settings.data_dir
+    downgraded: List[str] = []
+    for rec in store.list():
+        if rec.status != "SUCCESS":
+            continue
+        if rec.resource_status == RESOURCE_STATUS_MISSING:
+            continue
+        if artifacts_present(
+            rec.id, data_dir=data_dir, need_subtitle=bool(rec.need_subtitle)
+        ):
+            continue
+        store.update(
+            rec.id,
+            resource_status=RESOURCE_STATUS_MISSING,
+            error=_DELETED_MESSAGE,
+        )
+        downgraded.append(rec.id)
+    return downgraded
 
 
 # ---------- CRUD ----------
@@ -176,11 +224,18 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 
 @router.get("/{task_id}/download")
 def download_video(task_id: str, store: TaskStore = Depends(get_store)):
-    _require(store, task_id)
+    rec = _require(store, task_id)
     path = _resolve_video(task_id)
-    if path is None:
-        raise HTTPException(status_code=409, detail="成品视频尚未生成")
-    return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
+    if path is not None:
+        return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
+    # 兜底：成功任务的产物被清掉时，要把状态降级为 MISSING，
+    # 避免下次列表 / 详情接口继续暴露已失效的下载链接。
+    if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
+        _mark_resource_missing(store, task_id, _DELETED_MESSAGE)
+    raise HTTPException(
+        status_code=409,
+        detail=_DELETED_MESSAGE if rec.status == "SUCCESS" else "成品视频尚未生成",
+    )
 
 
 def _resolve_video(task_id: str):
@@ -196,11 +251,16 @@ def _resolve_video(task_id: str):
 
 @router.get("/{task_id}/subtitle")
 def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
-    _require(store, task_id)
+    rec = _require(store, task_id)
     path = task_dir(task_id) / TRANSLATED_SRT
-    if not path.exists():
-        raise HTTPException(status_code=409, detail="译文字幕尚未生成")
-    return FileResponse(path, media_type="application/x-subrip", filename=f"{task_id}.srt")
+    if path.exists():
+        return FileResponse(path, media_type="application/x-subrip", filename=f"{task_id}.srt")
+    if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
+        _mark_resource_missing(store, task_id, _DELETED_MESSAGE)
+    raise HTTPException(
+        status_code=409,
+        detail=_DELETED_MESSAGE if rec.status == "SUCCESS" else "译文字幕尚未生成",
+    )
 
 
 @router.post("/{task_id}/folder", summary="打开任务文件夹")
@@ -238,6 +298,7 @@ def _sse_payload(rec) -> str:
         "currentStep": rec.current_step,
         "title": rec.title,
         "error": rec.error,
+        "resourceStatus": to_out(rec).resourceStatus,
         "outputs": to_out(rec).outputs,
     }
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"

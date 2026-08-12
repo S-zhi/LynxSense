@@ -2,6 +2,7 @@
 
 from .config import settings
 from .storage import (
+    artifacts_present,
     ensure_task_dir,
     task_dir,
     SOURCE_VIDEO_STEM,
@@ -13,6 +14,7 @@ from .storage import (
 
 __all__ = [
     "settings",
+    "artifacts_present",
     "ensure_task_dir",
     "task_dir",
     "SOURCE_VIDEO_STEM",
