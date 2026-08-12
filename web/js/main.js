@@ -5,6 +5,7 @@ import { initShell } from "./ui-shell.js";
 import { initConsole } from "./ui-console.js";
 import { initQueue } from "./ui-queue.js";
 import { initPreview } from "./ui-preview.js";
+import { initEditor } from "./ui-editor.js";
 import { initProbe } from "./ui-probe.js";
 import { loadTasks, stopAll } from "./store.js";
 
@@ -13,6 +14,7 @@ initShell();
 initConsole();
 initQueue();
 initPreview();
+initEditor();
 initProbe();
 
 loadTasks();

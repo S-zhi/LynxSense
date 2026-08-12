@@ -6,7 +6,7 @@ import { TERMINAL } from "./constants.js";
 export const state = {
   tasks: [],
   filter: "all",       // all | active | done | failed
-  view: "tasks",       // tasks | preview
+  view: "tasks",       // tasks | preview | editor | probe
   previewId: null,
   loading: true,
   loadError: null,
