@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import shutil
@@ -12,15 +13,34 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from src.config import OUTPUT_VIDEO, SOURCE_VIDEO_STEM, TRANSLATED_SRT, task_dir
+from src.config import (
+    OUTPUT_VIDEO,
+    SOURCE_VIDEO_STEM,
+    TRANSLATED_SRT,
+    task_dir,
+)
 from src.core.downloader import probe_video
 from src.handler.deps import get_store
-from src.handler.schemas import TaskCreate, TaskOut, TaskProbeIn, TaskProbeOut, to_out
+from src.handler.schemas import (
+    ResumeOption,
+    ResumeOptionsOut,
+    TaskCreate,
+    TaskOut,
+    TaskProbeIn,
+    TaskProbeOut,
+    to_out,
+)
+from src.service.orchestrator import (
+    PIPELINE_STEPS,
+    PipelineError,
+    list_resume_options,
+    validate_start_from,
+)
 from src.service.runner import enqueue_pipeline
 from src.store import TaskStore
 
@@ -36,6 +56,35 @@ _UPLOAD_VIDEO_EXTS = {
     ".m4v", ".flv", ".ts", ".mpeg", ".mpg", ".wmv",
 }
 
+# 前端显示用的阶段名（与 PIPELINE_STEPS 一一对应）
+_STEP_LABELS = {
+    "DOWNLOADING": "下载视频",
+    "EXTRACTING": "提取音频",
+    "TRANSCRIBING": "语音转写",
+    "TRANSLATING": "字幕翻译",
+    "BURNING": "烧录字幕",
+}
+
+
+def _enqueue(task_id: str, start_from: Optional[str] = None) -> None:
+    """兼容新旧 enqueue_pipeline 签名：检测是否支持 start_from 关键字。"""
+    try:
+        sig = inspect.signature(enqueue_pipeline)
+    except (TypeError, ValueError):
+        sig = None
+    accepts_kw = (
+        sig is not None
+        and any(
+            p.kind in (p.KEYWORD_ONLY, p.POSITIONAL_OR_KEYWORD)
+            and p.name == "start_from"
+            for p in sig.parameters.values()
+        )
+    )
+    if accepts_kw:
+        enqueue_pipeline(task_id, start_from=start_from)
+    else:
+        enqueue_pipeline(task_id)
+
 
 def _require(store: TaskStore, task_id: str):
     rec = store.get(task_id)
@@ -45,6 +94,7 @@ def _require(store: TaskStore, task_id: str):
 
 
 # ---------- CRUD ----------
+
 
 @router.post("", response_model=TaskOut, status_code=201)
 def create_task(body: TaskCreate, store: TaskStore = Depends(get_store)) -> TaskOut:
@@ -58,7 +108,7 @@ def create_task(body: TaskCreate, store: TaskStore = Depends(get_store)) -> Task
         engine=body.engine,
         need_subtitle=body.needSubtitle,
     )
-    enqueue_pipeline(rec.id)  # 第 2 步接入真正执行
+    enqueue_pipeline(rec.id)
     return to_out(rec)
 
 
@@ -74,10 +124,7 @@ def create_upload_task(
     needSubtitle: bool = Form(True),
     store: TaskStore = Depends(get_store),
 ) -> TaskOut:
-    """上传本地视频并创建任务：源文件直接落盘，跳过下载，走后续识别 / 翻译 / 烧录。
-
-    字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
-    """
+    """上传本地视频并创建任务：源文件直接落盘，跳过下载，走后续识别 / 翻译 / 烧录。"""
     filename = (file.filename or "").strip()
     ext = Path(filename).suffix.lower()
     if ext not in _UPLOAD_VIDEO_EXTS:
@@ -86,7 +133,6 @@ def create_upload_task(
             detail=f"不支持的视频格式：{ext or '未知'}（支持 {', '.join(sorted(_UPLOAD_VIDEO_EXTS))}）",
         )
 
-    # 先建记录拿到 task_id，再把源文件落盘到该任务目录
     rec = store.create(
         url=filename,
         source_lang=sourceLang,
@@ -105,7 +151,7 @@ def create_upload_task(
     dest = d / f"{SOURCE_VIDEO_STEM}{ext}"
     try:
         with dest.open("wb") as out:
-            shutil.copyfileobj(file.file, out)  # 流式写盘，避免整文件入内存
+            shutil.copyfileobj(file.file, out)
     except Exception as e:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
@@ -152,15 +198,43 @@ def probe_task(body: TaskProbeIn) -> TaskProbeOut:
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
     _require(store, task_id)
     store.delete(task_id)
-    shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
+    shutil.rmtree(task_dir(task_id), ignore_errors=True)
 
 
 @router.post("/{task_id}/retry", response_model=TaskOut)
-def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
-    """仅允许失败任务重新入队，避免运行中任务重复执行。"""
+def retry_task(
+    task_id: str,
+    start_from: Optional[str] = Query(
+        default=None,
+        description=(
+            "断点续跑：从指定阶段开始。可选值：" + ", ".join(PIPELINE_STEPS) + "。"
+            "留空则从头重跑。"
+        ),
+    ),
+    store: TaskStore = Depends(get_store),
+) -> TaskOut:
+    """仅允许失败任务重新入队，避免运行中任务重复执行。
+
+    支持断点续跑（Issue #30）：通过 ``start_from`` 指定从哪一步开始；
+    之前阶段的产物被复用，跳过重跑。
+    """
     rec = _require(store, task_id)
     if rec.status != "FAILED":
         raise HTTPException(status_code=409, detail="只有失败任务可以重试")
+
+    if start_from is not None and start_from not in PIPELINE_STEPS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知的 start_from：{start_from!r}（合法值：{', '.join(PIPELINE_STEPS)}）",
+        )
+
+    # 校验前置产物完整性（产物缺失直接 409，明确告诉客户端不能从这步开始）
+    if start_from is not None:
+        try:
+            validate_start_from(start_from, task_id, bool(rec.need_subtitle))
+        except PipelineError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+
     updated = store.update(
         task_id,
         status="PENDING",
@@ -168,11 +242,47 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
         current_step=None,
         error=None,
     )
-    enqueue_pipeline(task_id)
+    # 注意：completed_steps / last_error_step 由 orchestrator 在新一次执行中重写，
+    # 这里只清状态，不动历史元数据，让前端/审计能追到最近一次失败的位置。
+    _enqueue(task_id, start_from=start_from)
     return to_out(updated)
 
 
+# ---------- 断点续跑：可恢复选项 ----------
+
+
+@router.get("/{task_id}/resume_options", response_model=ResumeOptionsOut)
+def resume_options(
+    task_id: str,
+    store: TaskStore = Depends(get_store),
+) -> ResumeOptionsOut:
+    """返回该任务的可恢复选项列表（用于前端"从此步骤继续"菜单）。
+
+    对所有任务都有意义：按当前磁盘上的产物推断每一步是否可作为安全的 resume 起点。
+    """
+    rec = _require(store, task_id)
+    need_subtitle = bool(rec.need_subtitle)
+    raw = list_resume_options(task_id, need_subtitle)
+    options: List[ResumeOption] = [
+        ResumeOption(
+            step=name,
+            label=_STEP_LABELS.get(name, name),
+            available=available,
+            reason=reason,
+        )
+        for name, available, reason in raw
+    ]
+    return ResumeOptionsOut(
+        taskId=rec.id,
+        status=rec.status,
+        completedSteps=list(rec.completed_steps or []),
+        lastErrorStep=rec.last_error_step,
+        options=options,
+    )
+
+
 # ---------- 文件下载 ----------
+
 
 @router.get("/{task_id}/download")
 def download_video(task_id: str, store: TaskStore = Depends(get_store)):
@@ -229,6 +339,7 @@ def _open_folder(path) -> None:
 
 
 # ---------- SSE 进度 ----------
+
 
 def _sse_payload(rec) -> str:
     data = {

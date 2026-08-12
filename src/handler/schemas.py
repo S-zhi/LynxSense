@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,27 @@ class TaskProbeOut(BaseModel):
     detail: Optional[str] = None
 
 
+class ResumeOption(BaseModel):
+    """断点续跑选项：表示可以"从这一步开始重跑"。"""
+
+    step: str
+    label: str
+    available: bool
+    reason: Optional[str] = None
+
+
+class ResumeOptionsOut(BaseModel):
+    """GET /api/tasks/{id}/resume_options 的响应。"""
+
+    taskId: str
+    status: str
+    # 已成功完成的阶段名（按顺序）；可能为空（旧数据或新任务）
+    completedSteps: List[str] = Field(default_factory=list)
+    # 上次失败倒下的阶段（FAILED 任务才有）
+    lastErrorStep: Optional[str] = None
+    options: List[ResumeOption]
+
+
 class TaskOut(BaseModel):
     """任务对象的响应形态。"""
 
@@ -64,6 +85,8 @@ class TaskOut(BaseModel):
     currentStep: Optional[str]
     error: Optional[str]
     outputs: Optional[dict]
+    completedSteps: List[str] = Field(default_factory=list)
+    lastErrorStep: Optional[str] = None
     createdAt: int
     updatedAt: int
 
@@ -93,6 +116,8 @@ def to_out(rec: TaskRecord) -> TaskOut:
         currentStep=rec.current_step,
         error=rec.error,
         outputs=outputs,
+        completedSteps=list(rec.completed_steps or []),
+        lastErrorStep=rec.last_error_step,
         createdAt=rec.created_at,
         updatedAt=rec.updated_at,
     )

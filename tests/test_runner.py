@@ -34,13 +34,14 @@ def test_enqueue_submits_to_executor(monkeypatch):
     monkeypatch.setattr(runner, "_executor", FakeExecutor())
     runner.enqueue_pipeline("task_x")
     assert submitted[0][0] is runner._run
-    assert submitted[0][1] == ("task_x",)
+    # start_from 默认 None：与旧行为完全一致
+    assert submitted[0][1] == ("task_x", None)
 
 
 def test_run_writes_progress_and_success(store, monkeypatch):
     tid = _make_task(store)
 
-    def fake_pipeline(params, on_event, *, api_key=None):
+    def fake_pipeline(params, on_event, *, api_key=None, start_from=None):
         on_event(PipelineEvent("DOWNLOADING", 10, "DOWNLOADING"))
         on_event(PipelineEvent("TRANSCRIBING", 50, "TRANSCRIBING"))
         on_event(PipelineEvent(
@@ -67,7 +68,7 @@ def test_run_passes_params_from_record(store, monkeypatch):
     )
     seen = {}
 
-    def fake_pipeline(params, on_event, *, api_key=None):
+    def fake_pipeline(params, on_event, *, api_key=None, start_from=None):
         seen["url"] = params.url
         seen["target"] = params.target_lang
         seen["mode"] = params.mode
@@ -85,7 +86,7 @@ def test_run_passes_params_from_record(store, monkeypatch):
 def test_run_failure_persists_failed(store, monkeypatch):
     tid = _make_task(store)
 
-    def boom(params, on_event, *, api_key=None):
+    def boom(params, on_event, *, api_key=None, start_from=None):
         on_event(PipelineEvent("DOWNLOADING", 5, "DOWNLOADING"))
         on_event(PipelineEvent("FAILED", 5, "DOWNLOADING", error="下载失败"))
         raise RuntimeError("下载失败")
@@ -102,7 +103,7 @@ def test_run_failure_fallback_when_no_event(store, monkeypatch):
     """run_pipeline 直接抛异常、没发 FAILED 事件时，兜底也要写 FAILED。"""
     tid = _make_task(store)
 
-    def boom(params, on_event, *, api_key=None):
+    def boom(params, on_event, *, api_key=None, start_from=None):
         raise RuntimeError("意外崩溃")
 
     monkeypatch.setattr(runner, "run_pipeline", boom)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from src.config import settings
 from src.service.orchestrator import PipelineEvent, PipelineParams, run_pipeline
@@ -27,13 +28,16 @@ _executor = ThreadPoolExecutor(
 _store = TaskStore(settings.db_path)
 
 
-def enqueue_pipeline(task_id: str) -> None:
-    """提交一个任务去后台执行（不阻塞调用方）。"""
-    _executor.submit(_run, task_id)
-    logger.info("已入队: %s", task_id)
+def enqueue_pipeline(task_id: str, start_from: Optional[str] = None) -> None:
+    """提交一个任务去后台执行（不阻塞调用方）。
+
+    start_from：可选阶段名（Issue #30 断点续跑）；None 时从头跑（与旧行为一致）。
+    """
+    _executor.submit(_run, task_id, start_from)
+    logger.info("已入队: %s start_from=%s", task_id, start_from)
 
 
-def _run(task_id: str) -> None:
+def _run(task_id: str, start_from: Optional[str] = None) -> None:
     """线程内执行：读记录 → 跑五步 → 进度写库。"""
     rec = _store.get(task_id)
     if rec is None:
@@ -67,10 +71,21 @@ def _run(task_id: str) -> None:
         if ev.outputs:
             fields["output_video"] = ev.outputs.get("video")
             fields["output_subtitle"] = ev.outputs.get("subtitle")
+
+        # 断点续跑元数据（Issue #30）
+        if ev.completed_steps is not None:
+            # 一直更新，反映"截至本事件为止已完成的所有阶段"
+            fields["completed_steps"] = list(ev.completed_steps)
+        if ev.error_step is not None:
+            fields["last_error_step"] = ev.error_step
+        elif ev.status == "FAILED":
+            # 兜底：FAILED 事件没带 error_step 时用 current_step
+            fields["last_error_step"] = ev.current_step
+
         _store.update(task_id, **fields)
 
     try:
-        run_pipeline(params, on_event, api_key=settings.deepseek_api_key)
+        run_pipeline(params, on_event, api_key=settings.deepseek_api_key, start_from=start_from)
     except Exception:
         # run_pipeline 失败时已通过 on_event 写过 FAILED；这里兜底再确保一次
         logger.exception("流水线执行失败: %s", task_id)

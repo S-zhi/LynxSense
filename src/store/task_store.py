@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
@@ -45,6 +46,10 @@ class TaskRecord:
     error: Optional[str] = None
     output_video: Optional[str] = None
     output_subtitle: Optional[str] = None
+    # 断点续跑元数据：已成功完成的阶段名（按顺序追加）。旧库缺字段视为空。
+    # 失败时单独记录倒下位置，方便 UI 提示 + 自动推荐 resume 起点。
+    completed_steps: List[str] = field(default_factory=list)
+    last_error_step: Optional[str] = None
     created_at: int = 0   # epoch 毫秒
     updated_at: int = 0
 
@@ -53,6 +58,28 @@ class TaskRecord:
 
 
 _COLUMNS = list(TaskRecord.__dataclass_fields__.keys())
+
+
+def _encode_list(items: List[str]) -> Optional[str]:
+    """list[str] -> JSON 字符串（空列表存 NULL，省一字节）。"""
+    if not items:
+        return None
+    return json.dumps(list(items), ensure_ascii=False)
+
+
+def _decode_list(value) -> List[str]:
+    """从行里读 list[str]（容错：None / 空 / 非法 JSON 都回空列表）。"""
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(x) for x in value]
+    try:
+        data = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(x) for x in data]
 
 
 def _now_ms() -> int:
@@ -96,6 +123,8 @@ class TaskStore:
                     error TEXT,
                     output_video TEXT,
                     output_subtitle TEXT,
+                    completed_steps TEXT,
+                    last_error_step TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
                 )
@@ -107,6 +136,10 @@ class TaskStore:
                 conn.execute("ALTER TABLE tasks ADD COLUMN need_subtitle INTEGER NOT NULL DEFAULT 1")
             if "source_type" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN source_type TEXT NOT NULL DEFAULT 'url'")
+            if "completed_steps" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN completed_steps TEXT")
+            if "last_error_step" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN last_error_step TEXT")
 
     # ---------- 增 ----------
     def create(
@@ -142,7 +175,10 @@ class TaskStore:
             updated_at=now,
         )
         placeholders = ", ".join(["?"] * len(_COLUMNS))
-        values = [getattr(rec, c) for c in _COLUMNS]
+        values = []
+        for c in _COLUMNS:
+            v = getattr(rec, c)
+            values.append(_encode_list(v) if c == "completed_steps" else v)
         with self._connect() as conn:
             conn.execute(
                 f"INSERT INTO tasks ({', '.join(_COLUMNS)}) VALUES ({placeholders})",
@@ -163,7 +199,15 @@ class TaskStore:
 
     # ---------- 改 ----------
     def update(self, task_id: str, **fields) -> Optional[TaskRecord]:
-        allowed = {k: v for k, v in fields.items() if k in _COLUMNS and k != "id"}
+        allowed: dict = {}
+        for k, v in fields.items():
+            if k == "id" or k not in _COLUMNS:
+                continue
+            if k == "completed_steps":
+                # list / None 统一成 JSON 字符串 / NULL
+                allowed[k] = _encode_list(v) if v is not None else None
+            else:
+                allowed[k] = v
         if not allowed:
             return self.get(task_id)
         allowed["updated_at"] = _now_ms()
@@ -183,4 +227,6 @@ class TaskStore:
 
 
 def _row_to_record(row: sqlite3.Row) -> TaskRecord:
-    return TaskRecord(**{c: row[c] for c in _COLUMNS})
+    payload = {c: row[c] for c in _COLUMNS}
+    payload["completed_steps"] = _decode_list(payload.get("completed_steps"))
+    return TaskRecord(**payload)
