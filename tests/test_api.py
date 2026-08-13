@@ -508,7 +508,7 @@ def test_upload_normalizes_uppercase_extension(client, monkeypatch):
     assert r.status_code == 201
     data = r.json()
     rec = client._store.get(data["id"])
-    assert (client._tmp / data["id"] / f"source.MP4").exists()
+    assert (client._tmp / data["id"] / f"source.mp4").exists()
     assert rec.title == "A"
 
 
