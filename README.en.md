@@ -387,7 +387,7 @@ No separate upgrade guide was found. For environment variable, data directory, d
 
 ## 8. License
 
-The repository currently does not include a `LICENSE` file. Needs User Input: add license information before distribution or open source release.
+This project is licensed under the [MIT License](./LICENSE). You are free to use, modify, and redistribute this project. See the [LICENSE](./LICENSE) file for more details.
 
 ## 9. Troubleshooting
 
