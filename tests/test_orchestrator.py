@@ -48,6 +48,13 @@ def _install_fakes(monkeypatch, *, calls, fail_at=None, percent=100):
     monkeypatch.setattr(orchestrator, "burn_subtitles",
                         make("burn", SimpleNamespace(output_path=Path("/d/output.mp4"))))
 
+    # Mock AssetResolver requirements to support mock paths
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: Path("/d/source.mp4"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_audio", lambda tid: Path("/d/audio.wav"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_original_srt", lambda tid: Path("/d/original.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_translated_srt", lambda tid: Path("/d/translated.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_output_video", lambda tid: Path("/d/output.mp4"))
+
 
 def test_pipeline_success_event_sequence(monkeypatch):
     calls = []
@@ -138,6 +145,13 @@ def test_pipeline_passes_options(monkeypatch):
     monkeypatch.setattr(orchestrator, "translate_srt", fake_translate)
     monkeypatch.setattr(orchestrator, "burn_subtitles", fake_burn)
 
+    # Mock AssetResolver requirements
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: Path("/d/source.mp4"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_audio", lambda tid: Path("/d/audio.wav"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_original_srt", lambda tid: Path("/d/original.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_translated_srt", lambda tid: Path("/d/translated.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_output_video", lambda tid: Path("/d/output.mp4"))
+
     params = PipelineParams(
         task_id="t1", url="http://x", source_lang="en", target_lang="ja",
         mode="bilingual", burn="soft", model="medium",
@@ -155,6 +169,13 @@ def test_pipeline_upload_skips_download_and_honors_options(monkeypatch, tmp_path
     src = tmp_path / "source.mp4"
     src.write_bytes(b"VID")
     monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+
+    # Mock AssetResolver requirements
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: src)
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_audio", lambda tid: Path("/d/audio.wav"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_original_srt", lambda tid: Path("/d/original.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_translated_srt", lambda tid: Path("/d/translated.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_output_video", lambda tid: Path("/d/output.mp4"))
 
     calls = []
     seen = {}
@@ -206,6 +227,7 @@ def test_pipeline_upload_skips_download_and_honors_options(monkeypatch, tmp_path
 def test_pipeline_upload_missing_source_fails(monkeypatch, tmp_path):
     """上传源文件缺失时应发 FAILED 并抛出。"""
     monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)  # 空目录
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
     params = PipelineParams(
         task_id="t1", url="clip.mp4", source_lang="auto", target_lang="zh-CN",
         source_type="upload",
@@ -250,6 +272,7 @@ def test_pipeline_url_only_download_skips_subtitle_steps(monkeypatch):
     monkeypatch.setattr(orchestrator, "transcribe", fail_transcribe)
     monkeypatch.setattr(orchestrator, "translate_srt", fail_translate)
     monkeypatch.setattr(orchestrator, "burn_subtitles", fail_burn)
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: Path("/d/source.mp4"))
 
     params = PipelineParams(
         task_id="t1", url="https://x/v", source_lang="en", target_lang="ja",
@@ -274,6 +297,7 @@ def test_pipeline_upload_only_load_skips_subtitle_steps(monkeypatch, tmp_path):
     src = tmp_path / "source.mp4"
     src.write_bytes(b"VID")
     monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
 
     def fail_download(*a, **k):
         raise AssertionError("need_subtitle=False + upload 不应调用 download")
@@ -320,6 +344,7 @@ def test_pipeline_upload_only_load_title_falls_back_to_stem(monkeypatch, tmp_pat
     src = tmp_path / "source.mp4"
     src.write_bytes(b"VID")
     monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
 
     monkeypatch.setattr(orchestrator, "download_video",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应调用 download")))
@@ -339,6 +364,7 @@ def test_pipeline_url_only_download_emits_only_downloading_events(monkeypatch):
     monkeypatch.setattr(orchestrator, "download_video",
                         lambda url, tid, on_progress=None, **kw: SimpleNamespace(
                             video_path=Path("/d/source.mp4"), title="T"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: Path("/d/source.mp4"))
     for name in ("extract_audio", "transcribe", "translate_srt", "burn_subtitles"):
         monkeypatch.setattr(orchestrator, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应调用 " + name)))
 

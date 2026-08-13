@@ -27,6 +27,7 @@ def client(tmp_path, monkeypatch):
     app.dependency_overrides[get_store] = lambda: store
     # 下载端点用 task_dir 定位文件 -> 指向临时目录
     monkeypatch.setattr(tasks_routes, "task_dir", lambda tid: tmp_path / tid)
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
     # 不在 API 测试里真跑流水线（执行器单独测）
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda task_id: None)
     with TestClient(app) as c:
@@ -508,7 +509,7 @@ def test_upload_normalizes_uppercase_extension(client, monkeypatch):
     assert r.status_code == 201
     data = r.json()
     rec = client._store.get(data["id"])
-    assert (client._tmp / data["id"] / f"source.MP4").exists()
+    assert (client._tmp / data["id"] / f"source.mp4").exists()
     assert rec.title == "A"
 
 

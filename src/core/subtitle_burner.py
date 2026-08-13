@@ -21,6 +21,7 @@ from typing import Callable, Optional
 
 from src.config import settings, ensure_task_dir, OUTPUT_VIDEO
 from src.core.ffmpeg_utils import has_subtitles_filter, probe_duration, run_ffmpeg
+from src.service.asset_resolver import AssetResolver, ResourceState
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +96,18 @@ def burn_subtitles(
     """
     video_path = Path(video_path)
     srt_path = Path(srt_path)
-    if not video_path.exists():
+
+    video_state = AssetResolver.check_file_state(video_path)
+    if video_state == ResourceState.DELETED:
         raise BurnError(f"输入视频不存在: {video_path}")
-    if not srt_path.exists():
+    elif video_state == ResourceState.UNREADABLE:
+        raise BurnError(f"输入视频损坏或不可读: {video_path}")
+
+    srt_state = AssetResolver.check_file_state(srt_path)
+    if srt_state == ResourceState.DELETED:
         raise BurnError(f"输入字幕不存在: {srt_path}")
+    elif srt_state == ResourceState.UNREADABLE:
+        raise BurnError(f"输入字幕损坏或不可读: {srt_path}")
 
     out_dir = ensure_task_dir(task_id)
     out_path = out_dir / OUTPUT_VIDEO
