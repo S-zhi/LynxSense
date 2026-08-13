@@ -11,17 +11,57 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_REF = (
     "stayallive/whisper-subtitles:"
     "b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969"
 )
+
+FALLBACK_LANGUAGES = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"]
+FALLBACK_MODELS = [
+    "tiny.en", "tiny", "base.en", "base", "small.en",
+    "small", "medium.en", "medium", "large-v1", "large-v2",
+]
+
+
+class TTLCache:
+    """一个简单的线程安全的 TTL 缓存。"""
+    def __init__(self, ttl_seconds: float = 3600.0):
+        self.ttl = ttl_seconds
+        self._cache: dict[str, tuple[Any, float]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Any | None:
+        with self._lock:
+            if key in self._cache:
+                val, expires_at = self._cache[key]
+                if time.time() < expires_at:
+                    return val
+                else:
+                    del self._cache[key]
+            return None
+
+    def set(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._cache[key] = (value, time.time() + self.ttl)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+
+_schema_cache = TTLCache(ttl_seconds=3600.0)
+_fetch_lock = threading.Lock()
 REPLICATE_API_BASE = "https://api.replicate.com/v1"
 
 
@@ -84,36 +124,48 @@ def fetch_replicate_version_schema(
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     """获取指定 Replicate 模型版本的完整 OpenAPI schema。"""
-    _load_env_file()
-    token = api_token or os.getenv("REPLICATE_API_TOKEN")
-    if not token:
-        raise ReplicateSchemaError(
-            "未设置 REPLICATE_API_TOKEN，请通过环境变量或项目根 .env 提供"
-        )
+    cached = _schema_cache.get(model_ref)
+    if cached is not None:
+        return cached
 
-    owner, model, version = _parse_model_ref(model_ref)
-    url = f"{REPLICATE_API_BASE}/models/{owner}/{model}/versions/{version}"
+    with _fetch_lock:
+        # 双重检查锁 (Double-checked locking) 确保并发下同一 model_ref 只被拉取一次
+        cached = _schema_cache.get(model_ref)
+        if cached is not None:
+            return cached
 
-    try:
-        response = httpx.get(url, headers=_auth_headers(token), timeout=timeout)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300]
-        raise ReplicateSchemaError(
-            f"Replicate API 返回错误 {exc.response.status_code}: {body}"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise ReplicateSchemaError(f"请求 Replicate API 失败: {exc}") from exc
+        _load_env_file()
+        token = api_token or os.getenv("REPLICATE_API_TOKEN")
+        if not token:
+            raise ReplicateSchemaError(
+                "未设置 REPLICATE_API_TOKEN，请通过环境变量或项目根 .env 提供"
+            )
 
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise ReplicateSchemaError("Replicate API 返回的不是合法 JSON") from exc
+        owner, model, version = _parse_model_ref(model_ref)
+        url = f"{REPLICATE_API_BASE}/models/{owner}/{model}/versions/{version}"
 
-    schema = data.get("openapi_schema")
-    if not isinstance(schema, dict):
-        raise ReplicateSchemaError("Replicate 响应中缺少 openapi_schema")
-    return schema
+        try:
+            response = httpx.get(url, headers=_auth_headers(token), timeout=timeout)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text[:300]
+            raise ReplicateSchemaError(
+                f"Replicate API 返回错误 {exc.response.status_code}: {body}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ReplicateSchemaError(f"请求 Replicate API 失败: {exc}") from exc
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ReplicateSchemaError("Replicate API 返回的不是合法 JSON") from exc
+
+        schema = data.get("openapi_schema")
+        if not isinstance(schema, dict):
+            raise ReplicateSchemaError("Replicate 响应中缺少 openapi_schema")
+
+        _schema_cache.set(model_ref, schema)
+        return schema
 
 
 def get_replicate_input_schema(
@@ -186,12 +238,18 @@ def get_video_language_options(
     timeout: float = 30.0,
 ) -> list[str]:
     """获取视频源语言可选值列表。"""
-    input_schema = get_replicate_input_schema(
-        model_ref,
-        api_token=api_token,
-        timeout=timeout,
-    )
-    return _get_enum_values(input_schema, "language")
+    try:
+        input_schema = get_replicate_input_schema(
+            model_ref,
+            api_token=api_token,
+            timeout=timeout,
+        )
+        return _get_enum_values(input_schema, "language")
+    except Exception as exc:
+        logger.warning(
+            f"获取 Replicate 语言选项失败，使用内置兜底列表: {exc}"
+        )
+        return FALLBACK_LANGUAGES
 
 
 def get_whisper_model_weight_options(
@@ -201,12 +259,18 @@ def get_whisper_model_weight_options(
     timeout: float = 30.0,
 ) -> list[str]:
     """获取 Whisper 模型权重可选值列表。"""
-    input_schema = get_replicate_input_schema(
-        model_ref,
-        api_token=api_token,
-        timeout=timeout,
-    )
-    return _get_enum_values(input_schema, "model_name")
+    try:
+        input_schema = get_replicate_input_schema(
+            model_ref,
+            api_token=api_token,
+            timeout=timeout,
+        )
+        return _get_enum_values(input_schema, "model_name")
+    except Exception as exc:
+        logger.warning(
+            f"获取 Replicate 模型权重选项失败，使用内置兜底列表: {exc}"
+        )
+        return FALLBACK_MODELS
 
 
 def _build_parser() -> argparse.ArgumentParser:
