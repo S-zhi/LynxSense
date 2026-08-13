@@ -296,3 +296,56 @@ def test_reburn_400_on_burn_error(client, tmp_path, monkeypatch):
     r = client.post(f"/api/tasks/{client._tid}/subtitles/burn", json={})
     assert r.status_code == 400
     assert "测试失败" in r.json()["detail"]
+
+
+def test_write_locks_leak_cleanup(client, monkeypatch):
+    """测试创建任务并保存字幕后触发锁生成，然后删除任务或清理任务，验证 _write_locks 是否成功回收。"""
+    from src.handler.subtitle_editor import _write_locks, _lock_for
+    from src.handler import storage as storage_routes
+
+    # 重写 task_dir 为 fake_dir 以便 storage.py 能正确定位到 tmp_path 目录下的任务
+    def fake_dir(tid: str):
+        return client._tmp / tid
+    monkeypatch.setattr(storage_routes, "task_dir", fake_dir)
+
+    # 1. 直接触发锁创建
+    task_id = client._tid
+    lock = _lock_for(task_id)
+    assert task_id in _write_locks
+
+    # 2. 调用 DELETE 接口删除任务，验证锁已被移除
+    r = client.delete(f"/api/tasks/{task_id}")
+    assert r.status_code == 204
+    assert task_id not in _write_locks
+
+    # 3. 再创建一个新任务，测试 storage/cleanup 清理是否也回收锁
+    new_tid = client._store.create(
+        url="https://example.com/v2",
+        source_lang="en",
+        target_lang="zh-CN",
+        mode="mono",
+        burn="hard",
+        model="small",
+        engine="deepseek",
+        title="another_task"
+    ).id
+    client._store.update(new_tid, status="SUCCESS", progress=100)
+
+    # 建立对应目录和产物
+    d = client._tmp / new_tid
+    d.mkdir(parents=True, exist_ok=True)
+    from src.config import SOURCE_VIDEO_STEM
+    (d / f"{SOURCE_VIDEO_STEM}.mp4").write_bytes(b"VIDEO")
+
+    # 触发锁创建
+    _lock_for(new_tid)
+    assert new_tid in _write_locks
+
+    # 调用 POST /api/storage/cleanup
+    cleanup_payload = {"taskIds": [new_tid]}
+    r_cleanup = client.post("/api/storage/cleanup", json=cleanup_payload)
+    assert r_cleanup.status_code == 200
+    assert r_cleanup.json()["deletedTasks"] == 1
+
+    # 验证锁字典已经被清除了该任务的锁，防止内存泄漏
+    assert new_tid not in _write_locks

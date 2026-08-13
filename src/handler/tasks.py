@@ -26,6 +26,7 @@ from src.config import (
     task_dir,
 )
 from src.core.downloader import probe_video
+from src.handler.subtitle_editor import release_lock
 from src.handler.deps import get_store
 from src.handler.schemas import TaskCreate, TaskOut, TaskProbeIn, TaskProbeOut, to_out
 from src.service.runner import enqueue_pipeline
@@ -157,6 +158,7 @@ def create_upload_task(
     except Exception as e:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
+        release_lock(rec.id)
         raise HTTPException(status_code=500, detail="保存上传文件失败") from e
     finally:
         file.file.close()
@@ -164,6 +166,7 @@ def create_upload_task(
     if not dest.exists() or dest.stat().st_size == 0:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
+        release_lock(rec.id)
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
 
     enqueue_pipeline(rec.id)
@@ -201,6 +204,7 @@ def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
     _require(store, task_id)
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
+    release_lock(task_id)
 
 
 @router.post("/{task_id}/retry", response_model=TaskOut)
