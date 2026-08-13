@@ -336,6 +336,8 @@ The repository currently does not include `.github/workflows/`. Needs User Input
 
 ## 6. Contributing
 
+For Issue templates, Pull Request process, Commit Message conventions, local testing, and compliance info, please refer to the detailed [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ### 6.1 Issue
 
 Public Issues are appropriate for:
@@ -345,7 +347,7 @@ Public Issues are appropriate for:
 - Documentation problems
 - Reproducible usage questions
 
-Do not report security vulnerabilities in public Issues.
+Do not report security vulnerabilities in public Issues. For detailed templates and guidelines, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md#2-如何反馈问题-issue-规范).
 
 ### 6.2 Pull Request
 
@@ -357,15 +359,19 @@ Recommended flow:
 4. Run `uv run pytest -q`.
 5. Open a Pull Request with the scope, verification steps, and known risks.
 
+For a more detailed code review and merge flow, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md#3-开发流程-fork--pr-规范).
+
 ### 6.3 Commit & Branch Convention
 
-The repository currently does not include a formal contribution guide. Needs User Input: add `CONTRIBUTING.md`. Suggested commit messages:
+This project follows the **Conventional Commits** specification. Suggested commit messages:
 
 ```text
 feat: add subtitle preview controls
 fix: handle ffmpeg subtitle filter errors
 docs: update README
 ```
+
+For full commit type definitions and examples, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md#4-代码及提交规范-commit-message--style).
 
 ### 6.4 Security Vulnerability Reporting
 
@@ -387,7 +393,7 @@ No separate upgrade guide was found. For environment variable, data directory, d
 
 ## 8. License
 
-The repository currently does not include a `LICENSE` file. Needs User Input: add license information before distribution or open source release.
+This project is licensed under the [MIT License](./LICENSE). You are free to use, modify, and redistribute this project. See the [LICENSE](./LICENSE) file for more details.
 
 ## 9. Troubleshooting
 

@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **PornhubTranslateSubtitles** (1155 symbols, 2598 relationships, 99 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Subtitles-AI** (1155 symbols, 2598 relationships, 99 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -25,10 +25,10 @@ This project is indexed by GitNexus as **PornhubTranslateSubtitles** (1155 symbo
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/PornhubTranslateSubtitles/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/PornhubTranslateSubtitles/clusters` | All functional areas |
-| `gitnexus://repo/PornhubTranslateSubtitles/processes` | All execution flows |
-| `gitnexus://repo/PornhubTranslateSubtitles/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/Subtitles-AI/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/Subtitles-AI/clusters` | All functional areas |
+| `gitnexus://repo/Subtitles-AI/processes` | All execution flows |
+| `gitnexus://repo/Subtitles-AI/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
