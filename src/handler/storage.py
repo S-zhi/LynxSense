@@ -28,6 +28,7 @@ from src.config import (
     task_dir,
 )
 from src.handler.deps import get_store
+from src.handler.subtitle_editor import release_lock
 from src.store import TaskStore, TaskRecord
 
 logger = logging.getLogger(__name__)
@@ -356,6 +357,7 @@ def cleanup(
             # 复用 delete_task 同等的清理动作：删记录 + 删目录
             store.delete(rec.id)
             shutil.rmtree(d, ignore_errors=True)
+            release_lock(rec.id)
             deleted_tasks += 1
             deleted_bytes += freed
             continue

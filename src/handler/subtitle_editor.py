@@ -50,6 +50,12 @@ def _lock_for(task_id: str) -> threading.Lock:
         return lk
 
 
+def release_lock(task_id: str) -> None:
+    """清理进程内锁字典 _write_locks 中的任务锁，防止内存泄漏。"""
+    with _write_locks_guard:
+        _write_locks.pop(task_id, None)
+
+
 def _require(store: TaskStore, task_id: str):
     rec = store.get(task_id)
     if rec is None:
