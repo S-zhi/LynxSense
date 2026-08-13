@@ -1,7 +1,14 @@
-/* 下载测试页：独立探测单个 URL 是否可解析、可下载。 */
+/* 下载测试页：独立探测单个 URL 是否可解析、可下载。
+ *
+ * 所有 probe 调用都会落库到 probe_records，本视图额外提供：
+ * - 测试历史列表（按时间倒序，最近 50 条）
+ * - 点击历史项把 URL 回填到输入框
+ * - 单条删除 / 一键清空 / 手动刷新
+ */
 
 import { $, el, shortUrl } from "./utils.js";
 import { Api } from "./api.js";
+import { toast } from "./toast.js";
 
 const URL_RE = /^https?:\/\/.+/i;
 
@@ -19,6 +26,18 @@ function formatDuration(seconds) {
   const s = total % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formatTimestamp(ms) {
+  // 把 epoch 毫秒格式化为本地时区的紧凑时间。
+  if (!ms || !Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  );
 }
 
 function setHint(bar, hint, message, isError = false) {
@@ -86,8 +105,10 @@ async function runProbe(url, refs) {
   refs.button.disabled = true;
   setHint(refs.bar, refs.hint, "正在测试链接...");
   renderChecking(refs.result);
+  let ok = false;
   try {
     const result = await Api.probeVideo(url);
+    ok = result.ok;
     setHint(
       refs.bar,
       refs.hint,
@@ -106,6 +127,126 @@ async function runProbe(url, refs) {
   } finally {
     refs.button.disabled = false;
   }
+  // 不管成功失败都刷新历史：让"刚才测过什么"立刻可见
+  if (refs.history) {
+    refs.history.refresh().catch(() => {});
+  }
+  return ok;
+}
+
+/* ---------------- 历史记录渲染 ---------------- */
+
+function renderHistoryItem(rec, refs) {
+  // 单条历史项：左侧是状态徽标 + 元信息，右侧是回填 / 删除按钮。
+  const li = el("li", `probe-history__item ${rec.ok ? "is-ok" : "is-fail"}`);
+  li.dataset.id = rec.id;
+
+  const head = el("div", "probe-history__item-head");
+  const badge = el("span", `probe-history__badge ${rec.ok ? "is-ok" : "is-fail"}`);
+  badge.textContent = rec.ok ? "可下载" : "不可用";
+  const time = el("span", "probe-history__time");
+  time.textContent = formatTimestamp(rec.createdAt);
+  head.append(badge, time);
+
+  const url = el("div", "probe-history__url");
+  url.textContent = rec.webpageUrl || rec.url;
+  url.title = rec.webpageUrl || rec.url;
+
+  const summary = el("div", "probe-history__summary");
+  if (rec.ok) {
+    if (rec.title) summary.textContent = rec.title;
+    const dur = formatDuration(rec.duration);
+    const parts = [];
+    if (dur) parts.push(`时长 ${dur}`);
+    if (rec.extractor) parts.push(rec.extractor);
+    if (rec.formatsCount) parts.push(`${rec.formatsCount} 种格式`);
+    if (parts.length) summary.textContent = `${summary.textContent} · ${parts.join(" · ")}`;
+  } else {
+    summary.textContent = rec.reason || rec.detail || "yt-dlp 未能确认这个链接";
+    if (rec.detail && rec.detail !== rec.reason) {
+      summary.textContent = `${summary.textContent} · ${rec.detail}`;
+    }
+  }
+
+  const actions = el("div", "probe-history__actions-row");
+  const retry = el("button", "btn btn--ghost btn--sm");
+  retry.type = "button";
+  retry.innerHTML = `<i class="ph ph-arrow-u-up-left" aria-hidden="true"></i><span>回填</span>`;
+  retry.addEventListener("click", () => {
+    refs.input.value = rec.webpageUrl || rec.url;
+    refs.input.focus();
+    setHint(refs.bar, refs.hint, "按开始测试确认可下载性");
+  });
+  const remove = el("button", "btn btn--ghost btn--sm probe-history__remove");
+  remove.type = "button";
+  remove.title = "删除这条历史";
+  remove.innerHTML = `<i class="ph ph-x" aria-hidden="true"></i>`;
+  remove.addEventListener("click", async () => {
+    if (!confirm("确认删除这条测试历史？")) return;
+    try {
+      await Api.deleteProbeRecord(rec.id);
+      toast("已删除", "ph-trash");
+      refs.refresh().catch(() => {});
+    } catch (e) {
+      toast(e?.message || "删除失败", "ph-warning-circle");
+    }
+  });
+  actions.append(retry, remove);
+
+  li.append(head, url, summary, actions);
+  return li;
+}
+
+function createHistoryController(refs) {
+  // 封装历史记录的加载 / 渲染，避免把状态散在闭包外。
+  const list = refs.historyList;
+  const hint = refs.historyHint;
+  const refreshBtn = refs.historyRefresh;
+  const clearBtn = refs.historyClear;
+
+  let busy = false;
+
+  async function refresh() {
+    if (busy) return;
+    busy = true;
+    refreshBtn.disabled = true;
+    try {
+      const records = await Api.listProbeRecords(50);
+      list.replaceChildren();
+      if (!records || records.length === 0) {
+        hint.textContent = "还没有测试记录，测试过的链接会自动出现在这里。";
+        hint.classList.remove("is-error");
+        return;
+      }
+      hint.textContent = `共 ${records.length} 条，按时间倒序`;
+      hint.classList.remove("is-error");
+      const frag = document.createDocumentFragment();
+      records.forEach((r) => frag.appendChild(renderHistoryItem(r, refs)));
+      list.appendChild(frag);
+    } catch (e) {
+      hint.textContent = e?.message || "加载历史失败";
+      hint.classList.add("is-error");
+    } finally {
+      refreshBtn.disabled = false;
+      busy = false;
+    }
+  }
+
+  refreshBtn.addEventListener("click", () => { refresh().catch(() => {}); });
+
+  clearBtn.addEventListener("click", async () => {
+    if (!confirm("确认清空所有下载测试历史？此操作不可撤销。")) return;
+    try {
+      const res = await Api.clearProbeRecords();
+      const n = res && Number.isFinite(res.deleted) ? res.deleted : 0;
+      toast(`已清空 ${n} 条历史`, "ph-trash");
+      await refresh();
+    } catch (e) {
+      toast(e?.message || "清空失败", "ph-warning-circle");
+    }
+  });
+
+  return { refresh };
 }
 
 export function initProbe() {
@@ -117,6 +258,20 @@ export function initProbe() {
   const button = $("#probeBtn");
   const result = $("#probeResult");
 
+  // 历史记录相关的 DOM 节点
+  const historyList = $("#probeHistoryList");
+  const historyHint = $("#probeHistoryHint");
+  const historyRefresh = $("#probeHistoryRefresh");
+  const historyClear = $("#probeHistoryClear");
+
+  const refs = { bar, hint, button, result, input,
+                 historyList, historyHint, historyRefresh, historyClear };
+
+  const history = createHistoryController(refs);
+  refs.history = history;
+  // 启动时尝试拉一次历史：失败（后端没启 / mock 关闭）也不阻塞测试功能
+  history.refresh().catch(() => {});
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const url = input.value.trim();
@@ -125,7 +280,7 @@ export function initProbe() {
       input.focus();
       return;
     }
-    runProbe(url, { bar, hint, button, result });
+    runProbe(url, refs);
   });
 
   input.addEventListener("input", () => {

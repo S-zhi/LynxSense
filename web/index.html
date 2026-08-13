@@ -270,6 +270,23 @@
                 <div class="probe-result__desc">结果会显示在这里。</div>
               </div>
             </div>
+
+            <!-- 测试历史：所有 probe 调用都会落库一份，方便回看与排查 -->
+            <section class="probe-history" aria-label="测试历史">
+              <header class="probe-history__head">
+                <h3>测试历史</h3>
+                <div class="probe-history__actions">
+                  <button class="btn btn--ghost btn--sm" id="probeHistoryRefresh" type="button">
+                    <i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span>刷新</span>
+                  </button>
+                  <button class="btn btn--ghost btn--sm probe-history__clear" id="probeHistoryClear" type="button">
+                    <i class="ph ph-trash" aria-hidden="true"></i><span>清空</span>
+                  </button>
+                </div>
+              </header>
+              <p class="probe-history__hint" id="probeHistoryHint">点击上方"刷新"加载历史记录。</p>
+              <ul class="probe-history__list" id="probeHistoryList"></ul>
+            </section>
           </div>
         </section>
 

@@ -10,7 +10,24 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskRecord
+from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, ProbeRecord, TaskRecord
+
+
+def _probe_record_to_out(rec: ProbeRecord) -> "ProbeRecordOut":
+    """ProbeRecord(snake_case) -> ProbeRecordOut(camelCase)。"""
+    return ProbeRecordOut(
+        id=rec.id,
+        url=rec.url,
+        ok=bool(rec.ok),
+        title=rec.title,
+        extractor=rec.extractor,
+        duration=rec.duration,
+        formatsCount=rec.formats_count,
+        webpageUrl=rec.webpage_url,
+        reason=rec.reason,
+        detail=rec.detail,
+        createdAt=rec.created_at,
+    )
 
 
 class TaskCreate(BaseModel):
@@ -43,6 +60,28 @@ class TaskProbeOut(BaseModel):
     webpageUrl: Optional[str] = None
     reason: Optional[str] = None
     detail: Optional[str] = None
+
+
+class ProbeRecordOut(BaseModel):
+    """单条下载测试历史记录（数据库行 -> 前端契约）。"""
+
+    id: str
+    url: str
+    ok: bool
+    title: Optional[str] = None
+    extractor: Optional[str] = None
+    duration: Optional[float] = None
+    formatsCount: int = 0
+    webpageUrl: Optional[str] = None
+    reason: Optional[str] = None
+    detail: Optional[str] = None
+    createdAt: int
+
+
+class ProbeRecordsClearOut(BaseModel):
+    """清空历史记录后的响应，便于前端 toast 显示删了多少条。"""
+
+    deleted: int
 
 
 class TaskOut(BaseModel):

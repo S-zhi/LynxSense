@@ -11,20 +11,23 @@ from fastapi.testclient import TestClient
 
 from src.handler import tasks as tasks_routes
 from src.handler.app import app
-from src.handler.deps import get_store
+from src.handler.deps import get_probe_store, get_store
 from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskStore
 
 from src.handler.schemas import to_out
 from src.core.downloader import ProbeResult
-from src.store import TaskStore, TaskRecord
+from src.store import ProbeStore, TaskStore, TaskRecord
 
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    store = TaskStore(tmp_path / "test.db")
+    db_path = tmp_path / "test.db"
+    store = TaskStore(db_path)
+    probe_store = ProbeStore(db_path)
     # 覆盖 store 依赖 -> 临时库
     app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_probe_store] = lambda: probe_store
     # 下载端点用 task_dir 定位文件 -> 指向临时目录
     monkeypatch.setattr(tasks_routes, "task_dir", lambda tid: tmp_path / tid)
     monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
@@ -32,6 +35,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda task_id: None)
     with TestClient(app) as c:
         c._store = store
+        c._probe_store = probe_store
         c._tmp = tmp_path
         yield c
     app.dependency_overrides.clear()
@@ -444,7 +448,7 @@ def test_cors_rejects_untrusted_origin(client):
 # ---------- /api/tasks/probe 探针端点 ----------
 
 def test_probe_returns_probe_result_shape(client, monkeypatch):
-    """POST /api/tasks/probe 应把 probe_video 的 ProbeResult 翻成 TaskProbeOut。"""
+    """POST /api/tasks/probe 应把 probe_video 的 ProbeResult 翻成 TaskProbeOut，并落记录。"""
     fake = ProbeResult(
         ok=True,
         title="P",
@@ -465,10 +469,17 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert data["formatsCount"] == 2
     assert data["webpageUrl"] == "https://x/v"
     assert data["reason"] is None and data["detail"] is None
+    # 落库：调用一次后历史记录里应能查到此条
+    records = client._probe_store.list()
+    assert len(records) == 1
+    assert records[0].url == "https://x/v"
+    assert bool(records[0].ok) is True
+    assert records[0].title == "P"
+    assert records[0].formats_count == 2
 
 
 def test_probe_failure_response(client, monkeypatch):
-    """失败时透传 reason / detail。"""
+    """失败时透传 reason / detail，并落一条 ok=False 的历史。"""
     fake = ProbeResult(ok=False, reason="yt-dlp 暂不支持这个网站或链接", detail="Unsupported URL")
     monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
 
@@ -479,6 +490,12 @@ def test_probe_failure_response(client, monkeypatch):
     assert data["reason"] == "yt-dlp 暂不支持这个网站或链接"
     assert data["detail"] == "Unsupported URL"
     assert data["formatsCount"] == 0
+    # 失败也要落库：方便用户回看错误信息
+    records = client._probe_store.list()
+    assert len(records) == 1
+    assert bool(records[0].ok) is False
+    assert records[0].reason == "yt-dlp 暂不支持这个网站或链接"
+    assert records[0].detail == "Unsupported URL"
 
 
 def test_probe_rejects_empty_url_422(client):
@@ -488,6 +505,80 @@ def test_probe_rejects_empty_url_422(client):
 
 def test_probe_rejects_missing_url_422(client):
     assert client.post("/api/tasks/probe", json={}).status_code == 422
+
+
+# ---------- /api/tasks/probe/records 端点 ----------
+
+def test_list_probe_records_default_limit(client, monkeypatch):
+    """GET /api/tasks/probe/records 默认 limit=50，按时间倒序。"""
+    fake = ProbeResult(ok=True, title="T", formats_count=1)
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+    for i in range(3):
+        r = client.post("/api/tasks/probe", json={"url": f"https://x/{i}"})
+        assert r.status_code == 200
+
+    res = client.get("/api/tasks/probe/records")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) == 3
+    # 倒序：最后写入的应排第一
+    assert data[0]["url"] == "https://x/2"
+    assert data[2]["url"] == "https://x/0"
+    # 字段对齐前端契约
+    assert set(data[0].keys()) == {
+        "id", "url", "ok", "title", "extractor", "duration",
+        "formatsCount", "webpageUrl", "reason", "detail", "createdAt",
+    }
+
+
+def test_list_probe_records_respects_limit(client, monkeypatch):
+    fake = ProbeResult(ok=True, title="T", formats_count=1)
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+    for i in range(3):
+        client.post("/api/tasks/probe", json={"url": f"https://x/{i}"})
+
+    res = client.get("/api/tasks/probe/records", params={"limit": 2})
+    assert res.status_code == 200
+    assert len(res.json()) == 2
+
+
+def test_list_probe_records_rejects_invalid_limit(client):
+    """limit 越界（<1 或 >500）应被 422 拒绝。"""
+    assert client.get("/api/tasks/probe/records", params={"limit": 0}).status_code == 422
+    assert client.get("/api/tasks/probe/records", params={"limit": 501}).status_code == 422
+
+
+def test_clear_probe_records(client, monkeypatch):
+    fake = ProbeResult(ok=True, title="T", formats_count=1)
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+    for i in range(2):
+        client.post("/api/tasks/probe", json={"url": f"https://x/{i}"})
+
+    res = client.delete("/api/tasks/probe/records")
+    assert res.status_code == 200
+    assert res.json() == {"deleted": 2}
+    # 清空后列表为空
+    assert client.get("/api/tasks/probe/records").json() == []
+    # 再次清空返回 0，不报错
+    res2 = client.delete("/api/tasks/probe/records")
+    assert res2.status_code == 200
+    assert res2.json() == {"deleted": 0}
+
+
+def test_delete_probe_record(client, monkeypatch):
+    fake = ProbeResult(ok=True, title="T", formats_count=1)
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+    client.post("/api/tasks/probe", json={"url": "https://x/v"})
+
+    rid = client._probe_store.list()[0].id
+    res = client.delete(f"/api/tasks/probe/records/{rid}")
+    assert res.status_code == 204
+    assert client.get("/api/tasks/probe/records").json() == []
+
+
+def test_delete_probe_record_404_when_missing(client):
+    res = client.delete("/api/tasks/probe/records/probe_doesnotexist")
+    assert res.status_code == 404
 
 
 # ---------- /api/tasks/upload 上传端点边界 ----------

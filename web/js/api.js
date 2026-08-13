@@ -100,6 +100,33 @@ const RealApi = {
     return res.json();
   },
 
+  // 列出最近的下载测试历史记录（按时间倒序）。
+  async listProbeRecords(limit = 50) {
+    const res = await request(
+      this.base,
+      `/api/tasks/probe/records?limit=${encodeURIComponent(limit)}`,
+    );
+    if (!res.ok) throw new Error(await readError(res, "获取测试历史失败"));
+    return res.json();
+  },
+
+  // 一键清空所有下载测试历史。
+  async clearProbeRecords() {
+    const res = await request(this.base, "/api/tasks/probe/records", {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(await readError(res, "清空测试历史失败"));
+    return res.json();
+  },
+
+  // 删除单条下载测试历史。
+  async deleteProbeRecord(id) {
+    const res = await request(this.base, `/api/tasks/probe/records/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(await readError(res, "删除测试记录失败"));
+  },
+
   async listTasks() {
     const res = await request(this.base, "/api/tasks");
     if (!res.ok) throw new Error(await readError(res, "获取任务列表失败"));
@@ -239,6 +266,29 @@ const RealApi = {
 
 const MockApi = (() => {
   const STORE_KEY = "subtrans_mock_tasks_v1";
+  // 下载测试历史：与真实后端的 probe_records 行为对齐
+  const PROBE_STORE_KEY = "subtrans_mock_probe_records_v1";
+
+  // 加载 / 持久化历史记录的辅助
+  function _loadProbe() {
+    try {
+      const raw = localStorage.getItem(PROBE_STORE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function _saveProbe(arr) {
+    try { localStorage.setItem(PROBE_STORE_KEY, JSON.stringify(arr)); } catch (e) {}
+  }
+  function _pushProbe(rec) {
+    const arr = _loadProbe();
+    arr.unshift(rec);
+    // 简单上限：保留最近 100 条，避免 localStorage 膨胀
+    if (arr.length > 100) arr.length = 100;
+    _saveProbe(arr);
+  }
 
   // 按 taskId 缓存 in-memory subtitles（编辑/保存即时反馈）
   const _subtitles = {};
@@ -322,19 +372,54 @@ const MockApi = (() => {
       };
       tasks.unshift(t); persist(); await delay(180); return { ...t };
     },
-    // 示例模式下模拟链接探测成功。
+    // 示例模式下模拟链接探测成功，同时写入历史。
     async probeVideo(url) {
       await delay(180);
-      return {
-        ok: /^https?:\/\/.+/i.test(url),
-        title: "示例视频 · " + shortUrl(url),
-        extractor: "Mock",
-        duration: 90,
-        formatsCount: 3,
+      const ok = /^https?:\/\/.+/i.test(url);
+      const result = {
+        ok,
+        title: ok ? "示例视频 · " + shortUrl(url) : null,
+        extractor: ok ? "Mock" : null,
+        duration: ok ? 90 : null,
+        formatsCount: ok ? 3 : 0,
         webpageUrl: url,
-        reason: /^https?:\/\/.+/i.test(url) ? null : "请输入有效的视频链接",
+        reason: ok ? null : "请输入有效的视频链接",
         detail: null,
       };
+      _pushProbe({
+        id: "probe_" + Math.random().toString(16).slice(2, 10),
+        url,
+        ok,
+        title: result.title,
+        extractor: result.extractor,
+        duration: result.duration,
+        formatsCount: result.formatsCount,
+        webpageUrl: result.webpageUrl,
+        reason: result.reason,
+        detail: result.detail,
+        createdAt: Date.now(),
+      });
+      return result;
+    },
+    // 示例模式下：返回历史记录（按时间倒序，遵守 limit）。
+    async listProbeRecords(limit = 50) {
+      await delay(60);
+      const arr = _loadProbe();
+      const n = Math.max(1, Math.min(500, Number(limit) || 50));
+      return arr.slice(0, n);
+    },
+    // 示例模式下：一键清空历史。
+    async clearProbeRecords() {
+      await delay(60);
+      const arr = _loadProbe();
+      _saveProbe([]);
+      return { deleted: arr.length };
+    },
+    // 示例模式下：删除单条历史。
+    async deleteProbeRecord(id) {
+      await delay(40);
+      const arr = _loadProbe().filter((r) => r.id !== id);
+      _saveProbe(arr);
     },
     async listTasks() { await delay(300); return tasks.map((t) => ({ ...t })); },
     // 示例模式下返回常用源语言选项。
