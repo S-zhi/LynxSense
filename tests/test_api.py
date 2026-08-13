@@ -235,6 +235,35 @@ def test_health(client):
     assert client.get("/api/health").json() == {"ok": True}
 
 
+def test_srt_languages(client, monkeypatch):
+    """测试获取源语言选项。"""
+    monkeypatch.setattr(
+        "src.handler.srt.get_video_language_options",
+        lambda: ["en", "zh"],
+    )
+    r = client.get("/api/srt/languages")
+    assert r.status_code == 200
+    assert r.json() == ["en", "zh"]
+
+
+def test_srt_model_weights(client, monkeypatch):
+    """测试获取 Whisper 模型权重选项。"""
+    monkeypatch.setattr(
+        "src.handler.srt.get_whisper_model_weight_options",
+        lambda: ["tiny", "small"],
+    )
+    r = client.get("/api/srt/model-weights")
+    assert r.status_code == 200
+    assert r.json() == ["tiny", "small"]
+
+
+def test_srt_target_languages(client):
+    """测试获取配置/后端下发的目标语言选项。"""
+    r = client.get("/api/srt/target-languages")
+    assert r.status_code == 200
+    assert r.json() == ["zh-CN", "zh-TW", "en", "ja", "ko"]
+
+
 # ---------- issue #22：终态任务产物丢失 ----------
 
 
@@ -508,7 +537,7 @@ def test_upload_normalizes_uppercase_extension(client, monkeypatch):
     assert r.status_code == 201
     data = r.json()
     rec = client._store.get(data["id"])
-    assert (client._tmp / data["id"] / f"source.MP4").exists()
+    assert (client._tmp / data["id"] / f"source.mp4").exists()
     assert rec.title == "A"
 
 

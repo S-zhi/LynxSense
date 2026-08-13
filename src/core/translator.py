@@ -56,6 +56,15 @@ _LANG_NAMES = {
     "en": "English",
     "ja": "Japanese",
     "ko": "Korean",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ru": "Russian",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "vi": "Vietnamese",
+    "th": "Thai",
+    "ar": "Arabic",
 }
 
 

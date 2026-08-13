@@ -8,7 +8,6 @@ import { initPreview } from "./ui-preview.js";
 import { initEditor } from "./ui-editor.js";
 import { initProbe } from "./ui-probe.js";
 import { initStorage } from "./ui-storage.js";
-import { loadTasks, stopAll } from "./store.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
 
 initTheme();
