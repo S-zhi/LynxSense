@@ -12,6 +12,9 @@ window.APP_CONFIG = {
 
   // 当前仅支持 DeepSeek 翻译，后续可在此追加引擎
   TRANSLATION_ENGINES: [{ value: "deepseek", label: "DeepSeek", enabled: true }],
+
+  // 默认支持的目标语言列表
+  TARGET_LANGUAGES: ["zh-CN", "zh-TW", "en", "ja", "ko"],
 };
 
 // 运行时覆盖 API 地址：localStorage.setItem('SUBTRANS_API_BASE_URL', 'http://...')

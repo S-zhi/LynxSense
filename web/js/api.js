@@ -113,6 +113,13 @@ const RealApi = {
     return res.json();
   },
 
+  // 获取目标视频语言选项。
+  async listTargetLanguages() {
+    const res = await request(this.base, "/api/srt/target-languages");
+    if (!res.ok) throw new Error("获取目标语言失败：" + res.status);
+    return res.json();
+  },
+
   // 获取 Whisper 模型权重选项。
   async listModelWeights() {
     const res = await request(this.base, "/api/srt/model-weights");
@@ -332,6 +339,8 @@ const MockApi = (() => {
     async listTasks() { await delay(300); return tasks.map((t) => ({ ...t })); },
     // 示例模式下返回常用源语言选项。
     async listVideoLanguages() { await delay(80); return ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"]; },
+    // 示例模式下返回目标语言选项。
+    async listTargetLanguages() { await delay(80); return CFG.TARGET_LANGUAGES || ["zh-CN", "zh-TW", "en", "ja", "ko"]; },
     // 示例模式下返回 Replicate Whisper 模型权重选项。
     async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
     async deleteTask(id) { tasks = tasks.filter((t) => t.id !== id); persist(); await delay(80); },

@@ -1,0 +1,17 @@
+INFO:     Started server process [84651]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:40686 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37200 - "GET /api/srt/languages HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:37210 - "GET /api/srt/model-weights HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:37202 - "GET /api/srt/target-languages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37218 - "GET /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33036 - "GET /api/srt/languages HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:33060 - "GET /api/srt/model-weights HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:33052 - "GET /api/srt/target-languages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33036 - "GET /api/tasks HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [84651]

@@ -8,6 +8,7 @@ import { LANG_LABEL } from "./constants.js";
 
 const CFG = window.APP_CONFIG;
 const FALLBACK_LANGUAGES = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"];
+const FALLBACK_TARGET_LANGUAGES = ["zh-CN", "zh-TW", "en", "ja", "ko"];
 const FALLBACK_MODELS = [
   "tiny.en", "tiny", "base.en", "base", "small.en",
   "small", "medium.en", "medium", "large-v1", "large-v2",
@@ -43,8 +44,8 @@ function option(value, label = value) {
   return item;
 }
 
-function sourceLanguageLabel(code) {
-  // 把源语言代码转换为中文展示文案，提交时仍使用原始代码。
+function languageLabel(code) {
+  // 把语言代码转换为中文展示文案，提交时仍使用原始代码。
   if (LANG_LABEL[code]) return LANG_LABEL[code];
   try {
     return LANGUAGE_DISPLAY?.of(code) || code;
@@ -82,11 +83,24 @@ function renderSourceLanguages(languages) {
   sel.innerHTML = "";
   sel.append(option("auto", "自动检测"));
   languages.forEach((code) => {
-    sel.append(option(code, sourceLanguageLabel(code)));
+    sel.append(option(code, languageLabel(code)));
   });
   sel.value = [...sel.options].some((item) => item.value === current)
     ? current
     : DEFAULT_SOURCE_LANGUAGE;
+}
+
+function renderTargetLanguages(languages) {
+  // 渲染目标语言下拉框。
+  const sel = $("#targetLang");
+  const current = sel.value || "zh-CN";
+  sel.innerHTML = "";
+  languages.forEach((code) => {
+    sel.append(option(code, languageLabel(code)));
+  });
+  sel.value = [...sel.options].some((item) => item.value === current)
+    ? current
+    : (languages[0] || "zh-CN");
 }
 
 function modelLabel(model) {
@@ -118,16 +132,19 @@ function renderModelWeights(models) {
 }
 
 async function initSrtOptions() {
-  // 从后端加载源语言和模型权重选项，失败时使用本地兜底。
+  // 从后端加载源语言、目标语言和模型权重选项，失败时使用本地兜底。
   renderSourceLanguages(FALLBACK_LANGUAGES);
+  renderTargetLanguages(CFG.TARGET_LANGUAGES || FALLBACK_TARGET_LANGUAGES);
   renderModelWeights(FALLBACK_MODELS);
 
   try {
-    const [languages, models] = await Promise.all([
+    const [languages, targetLanguages, models] = await Promise.all([
       Api.listVideoLanguages(),
+      Api.listTargetLanguages(),
       Api.listModelWeights(),
     ]);
     renderSourceLanguages(languages);
+    renderTargetLanguages(targetLanguages);
     renderModelWeights(models);
   } catch (err) {
     toast(err.message || "获取识别选项失败，已使用默认选项", "ph-warning-circle");

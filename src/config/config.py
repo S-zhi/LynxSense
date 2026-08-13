@@ -120,5 +120,11 @@ class Settings:
     translate_batch_size: int = int(os.getenv("SUBTRANS_TRANSLATE_BATCH", "8"))
     translate_timeout: int = int(os.getenv("SUBTRANS_TRANSLATE_TIMEOUT", "60"))
 
+    # 支持的翻译目标语言列表（逗号分隔）
+    target_languages: tuple[str, ...] = _env_list(
+        "SUBTRANS_TARGET_LANGUAGES",
+        ("zh-CN", "zh-TW", "en", "ja", "ko"),
+    )
+
 
 settings = Settings()
