@@ -336,6 +336,8 @@ SUBTRANS_LIVE_TEST=1 uv run pytest tests/test_live_pipeline.py -v -s
 
 ## 6. 贡献指南
 
+关于 Issue 反馈模板、Pull Request 流程、Commit Message 规范、测试运行与合规说明等，请参见详细的 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
 ### 6.1 Issue
 
 适合提交公开 Issue 的内容：
@@ -345,7 +347,7 @@ SUBTRANS_LIVE_TEST=1 uv run pytest tests/test_live_pipeline.py -v -s
 - 文档问题
 - 可复现的使用问题
 
-安全漏洞不要通过公开 Issue 提交。
+安全漏洞不要通过公开 Issue 提交。详细的 Issue 模板和规范请参考 [CONTRIBUTING.md](./CONTRIBUTING.md#2-如何反馈问题-issue-规范)。
 
 ### 6.2 Pull Request
 
@@ -357,15 +359,19 @@ SUBTRANS_LIVE_TEST=1 uv run pytest tests/test_live_pipeline.py -v -s
 4. 运行 `uv run pytest -q`。
 5. 提交 Pull Request，并说明变更范围、验证方式和已知风险。
 
+更详细的代码审核与合并流程，请参考 [CONTRIBUTING.md](./CONTRIBUTING.md#3-开发流程-fork--pr-规范)。
+
 ### 6.3 Commit 与分支规范
 
-仓库当前未发现正式贡献规范，需要补充 `CONTRIBUTING.md`。提交信息建议使用清晰的动词前缀，例如：
+本项目使用 **Conventional Commits (约定式提交)** 规范。提交信息建议使用清晰的动词前缀，例如：
 
 ```text
 feat: add subtitle preview controls
 fix: handle ffmpeg subtitle filter errors
 docs: update README
 ```
+
+完整的 Commit 类型定义与示例，请参考 [CONTRIBUTING.md](./CONTRIBUTING.md#4-代码及提交规范-commit-message--style)。
 
 ### 6.4 安全漏洞报告
 
