@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from src.config import settings
 from src.service.orchestrator import PipelineEvent, PipelineParams, run_pipeline
+from src.service.asset_resolver import ResourceError
 from src.store import TaskStore
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,11 @@ def _run(task_id: str) -> None:
 
     try:
         run_pipeline(params, on_event, api_key=settings.deepseek_api_key)
+    except ResourceError as e:
+        logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
+        cur = _store.get(task_id)
+        if cur is not None and cur.status != "FAILED":
+            _store.update(task_id, status="FAILED", error=str(e))
     except Exception:
         # run_pipeline 失败时已通过 on_event 写过 FAILED；这里兜底再确保一次
         logger.exception("流水线执行失败: %s", task_id)

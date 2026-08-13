@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from src.config import settings, ensure_task_dir, AUDIO_FILENAME
+from src.service.asset_resolver import AssetResolver, ResourceState
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +76,13 @@ def extract_audio(
         AudioExtractError: 输入不存在、ffmpeg 失败或产物缺失。
     """
     video_path = Path(video_path)
-    if not video_path.exists():
+    state = AssetResolver.check_file_state(video_path)
+    if state == ResourceState.DELETED:
         logger.error(f"输入视频不存在: {video_path}")
         raise AudioExtractError(f"输入视频不存在: {video_path}")
+    elif state == ResourceState.UNREADABLE:
+        logger.error(f"输入视频损坏或不可读: {video_path}")
+        raise AudioExtractError(f"输入视频损坏或不可读: {video_path}")
 
     if not _has_audio_stream(video_path):
         logger.error(f"源视频不包含音频流，无法提取音频: {video_path}")

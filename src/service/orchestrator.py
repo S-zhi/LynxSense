@@ -20,6 +20,7 @@ from src.core.downloader import download_video
 from src.core.subtitle_burner import burn_subtitles
 from src.core.transcriber import transcribe
 from src.core.translator import translate_srt
+from src.service.asset_resolver import AssetResolver, ResourceError, ResourceState
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +115,12 @@ def run_pipeline(
                 params.url, tid,
                 on_progress=lambda p: emit("DOWNLOADING", _scale(0, 100, getattr(p, "percent", None))),
             )
-            video_path, title = dl.video_path, dl.title
+            video_path = AssetResolver.require_source(tid)
+            title = dl.title
         else:
             dl = download_video(params.url, tid, on_progress=step_cb("DOWNLOADING"))
-            video_path, title = dl.video_path, dl.title
+            video_path = AssetResolver.require_source(tid)
+            title = dl.title
 
         # 仅下载 / 仅载入本地视频：不做字幕处理，直接以源视频完成
         if not params.need_subtitle:
@@ -128,19 +131,22 @@ def run_pipeline(
             return final
 
         emit("EXTRACTING", 20)
+        video_path = AssetResolver.require_source(tid)
         au = extract_audio(video_path, tid, on_progress=step_cb("EXTRACTING"))
 
         emit("TRANSCRIBING", 35)
+        audio_path = AssetResolver.require_audio(tid)
         tr = transcribe(
-            au.audio_path, tid,
+            audio_path, tid,
             language=params.source_lang,
             model_name=params.model,
             on_progress=step_cb("TRANSCRIBING"),
         )
 
         emit("TRANSLATING", 65)
+        original_srt_path = AssetResolver.require_original_srt(tid)
         tl = translate_srt(
-            tr.srt_path, tid,
+            original_srt_path, tid,
             params.source_lang, params.target_lang,
             mode=params.mode,
             on_progress=step_cb("TRANSLATING"),
@@ -148,18 +154,30 @@ def run_pipeline(
         )
 
         emit("BURNING", 85)
+        video_path = AssetResolver.require_source(tid)
+        translated_srt_path = AssetResolver.require_translated_srt(tid)
         bn = burn_subtitles(
-            video_path, tl.srt_path, tid,
+            video_path, translated_srt_path, tid,
             mode=params.burn,
             on_progress=step_cb("BURNING"),
         )
 
-        outputs = {"video": str(bn.output_path), "subtitle": str(tl.srt_path)}
+        output_video_path = AssetResolver.require_output_video(tid)
+        outputs = {"video": str(output_video_path), "subtitle": str(translated_srt_path)}
         final = PipelineEvent("SUCCESS", 100, None, title=title, outputs=outputs)
         on_event(final)
         logger.info("流水线完成: task=%s", tid)
         return final
 
+    except ResourceError as e:
+        logger.error("流水线因资源异常中断: task=%s step=%s, msg=%s", tid, state["step"], str(e))
+        on_event(PipelineEvent(
+            status="FAILED",
+            progress=state["progress"],
+            current_step=state["step"],
+            error=str(e),
+        ))
+        raise
     except Exception as e:
         logger.exception("流水线失败: task=%s step=%s", tid, state["step"])
         on_event(PipelineEvent(
@@ -173,8 +191,7 @@ def run_pipeline(
 
 def _locate_uploaded_source(task_id: str) -> Path:
     """定位上传模式下预先落盘的源视频 data/{task_id}/source.*。"""
-    d = task_dir(task_id)
-    for p in sorted(d.glob(f"{SOURCE_VIDEO_STEM}.*")):
-        if p.is_file():
-            return p
-    raise PipelineError("上传的视频文件缺失，无法开始处理")
+    try:
+        return AssetResolver.require_source(task_id)
+    except ResourceError as e:
+        raise PipelineError(str(e)) from e

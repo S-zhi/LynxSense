@@ -30,6 +30,7 @@ from src.handler.subtitle_editor import release_lock
 from src.handler.deps import get_store
 from src.handler.schemas import TaskCreate, TaskOut, TaskProbeIn, TaskProbeOut, to_out
 from src.service.runner import enqueue_pipeline
+from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskStore
 
 logger = logging.getLogger(__name__)
@@ -80,14 +81,24 @@ def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
             continue
         if rec.resource_status == RESOURCE_STATUS_MISSING:
             continue
-        if artifacts_present(
-            rec.id, data_dir=data_dir, need_subtitle=bool(rec.need_subtitle)
-        ):
-            continue
+
+        need_sub = bool(rec.need_subtitle)
+        if need_sub:
+            state_out, _, _ = AssetResolver.resolve_output_video(rec.id)
+            state_srt, _, _ = AssetResolver.resolve_translated_srt(rec.id)
+            if state_out == ResourceState.AVAILABLE and state_srt == ResourceState.AVAILABLE:
+                continue
+            error_msg = "资源不可读" if (state_out == ResourceState.UNREADABLE or state_srt == ResourceState.UNREADABLE) else _DELETED_MESSAGE
+        else:
+            state_src, _, _ = AssetResolver.resolve_source(rec.id)
+            if state_src == ResourceState.AVAILABLE:
+                continue
+            error_msg = "资源不可读" if state_src == ResourceState.UNREADABLE else _DELETED_MESSAGE
+
         store.update(
             rec.id,
             resource_status=RESOURCE_STATUS_MISSING,
-            error=_DELETED_MESSAGE,
+            error=error_msg,
         )
         downgraded.append(rec.id)
     return downgraded
@@ -231,7 +242,14 @@ def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
     path = _resolve_video(task_id)
     if path is not None:
-        return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
+        state = AssetResolver.check_file_state(path)
+        if state == ResourceState.AVAILABLE:
+            return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
+        elif state == ResourceState.UNREADABLE:
+            if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
+                _mark_resource_missing(store, task_id, "资源不可读")
+            raise HTTPException(status_code=409, detail="资源不可读")
+
     # 兜底：成功任务的产物被清掉时，要把状态降级为 MISSING，
     # 避免下次列表 / 详情接口继续暴露已失效的下载链接。
     if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
@@ -257,8 +275,14 @@ def _resolve_video(task_id: str):
 def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
     path = task_dir(task_id) / TRANSLATED_SRT
-    if path.exists():
+    state = AssetResolver.check_file_state(path)
+    if state == ResourceState.AVAILABLE:
         return FileResponse(path, media_type="application/x-subrip", filename=f"{task_id}.srt")
+    elif state == ResourceState.UNREADABLE:
+        if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
+            _mark_resource_missing(store, task_id, "资源不可读")
+        raise HTTPException(status_code=409, detail="资源不可读")
+
     if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
         _mark_resource_missing(store, task_id, _DELETED_MESSAGE)
     raise HTTPException(
