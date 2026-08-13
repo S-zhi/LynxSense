@@ -26,17 +26,31 @@ async function request(base, path, options = {}) {
   }
 }
 
-async function errorText(res) {
-  // 提取后端错误详情，便于定位 422 这类参数校验失败。
+async function readError(res, fallback) {
+  let detail = "";
   try {
-    const data = await res.json();
-    if (Array.isArray(data.detail)) {
-      return `${res.status} ${data.detail.map((item) => `${item.loc?.join(".")}: ${item.msg}`).join("; ")}`;
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      if (data && data.detail) {
+        if (Array.isArray(data.detail)) {
+          detail = data.detail.map((item) => `${item.loc?.join(".")}: ${item.msg}`).join("; ");
+        } else {
+          detail = String(data.detail);
+        }
+      } else {
+        detail = text || String(res.status);
+      }
+    } catch (e) {
+      detail = text || String(res.status);
     }
-    return `${res.status} ${data.detail || JSON.stringify(data)}`;
   } catch (e) {
-    return String(res.status);
+    detail = String(res.status);
   }
+  if (!detail || !detail.trim()) {
+    detail = String(res.status);
+  }
+  return `${fallback}：${detail}`;
 }
 
 const RealApi = {
@@ -48,7 +62,7 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("创建任务失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "创建任务失败"));
     return res.json();
   },
 
@@ -71,7 +85,7 @@ const RealApi = {
       method: "POST",
       body,
     });
-    if (!res.ok) throw new Error("上传任务创建失败：" + await errorText(res));
+    if (!res.ok) throw new Error(await readError(res, "上传任务创建失败"));
     return res.json();
   },
 
@@ -82,45 +96,45 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
     });
-    if (!res.ok) throw new Error("链接校验失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "链接校验失败"));
     return res.json();
   },
 
   async listTasks() {
     const res = await request(this.base, "/api/tasks");
-    if (!res.ok) throw new Error("获取任务列表失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "获取任务列表失败"));
     return res.json();
   },
 
   // 获取源视频语言选项。
   async listVideoLanguages() {
     const res = await request(this.base, "/api/srt/languages");
-    if (!res.ok) throw new Error("获取源语言失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "获取源语言失败"));
     return res.json();
   },
 
   // 获取 Whisper 模型权重选项。
   async listModelWeights() {
     const res = await request(this.base, "/api/srt/model-weights");
-    if (!res.ok) throw new Error("获取模型列表失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "获取模型列表失败"));
     return res.json();
   },
 
   async deleteTask(id) {
     const res = await request(this.base, `/api/tasks/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("删除失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "删除失败"));
   },
 
   async retryTask(id) {
     const res = await request(this.base, `/api/tasks/${id}/retry`, { method: "POST" });
-    if (!res.ok) throw new Error("重试失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "重试失败"));
     return res.json();
   },
 
   // 请求后端打开任务所在的本地文件夹。
   async openFolder(id) {
     const res = await request(this.base, `/api/tasks/${id}/folder`, { method: "POST" });
-    if (!res.ok) throw new Error("打开文件夹失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "打开文件夹失败"));
   },
 
   // ---------- 本地资源治理 ----------
@@ -136,7 +150,7 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
     });
-    if (!res.ok) throw new Error("预览清理失败：" + await errorText(res));
+    if (!res.ok) throw new Error(await readError(res, "预览清理失败"));
     return res.json();
   },
 
@@ -146,13 +160,13 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
     });
-    if (!res.ok) throw new Error("执行清理失败：" + await errorText(res));
+    if (!res.ok) throw new Error(await readError(res, "执行清理失败"));
     return res.json();
   },
 
   async getRetention() {
     const res = await request(this.base, "/api/storage/retention");
-    if (!res.ok) throw new Error("获取保留策略失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "获取保留策略失败"));
     return res.json();
   },
 
@@ -162,11 +176,14 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ days }),
     });
-    if (!res.ok) throw new Error("保存保留策略失败：" + res.status);
+    if (!res.ok) throw new Error(await readError(res, "保存保留策略失败"));
+    return res.json();
+  },
+
   // 拉取任务 current subtitles（original + translated），解析为前端可编辑结构
   async getSubtitles(id) {
     const res = await request(this.base, `/api/tasks/${id}/subtitles`);
-    if (!res.ok) throw new Error("读取字幕失败：" + (await errorText(res)));
+    if (!res.ok) throw new Error(await readError(res, "读取字幕失败"));
     return res.json();
   },
 
@@ -177,7 +194,7 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("保存字幕失败：" + (await errorText(res)));
+    if (!res.ok) throw new Error(await readError(res, "保存字幕失败"));
     return res.json();
   },
 
@@ -188,7 +205,7 @@ const RealApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("重新烧录失败：" + (await errorText(res)));
+    if (!res.ok) throw new Error(await readError(res, "重新烧录失败"));
     return res.json();
   },
 
@@ -348,6 +365,8 @@ const MockApi = (() => {
       const out = { days, updatedAt: Date.now() };
       try { localStorage.setItem("subtrans_mock_retention", JSON.stringify(out)); } catch (e) {}
       return out;
+    },
+
     // 示例模式下的字幕编辑：内存中维护一份，供前端 UI 调试
     async getSubtitles(id) {
       await delay(120);
