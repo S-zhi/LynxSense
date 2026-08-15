@@ -200,13 +200,9 @@
               <header class="editor__head">
                 <div class="editor__headtitle">
                   <h2 id="editorTitle">字幕编辑</h2>
-                  <span class="editor__sub" id="editorSub">左侧选任务，右侧编辑</span>
+                  <span class="editor__sub" id="editorSub">左侧选任务，逐条对照编辑原文和译文</span>
                 </div>
                 <div class="editor__actions" id="editorActions" hidden>
-                  <div class="editor__locale" role="tablist" aria-label="编辑语言轨道">
-                    <button class="chip is-active" data-locale="translated" type="button" role="tab">译文</button>
-                    <button class="chip" data-locale="original" type="button" role="tab">原文</button>
-                  </div>
                   <button class="btn btn--ghost btn--sm" id="editorAdd" type="button" title="在末尾追加一条空白字幕">
                     <i class="ph ph-plus"></i><span>新增条目</span>
                   </button>
@@ -225,7 +221,6 @@
               </header>
 
               <div class="editor__body">
-                <div class="editor__video" id="editorVideo"></div>
                 <div class="editor__subs" id="editorSubs"></div>
               </div>
             </section>
