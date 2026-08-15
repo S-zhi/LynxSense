@@ -9,6 +9,35 @@ import { toast } from "./toast.js";
 let stageEl, listEl;
 let lastStageId = undefined;
 let selectedTrack = "subtitled";
+const VIDEO_AVAILABILITY_TIMEOUT_MS = 5000;
+export const VIDEO_MISSING_TITLE = "视频找不到了";
+
+export function isVideoKnownMissing(task, videoKind) {
+  return task?.resourceStatus === "MISSING" && (
+    videoKind === "video" || task.needSubtitle === false
+  );
+}
+
+export async function checkVideoAvailability(
+  videoUrl,
+  fetchImpl = fetch,
+  timeoutMs = VIDEO_AVAILABILITY_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(videoUrl, {
+      method: "HEAD",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch (_) {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export function initPreview() {
   stageEl = $("#previewStage");
@@ -77,7 +106,6 @@ function renderStage(sel) {
   const stage = el("div", "stage");
 
   const screen = el("div", "stage__screen");
-  screen.append(stageVideoChecking(trackLabel));
 
   const bar = el("div", "stage__bar");
   const title = el("div", "stage__title");
@@ -123,31 +151,33 @@ function renderStage(sel) {
   bar.append(title, tags, actions);
   stage.append(screen, bar);
   stageEl.append(stage);
+  if (isVideoKnownMissing(sel, videoKind)) {
+    showStageVideoMissing(screen, dlVideo, trackLabel);
+    return;
+  }
+
+  screen.append(stageVideoChecking(trackLabel));
   // 先确认资源可用，再创建 <video>。这样 409 不会暴露原生播放器的加载转圈。
   void prepareStageVideo(stage, screen, dlVideo, Api.downloadUrl(sel.id, videoKind), trackLabel);
 }
 
 async function prepareStageVideo(stage, screen, dlVideo, videoUrl, trackLabel) {
-  try {
-    const response = await fetch(videoUrl, { method: "HEAD" });
-    if (!stageEl.contains(stage)) return;
-    if (!response.ok) {
-      showStageVideoMissing(screen, dlVideo, trackLabel);
-      return;
-    }
-
-    const video = el("video");
-    video.controls = true;
-    video.preload = "metadata";
-    video.addEventListener("error", () => {
-      if (stageEl.contains(stage)) showStageVideoMissing(screen, dlVideo, trackLabel);
-    }, { once: true });
-    screen.replaceChildren(video);
-    dlVideo.disabled = false;
-    video.src = videoUrl;
-  } catch (_) {
-    if (stageEl.contains(stage)) showStageVideoMissing(screen, dlVideo, trackLabel);
+  const available = await checkVideoAvailability(videoUrl);
+  if (!stageEl.contains(stage)) return;
+  if (!available) {
+    showStageVideoMissing(screen, dlVideo, trackLabel);
+    return;
   }
+
+  const video = el("video");
+  video.controls = true;
+  video.preload = "metadata";
+  video.addEventListener("error", () => {
+    if (stageEl.contains(stage)) showStageVideoMissing(screen, dlVideo, trackLabel);
+  }, { once: true });
+  screen.replaceChildren(video);
+  dlVideo.disabled = false;
+  video.src = videoUrl;
 }
 
 function showStageVideoMissing(screen, dlVideo, trackLabel) {
@@ -204,8 +234,8 @@ function stageVideoMissing(trackLabel) {
   const e = el("div", "stage__missing");
   e.innerHTML = `
     <span class="stage__missing-kicker">PREVIEW UNAVAILABLE</span>
-    <div class="stage__missing-title">${trackLabel}找不到了</div>
-    <p class="stage__missing-desc">视频文件可能已被清理或移动。</p>
+    <div class="stage__missing-title">${VIDEO_MISSING_TITLE}</div>
+    <p class="stage__missing-desc">${trackLabel}文件可能已被清理或移动。</p>
     <p class="stage__missing-hint">请返回任务页重新处理后，再回来预览。</p>`;
   return e;
 }
