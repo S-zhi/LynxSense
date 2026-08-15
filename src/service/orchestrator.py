@@ -77,6 +77,7 @@ def run_pipeline(
     on_event: EventHook,
     *,
     api_key: Optional[str] = None,
+    engine_config=None,
 ) -> PipelineEvent:
     """顺序执行五步。成功返回最终 SUCCESS 事件；失败发 FAILED 事件并抛出。"""
     tid = params.task_id
@@ -151,6 +152,7 @@ def run_pipeline(
             mode=params.mode,
             on_progress=step_cb("TRANSLATING"),
             api_key=api_key,
+            engine_config=engine_config,
         )
 
         emit("BURNING", 85)

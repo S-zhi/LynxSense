@@ -154,6 +154,41 @@ const RealApi = {
     return res.json();
   },
 
+  async listTranslationEngines() {
+    const res = await request(this.base, "/api/settings/translation-engines");
+    if (!res.ok) throw new Error(await readError(res, "获取翻译引擎失败"));
+    return res.json();
+  },
+
+  async createTranslationEngine(payload) {
+    const res = await request(this.base, "/api/settings/translation-engines", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readError(res, "创建翻译引擎失败"));
+    return res.json();
+  },
+
+  async updateTranslationEngine(id, payload) {
+    const res = await request(this.base, `/api/settings/translation-engines/${encodeURIComponent(id)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readError(res, "保存翻译引擎失败"));
+    return res.json();
+  },
+
+  async validateTranslationEngine(id) {
+    const res = await request(this.base, `/api/settings/translation-engines/${encodeURIComponent(id)}/validate`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(await readError(res, "检测翻译引擎失败"));
+    return res.json();
+  },
+
+  async deleteTranslationEngine(id) {
+    const res = await request(this.base, `/api/settings/translation-engines/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readError(res, "删除翻译引擎失败"));
+  },
+
   async deleteTask(id) {
     const res = await request(this.base, `/api/tasks/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await readError(res, "删除失败"));
@@ -428,6 +463,22 @@ const MockApi = (() => {
     async listTargetLanguages() { await delay(80); return CFG.TARGET_LANGUAGES || ["zh-CN", "zh-TW", "en", "ja", "ko"]; },
     // 示例模式下返回 Replicate Whisper 模型权重选项。
     async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
+    async listTranslationEngines() {
+      try { return JSON.parse(localStorage.getItem("subtrans_mock_engines_v1") || "[]"); } catch (_) { return []; }
+    },
+    async createTranslationEngine(payload) {
+      const list = await this.listTranslationEngines();
+      const item = { ...payload, id: uid().replace("task_", "engine_"), hasApiKey: !!payload.apiKey, availability: payload.apiKey ? "AVAILABLE" : "UNCONFIGURED", lastCheckedAt: Date.now() };
+      list.push(item); localStorage.setItem("subtrans_mock_engines_v1", JSON.stringify(list)); return item;
+    },
+    async updateTranslationEngine(id, payload) {
+      const list = await this.listTranslationEngines();
+      const old = list.find((e) => e.id === id) || {};
+      const item = { ...old, ...payload, id, hasApiKey: !!(payload.apiKey || old.hasApiKey), availability: (payload.apiKey || old.hasApiKey) ? "AVAILABLE" : "UNCONFIGURED" };
+      localStorage.setItem("subtrans_mock_engines_v1", JSON.stringify(list.map((e) => e.id === id ? item : e))); return item;
+    },
+    async validateTranslationEngine(id) { const list = await this.listTranslationEngines(); const item = list.find((e) => e.id === id); if (item) { item.availability = item.hasApiKey ? "AVAILABLE" : "UNCONFIGURED"; localStorage.setItem("subtrans_mock_engines_v1", JSON.stringify(list)); } return item || {}; },
+    async deleteTranslationEngine(id) { const list = (await this.listTranslationEngines()).filter((e) => e.id !== id); localStorage.setItem("subtrans_mock_engines_v1", JSON.stringify(list)); },
     async deleteTask(id) { tasks = tasks.filter((t) => t.id !== id); persist(); await delay(80); },
     async retryTask(id) {
       const t = find(id);

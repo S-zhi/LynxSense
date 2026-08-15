@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="styles/editor.css" />
     <link rel="stylesheet" href="styles/probe.css" />
     <link rel="stylesheet" href="styles/storage.css" />
+    <link rel="stylesheet" href="styles/translation-settings.css" />
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
   </head>
   <body>
@@ -43,6 +44,9 @@
           </button>
           <button class="nav__item" type="button" data-view="storage">
             <i class="ph ph-hard-drives" aria-hidden="true"></i><span>本地资源</span>
+          </button>
+          <button class="nav__item" type="button" data-view="translation-settings">
+            <i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>高级设置</span>
           </button>
         </nav>
 
@@ -401,6 +405,29 @@
                 <i class="ph ph-tray" aria-hidden="true"></i>
                 <div>暂无任务产物</div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 高级设置 ============ -->
+        <section class="view" data-view="translation-settings" id="view-translation-settings">
+          <div class="translation-settings">
+            <header class="translation-settings__head">
+              <div>
+                <span class="eyebrow">ADVANCED / TRANSLATION</span>
+                <h2>翻译引擎</h2>
+                <p>创建多个服务商配置，按 OpenAI Compatible 或 Anthropic Compatible 协议接入。</p>
+              </div>
+              <button class="btn btn--primary" id="engineAdd" type="button"><i class="ph ph-plus"></i><span>新增配置</span></button>
+            </header>
+            <div class="translation-settings__notice">
+              <i class="ph ph-shield-check" aria-hidden="true"></i>
+              <span>API Key 只用于后端请求，页面仅显示脱敏状态；保存后可自动检测连接和模型可用性。</span>
+            </div>
+            <div class="engine-list" id="engineList" aria-live="polite"></div>
+            <div class="engine-empty" id="engineEmpty" hidden>
+              <i class="ph ph-plugs-connected"></i><strong>还没有翻译引擎</strong>
+              <span>新增一个配置后，它会出现在任务页的翻译引擎选择器中。</span>
             </div>
           </div>
         </section>

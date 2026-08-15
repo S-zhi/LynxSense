@@ -27,7 +27,7 @@ from src.config import (
 )
 from src.core.downloader import probe_video
 from src.handler.subtitle_editor import release_lock
-from src.handler.deps import get_probe_store, get_store
+from src.handler.deps import get_probe_store, get_store, get_translation_engine_store
 from src.handler.schemas import (
     ProbeRecordOut,
     ProbeRecordsClearOut,
@@ -45,6 +45,7 @@ from src.store import (
     RESOURCE_STATUS_MISSING,
     ProbeStore,
     TaskStore,
+    TranslationEngineStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,24 @@ def _mark_resource_missing(store: TaskStore, task_id: str, reason: str) -> None:
         resource_status=RESOURCE_STATUS_MISSING,
         error=reason,
     )
+
+
+def _ensure_translation_engine(
+    engine: str,
+    need_subtitle: bool,
+    engines: TranslationEngineStore,
+) -> None:
+    if not need_subtitle or engine == "deepseek":
+        return
+    rec = engines.get(engine)
+    if rec is None:
+        raise HTTPException(status_code=422, detail="翻译引擎配置不存在")
+    if not rec.enabled:
+        raise HTTPException(status_code=422, detail="翻译引擎已停用")
+    if not rec.api_key:
+        raise HTTPException(status_code=422, detail="翻译引擎尚未配置 API Key")
+    if rec.availability != "AVAILABLE":
+        raise HTTPException(status_code=422, detail="翻译引擎尚未通过可用性检测")
 
 
 def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
@@ -121,7 +140,12 @@ def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
 # ---------- CRUD ----------
 
 @router.post("", response_model=TaskOut, status_code=201)
-def create_task(body: TaskCreate, store: TaskStore = Depends(get_store)) -> TaskOut:
+def create_task(
+    body: TaskCreate,
+    store: TaskStore = Depends(get_store),
+    engines: TranslationEngineStore = Depends(get_translation_engine_store),
+) -> TaskOut:
+    _ensure_translation_engine(body.engine, body.needSubtitle, engines)
     rec = store.create(
         url=body.url,
         source_lang=body.sourceLang,
@@ -144,15 +168,17 @@ def create_upload_task(
     mode: Literal["mono", "bilingual"] = Form("mono"),
     burn: Literal["hard", "soft"] = Form("hard"),
     model: str = Form("small", min_length=1),
-    engine: Literal["deepseek"] = Form("deepseek"),
+    engine: str = Form("deepseek", min_length=1),
     needSubtitle: bool = Form(True),
     store: TaskStore = Depends(get_store),
+    engines: TranslationEngineStore = Depends(get_translation_engine_store),
 ) -> TaskOut:
     """上传本地视频并创建任务：源文件直接落盘，跳过下载，走后续识别 / 翻译 / 烧录。
 
     字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
     """
     filename = (file.filename or "").strip()
+    _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
     if ext not in _UPLOAD_VIDEO_EXTS:
         raise HTTPException(

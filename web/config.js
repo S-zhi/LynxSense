@@ -10,8 +10,8 @@ window.APP_CONFIG = {
   // 请求超时（毫秒）
   API_TIMEOUT_MS: 15000,
 
-  // 当前仅支持 DeepSeek 翻译，后续可在此追加引擎
-  TRANSLATION_ENGINES: [{ value: "deepseek", label: "DeepSeek", enabled: true }],
+  // 高级设置中的引擎配置由后端动态加载；此项仅作为无后端时的兼容兜底
+  TRANSLATION_ENGINES: [{ value: "deepseek", label: "DeepSeek（兼容旧配置）", enabled: true }],
 
   // 默认支持的目标语言列表
   TARGET_LANGUAGES: ["zh-CN", "zh-TW", "en", "ja", "ko"],
