@@ -84,19 +84,27 @@ def build_readiness() -> dict[str, Any]:
         missing.append("SUBTRANS_DATA_DIR 可写权限")
     if db_dir_status != "writable":
         missing.append("SUBTRANS_DB 所在目录可写权限")
+    if ffmpeg_status == "available" and not hard_burn_ready:
+        missing.append("FFmpeg subtitles 滤镜（通常由 libass 提供）")
 
     if not full_pipeline_ready:
         message = (
             "业务服务尚未完成初始化。请在项目根目录的 .env 中配置必要参数，"
             "并确认 FFmpeg、FFprobe 和 yt-dlp 可用，然后重启业务服务。"
         )
+        agent_action = "ask_user_to_configure"
+        restart_required = True
     elif not hard_burn_ready:
         message = (
             "基础流水线已就绪，但当前 FFmpeg 不支持硬字幕滤镜；"
             "请安装带 libass 的 ffmpeg-full，或将 burn 设置为 soft。"
         )
+        agent_action = "use_soft_burn_or_install_libass"
+        restart_required = False
     else:
         message = "业务服务已就绪，可以运行完整字幕流水线。"
+        agent_action = "continue"
+        restart_required = False
 
     return {
         "ok": hard_pipeline_ready,
@@ -124,5 +132,7 @@ def build_readiness() -> dict[str, Any]:
             "soft_burn": full_pipeline_ready,
         },
         "missing": missing,
+        "agent_action": agent_action,
+        "restart_required": restart_required,
         "message": message,
     }

@@ -31,6 +31,8 @@ def test_readiness_reports_fixed_config_location_and_missing_values(monkeypatch,
     assert "REPLICATE_API_TOKEN" in result["missing"]
     assert "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY" in result["missing"]
     assert result["capabilities"]["download"] is False
+    assert result["agent_action"] == "ask_user_to_configure"
+    assert result["restart_required"] is True
 
 
 def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_path):
@@ -55,5 +57,28 @@ def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_p
         "hard_burn": True,
         "soft_burn": True,
     }
+    assert result["agent_action"] == "continue"
+    assert result["restart_required"] is False
     assert "replicate-secret" not in str(result)
     assert "deepseek-secret" not in str(result)
+
+
+def test_readiness_guides_agent_to_soft_burn_when_libass_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-secret")
+    monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(
+        runtime_check.shutil,
+        "which",
+        lambda command: f"/usr/bin/{command}",
+    )
+    monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: False)
+
+    result = runtime_check.build_readiness()
+
+    assert result["ok"] is False
+    assert result["initialized"] is True
+    assert result["agent_action"] == "use_soft_burn_or_install_libass"
+    assert result["restart_required"] is False
+    assert any("FFmpeg subtitles 滤镜" in item for item in result["missing"])
