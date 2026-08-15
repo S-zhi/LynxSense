@@ -82,6 +82,47 @@ class TranslationEngineStore:
             rows = conn.execute("SELECT * FROM translation_engines ORDER BY created_at ASC").fetchall()
         return [_row_to_engine(row) for row in rows]
 
+    def ensure_default_deepseek(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        base_url: str = "https://api.deepseek.com",
+        model: str = "deepseek-chat",
+    ) -> TranslationEngine:
+        """确保旧版 DeepSeek 兼容配置在高级设置中可见。
+
+        使用固定的 ``deepseek`` ID，以兼容已有任务记录和旧版环境变量配置。
+        只在记录不存在时写入，用户后续在 UI 中的自定义不会被启动流程覆盖。
+        """
+        existing = self.get("deepseek")
+        if existing is not None:
+            return existing
+
+        now = _now_ms()
+        normalized_key = api_key or None
+        rec = TranslationEngine(
+            id="deepseek",
+            name="DeepSeek",
+            api_type="openai_compatible",
+            base_url=base_url.strip().rstrip("/"),
+            model=model.strip(),
+            api_key=normalized_key,
+            enabled=1,
+            availability="UNKNOWN" if normalized_key else "UNCONFIGURED",
+            created_at=now,
+            updated_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO translation_engines
+                (id, name, api_type, base_url, model, api_key, enabled, availability,
+                 last_checked_at, last_error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (rec.id, rec.name, rec.api_type, rec.base_url, rec.model, rec.api_key,
+                 rec.enabled, rec.availability, None, None, rec.created_at, rec.updated_at),
+            )
+        return self.get("deepseek") or rec
+
     def get(self, engine_id: str) -> Optional[TranslationEngine]:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM translation_engines WHERE id = ?", (engine_id,)).fetchone()

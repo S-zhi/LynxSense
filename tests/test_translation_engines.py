@@ -6,6 +6,31 @@ from src.core.translation_engines import EngineClient
 from src.store.translation_engine_store import TranslationEngineStore
 
 
+def test_translation_engine_store_seeds_deepseek_once(tmp_path):
+    db = tmp_path / "engines.db"
+    store = TranslationEngineStore(db)
+
+    seeded = store.ensure_default_deepseek(
+        api_key="env-key",
+        base_url="https://api.deepseek.com/",
+        model="deepseek-chat",
+    )
+    assert seeded.id == "deepseek"
+    assert seeded.name == "DeepSeek"
+    assert seeded.api_type == "openai_compatible"
+    assert seeded.base_url == "https://api.deepseek.com"
+    assert seeded.model == "deepseek-chat"
+    assert seeded.has_api_key is True
+    assert seeded.availability == "UNKNOWN"
+
+    # 启动流程可重复执行，且不覆盖用户后续修改。
+    store.update("deepseek", name="我的 DeepSeek")
+    again = store.ensure_default_deepseek(api_key="another-key")
+    assert again.id == "deepseek"
+    assert again.name == "我的 DeepSeek"
+    assert again.api_key == "env-key"
+
+
 def test_translation_engine_store_persists_without_exposing_model(tmp_path):
     db = tmp_path / "engines.db"
     store = TranslationEngineStore(db)
