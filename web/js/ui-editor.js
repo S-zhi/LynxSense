@@ -237,10 +237,10 @@ function buildRow(entry, i) {
         <input class="subrow__time num" data-field="end" type="text" inputmode="decimal" value="${fmtTime(entry.end)}" aria-label="结束时间" />
       </div>
       <div class="subrow__ops">
-        <button class="iconbtn" type="button" data-op="seek" title="跳到该时间"><i class="ph ph-skip-forward"></i></button>
-        <button class="iconbtn" type="button" data-op="merge-next" title="与下一条合并"><i class="ph ph-arrows-in-line-vertical"></i></button>
-        <button class="iconbtn" type="button" data-op="split" title="从中间拆成两条"><i class="ph ph-scissors"></i></button>
-        <button class="iconbtn iconbtn--danger" type="button" data-op="delete" title="删除该条"><i class="ph ph-trash"></i></button>
+        <button class="iconbtn" type="button" data-op="seek" title="跳到该时间" aria-label="跳到第 ${i + 1} 条字幕的开始时间"><i class="ph ph-skip-forward"></i></button>
+        <button class="iconbtn" type="button" data-op="merge-next" title="与下一条合并" aria-label="将第 ${i + 1} 条字幕与下一条合并"><i class="ph ph-arrows-in-line-vertical"></i></button>
+        <button class="iconbtn" type="button" data-op="split" title="从中间拆成两条" aria-label="将第 ${i + 1} 条字幕拆成两条"><i class="ph ph-scissors"></i></button>
+        <button class="iconbtn iconbtn--danger" type="button" data-op="delete" title="删除该条" aria-label="删除第 ${i + 1} 条字幕"><i class="ph ph-trash"></i></button>
       </div>
     </div>
     <textarea class="subrow__text" rows="2" placeholder="字幕文本（双语可用换行）" spellcheck="false"></textarea>`;
