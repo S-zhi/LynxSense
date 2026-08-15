@@ -55,12 +55,22 @@
         );
 
       const orientation = new URLSearchParams(location.search).get("v") || "landscape";
+      const previewState = new URLSearchParams(location.search).get("state") || "ready";
       const src = orientation === "portrait" ? poster(720, 1280, "9:16 竖屏") : poster(1280, 720, "16:9 横屏");
+      const missing = previewState === "missing";
 
       const stage = document.getElementById("previewStage");
       stage.innerHTML = `
         <div class="stage">
-          <div class="stage__screen"><img src="${src}" alt="video" /></div>
+          <div class="stage__screen${missing ? " is-unavailable" : ""}">
+            ${missing ? `
+              <div class="stage__missing">
+                <span class="stage__missing-kicker">PREVIEW UNAVAILABLE</span>
+                <div class="stage__missing-title">视频找不到了</div>
+                <p class="stage__missing-desc">成品文件可能已被清理或移动。</p>
+                <p class="stage__missing-hint">请返回任务页重新处理后，再回来预览。</p>
+              </div>` : `<img src="${src}" alt="video" />`}
+          </div>
           <div class="stage__bar">
             <div class="stage__title">示例成品视频 · 一个相当长的标题用来测试省略号与换行行为演示文本</div>
             <div class="stage__tags">
@@ -70,7 +80,9 @@
             </div>
             <div class="stage__actions">
               <button class="btn btn--ghost btn--sm"><i class="ph ph-folder-open"></i><span>打开文件夹</span></button>
-              <button class="btn btn--primary btn--sm"><i class="ph ph-download-simple"></i><span>下载视频</span></button>
+              <button class="btn btn--${missing ? "ghost" : "primary"} btn--sm"${missing ? " disabled" : ""}>
+                <i class="ph ph-${missing ? "video-camera-slash" : "download-simple"}"></i><span>${missing ? "视频不可用" : "下载视频"}</span>
+              </button>
               <button class="btn btn--ghost btn--sm"><i class="ph ph-closed-captioning"></i><span>下载字幕</span></button>
             </div>
           </div>
