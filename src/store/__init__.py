@@ -5,6 +5,7 @@ from .task_store import (
     RESOURCE_STATUS_AVAILABLE,
     RESOURCE_STATUS_MISSING,
     RESOURCE_STATUSES,
+    STATUSES,
     TaskRecord,
     TaskStore,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "RESOURCE_STATUS_AVAILABLE",
     "RESOURCE_STATUS_MISSING",
     "RESOURCE_STATUSES",
+    "STATUSES",
     "AVAILABILITY",
     "ENGINE_TYPES",
     "TranslationEngine",

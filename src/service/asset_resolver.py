@@ -58,7 +58,10 @@ class AssetResolver:
         if not d.is_dir():
             return ResourceState.DELETED, None, "源视频文件缺失，资源已删除"
 
-        source_paths = sorted(d.glob(f"{SOURCE_VIDEO_STEM}.*"))
+        # yt-dlp 下载中会留下 source.<ext>.part；它不是可恢复流水线的完整源视频。
+        source_paths = sorted(
+            p for p in d.glob(f"{SOURCE_VIDEO_STEM}.*") if not p.name.endswith(".part")
+        )
         if not source_paths:
             return ResourceState.DELETED, None, "源视频文件缺失，资源已删除"
 

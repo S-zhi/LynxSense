@@ -21,6 +21,7 @@ from src.config import settings
 from src.handler import health, srt, subtitle_editor, tasks, storage, translation_engines
 
 from src.handler.deps import get_store
+from src.service.runner import recover_interrupted_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +58,20 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _scan_missing_terminal() -> None:
-        """启动时扫一遍终态 SUCCESS 任务，丢失资源的降级为 MISSING。
+        """启动时校验终态资源，并恢复所有未完成任务。
 
-        解决问题：服务重启后，磁盘产物已不在的"成功"任务不再被当作可用。
-        该操作幂等；运行中任务（status != SUCCESS）不会被触碰。
+        SUCCESS 任务的磁盘产物已不在时降级为 MISSING；PENDING 和处理中任务
+        重新入队，由流水线根据已有中间产物断点续跑。两项操作都可重复执行。
         """
         downgraded = tasks.scan_missing_terminal(get_store(), data_dir=settings.data_dir)
         if downgraded:
             logger.warning(
                 "启动扫描：以下任务产物已丢失，已降级为 MISSING: %s", downgraded
             )
+
+        recovered = recover_interrupted_tasks()
+        if recovered:
+            logger.warning("启动恢复：以下未完成任务已重新入队: %s", recovered)
 
     return app
 

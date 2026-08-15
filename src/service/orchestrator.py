@@ -79,7 +79,7 @@ def run_pipeline(
     api_key: Optional[str] = None,
     engine_config=None,
 ) -> PipelineEvent:
-    """顺序执行五步。成功返回最终 SUCCESS 事件；失败发 FAILED 事件并抛出。"""
+    """顺序执行五步，并按已有产物从最近完成的阶段继续。"""
     tid = params.task_id
     state = {"progress": 0, "step": None}
 
@@ -102,14 +102,22 @@ def run_pipeline(
 
         return cb
 
+    def artifact_available(resolver) -> bool:
+        resource_state, path, _ = resolver(tid)
+        return resource_state == ResourceState.AVAILABLE and path is not None
+
     try:
         emit("DOWNLOADING", 0)
 
-        # 第①步获取源视频：上传模式复用本地文件、跳过下载；链接模式走 yt-dlp。
+        # 第①步获取源视频：已有完整源文件时跳过下载；上传模式始终复用本地文件。
         if params.source_type == "upload":
             video_path = _locate_uploaded_source(tid)
             title = params.title or video_path.stem
             emit("DOWNLOADING", 20)  # 本地视频已就位，"下载/载入"阶段直接完成
+        elif artifact_available(AssetResolver.resolve_source):
+            video_path = AssetResolver.require_source(tid)
+            title = params.title
+            emit("DOWNLOADING", 20)  # 服务重启后复用已完成的下载
         elif not params.need_subtitle:
             # 仅下载模式：下载占满整条进度，跳过识别/翻译/烧录
             dl = download_video(
@@ -133,38 +141,54 @@ def run_pipeline(
 
         emit("EXTRACTING", 20)
         video_path = AssetResolver.require_source(tid)
-        au = extract_audio(video_path, tid, on_progress=step_cb("EXTRACTING"))
+        if artifact_available(AssetResolver.resolve_audio):
+            audio_path = AssetResolver.require_audio(tid)
+            emit("EXTRACTING", 35)  # 服务重启后复用已完成的音频提取
+        else:
+            extract_audio(video_path, tid, on_progress=step_cb("EXTRACTING"))
+            audio_path = AssetResolver.require_audio(tid)
 
         emit("TRANSCRIBING", 35)
-        audio_path = AssetResolver.require_audio(tid)
-        tr = transcribe(
-            audio_path, tid,
-            language=params.source_lang,
-            model_name=params.model,
-            on_progress=step_cb("TRANSCRIBING"),
-        )
+        if artifact_available(AssetResolver.resolve_original_srt):
+            original_srt_path = AssetResolver.require_original_srt(tid)
+            emit("TRANSCRIBING", 65)  # 服务重启后复用已完成的识别结果
+        else:
+            tr = transcribe(
+                audio_path, tid,
+                language=params.source_lang,
+                model_name=params.model,
+                on_progress=step_cb("TRANSCRIBING"),
+            )
+            original_srt_path = AssetResolver.require_original_srt(tid)
 
         emit("TRANSLATING", 65)
-        original_srt_path = AssetResolver.require_original_srt(tid)
-        tl = translate_srt(
-            original_srt_path, tid,
-            params.source_lang, params.target_lang,
-            mode=params.mode,
-            on_progress=step_cb("TRANSLATING"),
-            api_key=api_key,
-            engine_config=engine_config,
-        )
+        if artifact_available(AssetResolver.resolve_translated_srt):
+            translated_srt_path = AssetResolver.require_translated_srt(tid)
+            emit("TRANSLATING", 85)  # 服务重启后复用已完成的翻译结果
+        else:
+            tl = translate_srt(
+                original_srt_path, tid,
+                params.source_lang, params.target_lang,
+                mode=params.mode,
+                on_progress=step_cb("TRANSLATING"),
+                api_key=api_key,
+                engine_config=engine_config,
+            )
+            translated_srt_path = AssetResolver.require_translated_srt(tid)
 
         emit("BURNING", 85)
         video_path = AssetResolver.require_source(tid)
-        translated_srt_path = AssetResolver.require_translated_srt(tid)
-        bn = burn_subtitles(
-            video_path, translated_srt_path, tid,
-            mode=params.burn,
-            on_progress=step_cb("BURNING"),
-        )
+        if artifact_available(AssetResolver.resolve_output_video):
+            output_video_path = AssetResolver.require_output_video(tid)
+            emit("BURNING", 100)  # 服务重启后复用已完成的烧录结果
+        else:
+            burn_subtitles(
+                video_path, translated_srt_path, tid,
+                mode=params.burn,
+                on_progress=step_cb("BURNING"),
+            )
+            output_video_path = AssetResolver.require_output_video(tid)
 
-        output_video_path = AssetResolver.require_output_video(tid)
         outputs = {"video": str(output_video_path), "subtitle": str(translated_srt_path)}
         final = PipelineEvent("SUCCESS", 100, None, title=title, outputs=outputs)
         on_event(final)
