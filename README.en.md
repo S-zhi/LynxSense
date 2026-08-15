@@ -88,7 +88,7 @@ uv sync
 
 ### 2.2 Configure Environment Variables
 
-The repository currently does not include `.env.example`; this needs to be added. Before first run, create `.env` in the project root:
+Copy the project-root `.env.example` to `.env` and fill in the real secrets:
 
 ```ini
 REPLICATE_API_TOKEN=your Replicate token
@@ -122,6 +122,12 @@ Expected response:
 
 ```json
 {"ok": true}
+```
+
+Check whether the full pipeline dependencies are ready:
+
+```bash
+curl http://localhost:8000/api/health/ready
 ```
 
 The frontend and API use the same `http://localhost:8000` entry point by default, so no additional configuration is normally required. To use another backend URL, run this in the browser console:
@@ -210,6 +216,7 @@ Interactive API docs are available at <http://localhost:8000/docs>.
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/health` | Health check |
+| `GET` | `/api/health/ready` | Redacted configuration, dependency, and storage readiness check |
 | `POST` | `/api/tasks` | Create a job and enqueue it |
 | `GET` | `/api/tasks` | List jobs |
 | `GET` | `/api/tasks/{id}` | Get job details |
@@ -226,6 +233,12 @@ Interactive API docs are available at <http://localhost:8000/docs>.
 | `POST` | `/api/storage/cleanup` | Execute cleanup by filters; RUNNING tasks are always skipped |
 | `GET` | `/api/storage/retention` | Read the simplified retention policy (days=null = unlimited) |
 | `PUT` | `/api/storage/retention` | Write the simplified retention policy |
+
+### 3.5 MCP Server
+
+The MCP Server is a separate adapter over the business API. It does not access SQLite or
+the pipeline directly. See [MCP Server documentation](docs/mcp-server.md) for startup
+commands and tool details.
 
 `POST /api/tasks` request body:
 
