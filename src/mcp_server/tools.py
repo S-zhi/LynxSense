@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
+
+from pydantic import Field
 
 from .business_client import BusinessApiClient, BusinessApiError
 
@@ -255,25 +257,89 @@ def register_tools(server: Any, api: BusinessApiClient | None = None) -> Subtitl
     """把工具注册到 MCP Server，同时返回可直接测试的工具集合。"""
     service = SubtitleMcpTools(api or BusinessApiClient())
 
-    @server.tool()
+    @server.tool(
+        name="check_subtitle_setup",
+        title="检查字幕处理环境",
+        description=(
+            "只读检查业务 API、必要密钥、FFmpeg、yt-dlp 和存储目录是否就绪。"
+            "这是处理视频前的必做步骤；不会返回任何密钥内容。若 error_code 为 "
+            "NOT_INITIALIZED，请根据 config_file 和 missing 提醒用户在业务项目的 .env "
+            "中配置并重启业务服务；若 agent_action 为 continue，才继续后续工具。"
+        ),
+    )
     async def check_subtitle_setup() -> dict[str, Any]:
         """检查业务服务、密钥、FFmpeg 和存储目录是否已初始化。"""
         return await service.check_subtitle_setup()
 
-    @server.tool()
-    async def probe_video(url: str) -> dict[str, Any]:
+    @server.tool(
+        name="probe_video",
+        title="预检查视频地址",
+        description=(
+            "只读预检查视频 URL 是否可解析和下载，不会下载媒体文件。"
+            "调用前先确认 check_subtitle_setup 没有返回 BUSINESS_UNAVAILABLE 或 NOT_INITIALIZED，"
+            "并且 capabilities.download=true；如果预检查失败，不要直接启动流水线，应把返回的错误信息告知用户并请求新的 URL。"
+        ),
+    )
+    async def probe_video(
+        url: Annotated[
+            str,
+            Field(
+                description="视频页面地址，必须是可访问的 http:// 或 https:// URL。",
+                min_length=1,
+            ),
+        ],
+    ) -> dict[str, Any]:
         """在不下载媒体文件的情况下检查视频 URL 是否可解析和下载。"""
         return await service.probe_video(url)
 
-    @server.tool()
+    @server.tool(
+        name="start_subtitle_pipeline",
+        title="启动字幕处理流水线",
+        description=(
+            "异步创建视频字幕处理任务，可能触发下载、语音识别、翻译和字幕烧录等外部副作用。"
+            "调用前必须先执行 check_subtitle_setup；需要时可先执行 probe_video。"
+            "成功后只使用返回的 task_id 调用 get_task_status 轮询，状态为 SUCCESS 后才能调用 "
+            "get_task_artifacts。初始化失败时不要把密钥作为参数传入，按返回的 config_file、missing "
+            "和 agent_action 指引用户配置业务服务。"
+        ),
+    )
     async def start_subtitle_pipeline(
-        url: str,
-        source_lang: str = "auto",
-        target_lang: str = "zh-CN",
-        mode: Literal["mono", "bilingual"] = "mono",
-        burn: Literal["hard", "soft"] = "hard",
-        model: str = "small",
-        need_subtitle: bool = True,
+        url: Annotated[
+            str,
+            Field(
+                description="视频页面地址，必须是可访问的 http:// 或 https:// URL。",
+                min_length=1,
+            ),
+        ],
+        source_lang: Annotated[
+            str,
+            Field(description="源语言代码；auto 表示自动识别。"),
+        ] = "auto",
+        target_lang: Annotated[
+            str,
+            Field(description="目标语言代码，默认 zh-CN。"),
+        ] = "zh-CN",
+        mode: Annotated[
+            Literal["mono", "bilingual"],
+            Field(description="字幕模式：mono 为单语字幕，bilingual 为双语字幕。"),
+        ] = "mono",
+        burn: Annotated[
+            Literal["hard", "soft"],
+            Field(
+                description=(
+                    "字幕输出方式：hard 会烧录到视频，需要 FFmpeg 的 libass 字幕滤镜；"
+                    "soft 只生成外挂字幕，兼容性更高。"
+                ),
+            ),
+        ] = "hard",
+        model: Annotated[
+            str,
+            Field(description="语音识别模型名称，默认 small。"),
+        ] = "small",
+        need_subtitle: Annotated[
+            bool,
+            Field(description="是否执行语音识别和翻译；false 时只执行下载相关能力。"),
+        ] = True,
     ) -> dict[str, Any]:
         """异步启动下载、语音识别、字幕翻译和字幕烧录流水线。"""
         return await service.start_subtitle_pipeline(
@@ -286,23 +352,71 @@ def register_tools(server: Any, api: BusinessApiClient | None = None) -> Subtitl
             need_subtitle=need_subtitle,
         )
 
-    @server.tool()
-    async def get_task_status(task_id: str) -> dict[str, Any]:
+    @server.tool(
+        name="get_task_status",
+        title="查询字幕任务状态",
+        description=(
+            "只读查询任务状态、进度、当前阶段和错误信息。"
+            "对 start_subtitle_pipeline 返回的 task_id 进行轮询；只有 status=SUCCESS 时才调用 "
+            "get_task_artifacts，status=FAILED 时可询问用户是否调用 retry_task。"
+        ),
+    )
+    async def get_task_status(
+        task_id: Annotated[
+            str,
+            Field(description="start_subtitle_pipeline 或 retry_task 返回的任务 ID。", min_length=1),
+        ],
+    ) -> dict[str, Any]:
         """查询任务状态、进度、当前阶段和错误信息。"""
         return await service.get_task_status(task_id)
 
-    @server.tool()
-    async def get_task_artifacts(task_id: str) -> dict[str, Any]:
+    @server.tool(
+        name="get_task_artifacts",
+        title="获取字幕任务产物",
+        description=(
+            "获取成功任务的视频和字幕下载地址。调用前必须先用 get_task_status 确认 status=SUCCESS；"
+            "如果任务尚未完成或产物丢失，会返回 TASK_NOT_READY 或 RESOURCE_MISSING，"
+            "不要把未就绪的结果当作下载地址。"
+        ),
+    )
+    async def get_task_artifacts(
+        task_id: Annotated[
+            str,
+            Field(description="已成功完成的任务 ID。", min_length=1),
+        ],
+    ) -> dict[str, Any]:
         """获取成功任务的视频和译文字幕下载地址。"""
         return await service.get_task_artifacts(task_id)
 
-    @server.tool()
-    async def list_tasks(limit: int = 20) -> dict[str, Any]:
+    @server.tool(
+        name="list_tasks",
+        title="列出字幕处理任务",
+        description="只读列出最近的字幕处理任务，适合用户要求查看历史任务或寻找 task_id 时使用。",
+    )
+    async def list_tasks(
+        limit: Annotated[
+            int,
+            Field(description="最多返回的任务数量，范围 1 到 100，默认 20。", ge=1, le=100),
+        ] = 20,
+    ) -> dict[str, Any]:
         """列出最近的字幕处理任务。"""
         return await service.list_tasks(limit)
 
-    @server.tool()
-    async def retry_task(task_id: str) -> dict[str, Any]:
+    @server.tool(
+        name="retry_task",
+        title="重试失败字幕任务",
+        description=(
+            "重新执行一个失败的字幕处理任务，会产生新的异步处理副作用。"
+            "只对 status=FAILED 的任务使用；调用后继续用返回的 task_id 调用 get_task_status，"
+            "不要对仍在运行或已成功的任务重复重试。"
+        ),
+    )
+    async def retry_task(
+        task_id: Annotated[
+            str,
+            Field(description="status=FAILED 的任务 ID。", min_length=1),
+        ],
+    ) -> dict[str, Any]:
         """重新执行一个失败的字幕处理任务。"""
         return await service.retry_task(task_id)
 

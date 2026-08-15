@@ -57,6 +57,26 @@ SUBTRANS_MCP_TRANSPORT=streamable-http \
 - `list_tasks`：查看最近任务。
 - `retry_task`：重试失败任务。
 
+## Agent 自主发现与执行
+
+MCP Server 在服务级 metadata 中提供了工作流 instructions，每个工具也提供了明确的用途、前置条件、参数说明和
+下一步动作。完整的 Agent 行为规范通过 MCP Resource `subtitles://agent-guide` 暴露，Host 可以在连接后读取该资源。
+
+Agent 应遵循：
+
+```text
+check_subtitle_setup → probe_video → start_subtitle_pipeline
+→ get_task_status（轮询）→ get_task_artifacts（仅 SUCCESS）
+```
+
+`check_subtitle_setup` 返回的 `agent_action` 是机器可执行的决策提示：
+
+- `continue`：可以继续处理；
+- `ask_user_to_configure`：根据 `config_file` 和 `missing` 提示用户修改固定 `.env` 并重启业务服务；
+- `use_soft_burn_or_install_libass`：询问是否使用 `burn=soft`，或提示安装带 libass 的 FFmpeg。
+
+Agent 不应把 API Key 作为工具参数传递，也不应直接读写业务数据库或底层流水线。
+
 ## 初始化失败时的行为
 
 MCP 不会要求模型传递 API Key，也不会把密钥写入 MCP 配置。业务配置缺失时，
