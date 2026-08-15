@@ -127,7 +127,8 @@ class ProbeStore:
     # ---------- 查 ----------
     def list(self, limit: int = 50) -> List[ProbeRecord]:
         """按时间倒序列出最近 limit 条；limit<=0 表示不限制。"""
-        sql = "SELECT * FROM probe_records ORDER BY created_at DESC"
+        # created_at is millisecond precision; rowid keeps same-ms writes newest-first.
+        sql = "SELECT * FROM probe_records ORDER BY created_at DESC, rowid DESC"
         params: tuple = ()
         if limit and limit > 0:
             sql += " LIMIT ?"
