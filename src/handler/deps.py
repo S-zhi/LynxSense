@@ -31,6 +31,11 @@ def get_translation_engine_store() -> TranslationEngineStore:
     global _translation_engine_store
     if _translation_engine_store is None:
         _translation_engine_store = TranslationEngineStore(settings.db_path)
+        _translation_engine_store.ensure_default_deepseek(
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+        )
     return _translation_engine_store
 
 

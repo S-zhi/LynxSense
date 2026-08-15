@@ -16,7 +16,7 @@ const STATUS = {
 let engines = [];
 
 function statusView(value) {
-  return STATUS[value] || STATUS.UNKNOWN;
+  return STATUS[String(value || "").toLowerCase()] || STATUS.UNKNOWN;
 }
 
 function typeLabel(value) {
