@@ -117,3 +117,27 @@ def test_run_missing_task_skips(store, monkeypatch):
     monkeypatch.setattr(runner, "run_pipeline", lambda *a, **k: called.append(1))
     runner._run("nonexistent")
     assert not called  # 任务不存在时不应调用 run_pipeline
+
+
+def test_recover_interrupted_tasks_requeues_only_non_terminal(store, monkeypatch):
+    running = _make_task(store)
+    pending = _make_task(store)
+    success = _make_task(store)
+    failed = _make_task(store)
+    store.update(running, status="TRANSLATING", progress=70, current_step="TRANSLATING")
+    store.update(pending, status="PENDING")
+    store.update(success, status="SUCCESS", progress=100)
+    store.update(failed, status="FAILED", error="boom")
+
+    submitted = []
+
+    class FakeExecutor:
+        def submit(self, fn, *args):
+            submitted.append((fn, args))
+
+    monkeypatch.setattr(runner, "_executor", FakeExecutor())
+
+    recovered = runner.recover_interrupted_tasks()
+
+    assert set(recovered) == {running, pending}
+    assert {args for _, args in submitted} == {(running,), (pending,)}

@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from src.config import settings
 from src.service.orchestrator import PipelineEvent, PipelineParams, run_pipeline
 from src.service.asset_resolver import ResourceError
-from src.store import TaskStore
+from src.store import STATUSES, TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,24 @@ _executor = ThreadPoolExecutor(
     thread_name_prefix="pipeline",
 )
 _store = TaskStore(settings.db_path)
+_RECOVERABLE_STATUSES = set(STATUSES) - {"SUCCESS", "FAILED"}
 
 
 def enqueue_pipeline(task_id: str) -> None:
     """提交一个任务去后台执行（不阻塞调用方）。"""
     _executor.submit(_run, task_id)
     logger.info("已入队: %s", task_id)
+
+
+def recover_interrupted_tasks() -> list[str]:
+    """服务启动时重新提交未完成任务，避免任务永久停留在处理中。"""
+    recovered: list[str] = []
+    for rec in _store.list():
+        if rec.status not in _RECOVERABLE_STATUSES:
+            continue
+        enqueue_pipeline(rec.id)
+        recovered.append(rec.id)
+    return recovered
 
 
 def _run(task_id: str) -> None:
