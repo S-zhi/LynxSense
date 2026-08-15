@@ -28,7 +28,4 @@
 .engine-card__foot { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:2px; }
 .engine-card__meta { min-height:17px; color:var(--text-3); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .engine-card__actions { display:flex; gap:7px; flex:none; }
-.engine-empty { display:grid; place-items:center; gap:7px; min-height:210px; color:var(--text-3); border:1px dashed var(--border-2); border-radius:var(--r-row); text-align:center; }
-.engine-empty i { color:var(--accent); font-size:28px; }
-.engine-empty strong { color:var(--text); font-size:14px; }
 @media (max-width:760px) { .engine-list { grid-template-columns:1fr; } .engine-card__grid { grid-template-columns:1fr; } }

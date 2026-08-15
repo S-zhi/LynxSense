@@ -100,10 +100,8 @@ async function refresh(autoCheck = true) {
 
 function render() {
   const list = $("#engineList");
-  const empty = $("#engineEmpty");
-  if (!list || !empty) return;
+  if (!list) return;
   list.innerHTML = engines.map(cardTemplate).join("");
-  empty.hidden = engines.length > 0;
 }
 
 async function onAction(event) {
