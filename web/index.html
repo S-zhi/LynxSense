@@ -11,6 +11,10 @@
     <link rel="stylesheet" href="styles/console.css" />
     <link rel="stylesheet" href="styles/queue.css" />
     <link rel="stylesheet" href="styles/preview.css" />
+    <link rel="stylesheet" href="styles/editor.css" />
+    <link rel="stylesheet" href="styles/probe.css" />
+    <link rel="stylesheet" href="styles/storage.css" />
+    <link rel="stylesheet" href="styles/translation-settings.css" />
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
   </head>
   <body>
@@ -32,18 +36,87 @@
           <button class="nav__item" type="button" data-view="preview">
             <i class="ph ph-monitor-play" aria-hidden="true"></i><span>视频预览</span>
           </button>
+          <button class="nav__item" type="button" data-view="editor">
+            <i class="ph ph-text-aa" aria-hidden="true"></i><span>字幕编辑</span>
+          </button>
+          <button class="nav__item" type="button" data-view="probe">
+            <i class="ph ph-pulse" aria-hidden="true"></i><span>下载测试</span>
+          </button>
+          <button class="nav__item" type="button" data-view="storage">
+            <i class="ph ph-hard-drives" aria-hidden="true"></i><span>本地资源</span>
+          </button>
+          <button class="nav__item" type="button" data-view="translation-settings">
+            <i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>高级设置</span>
+          </button>
         </nav>
 
         <div class="sidebar__spacer"></div>
 
         <section class="supported-sites" aria-labelledby="supportedSitesTitle">
-          <h2 id="supportedSitesTitle">支持网站</h2>
-          <div class="supported-sites__cluster">
-            <a class="site-icon" href="https://www.pornhub.com/" target="_blank" rel="noreferrer" title="Pornhub" aria-label="打开 Pornhub">
-              <span class="site-icon__text">Porn</span>
-              <span class="site-icon__hub">hub</span>
-            </a>
+          <div class="supported-sites__head">
+            <h2 id="supportedSitesTitle">支持网站</h2>
+            <span class="supported-sites__verified"><i class="ph ph-seal-check" aria-hidden="true"></i> 10 已验证</span>
           </div>
+          <div class="supported-sites__viewport" aria-label="已验证支持的网站，自动滚动展示">
+            <div class="supported-sites__track">
+              <div class="supported-sites__group">
+                <a class="site-icon site-icon--youtube" href="https://www.youtube.com/watch?v=aqz-KE-bpKQ" target="_blank" rel="noreferrer" title="YouTube · 已验证" aria-label="打开 YouTube">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/youtube/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">YouTube</span>
+                </a>
+                <a class="site-icon site-icon--dailymotion" href="https://www.dailymotion.com/video/x5q9zr" target="_blank" rel="noreferrer" title="Dailymotion · 已验证" aria-label="打开 Dailymotion">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/dailymotion/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Dailymotion</span>
+                </a>
+                <a class="site-icon site-icon--tiktok" href="https://www.tiktok.com/@scout2015/video/6718335390845095173" target="_blank" rel="noreferrer" title="TikTok · 已验证" aria-label="打开 TikTok">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/tiktok/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">TikTok</span>
+                </a>
+                <a class="site-icon site-icon--wikimedia" href="https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_4K.webm" target="_blank" rel="noreferrer" title="Wikimedia Commons · 已验证" aria-label="打开 Wikimedia Commons">
+                  <span class="site-icon__mark"><img src="https://commons.wikimedia.org/favicon.ico" alt="" loading="eager" /></span><span class="site-icon__label">Wikimedia</span>
+                </a>
+                <a class="site-icon site-icon--peertube" href="https://video.blender.org/w/pAQiVCgv2CsLg79KKXUoMw" target="_blank" rel="noreferrer" title="PeerTube · 已验证" aria-label="打开 PeerTube">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/peertube/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">PeerTube</span>
+                </a>
+                <a class="site-icon site-icon--niconico" href="https://www.nicovideo.jp/watch/sm9" target="_blank" rel="noreferrer" title="Niconico · 已验证" aria-label="打开 Niconico">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/niconico/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Niconico</span>
+                </a>
+                <a class="site-icon site-icon--rumble" href="https://rumble.com/v6wvon4-digital-concentration-camp.html" target="_blank" rel="noreferrer" title="Rumble · 已验证" aria-label="打开 Rumble">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/rumble/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Rumble</span>
+                </a>
+                <a class="site-icon site-icon--soundcloud" href="https://soundcloud.com/allerlei_von_nicolai/creatures" target="_blank" rel="noreferrer" title="SoundCloud · 已验证" aria-label="打开 SoundCloud">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/soundcloud/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">SoundCloud</span>
+                </a>
+                <a class="site-icon site-icon--bandcamp" href="https://noseyuk.bandcamp.com/track/free-dubstep-instrumental-2013-free-download" target="_blank" rel="noreferrer" title="Bandcamp · 已验证" aria-label="打开 Bandcamp">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/bandcamp/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Bandcamp</span>
+                </a>
+                <a class="site-icon site-icon--twitch" href="https://www.twitch.tv/videos/987654321" target="_blank" rel="noreferrer" title="Twitch · 已验证" aria-label="打开 Twitch">
+                  <span class="site-icon__mark"><img src="https://cdn.simpleicons.org/twitch/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Twitch</span>
+                </a>
+              </div>
+              <div class="supported-sites__group" aria-hidden="true" inert>
+                <a class="site-icon site-icon--youtube" href="https://www.youtube.com/watch?v=aqz-KE-bpKQ" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/youtube/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">YouTube</span></a>
+                <a class="site-icon site-icon--dailymotion" href="https://www.dailymotion.com/video/x5q9zr" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/dailymotion/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Dailymotion</span></a>
+                <a class="site-icon site-icon--tiktok" href="https://www.tiktok.com/@scout2015/video/6718335390845095173" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/tiktok/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">TikTok</span></a>
+                <a class="site-icon site-icon--wikimedia" href="https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_4K.webm" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://commons.wikimedia.org/favicon.ico" alt="" loading="eager" /></span><span class="site-icon__label">Wikimedia</span></a>
+                <a class="site-icon site-icon--peertube" href="https://video.blender.org/w/pAQiVCgv2CsLg79KKXUoMw" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/peertube/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">PeerTube</span></a>
+                <a class="site-icon site-icon--niconico" href="https://www.nicovideo.jp/watch/sm9" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/niconico/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Niconico</span></a>
+                <a class="site-icon site-icon--rumble" href="https://rumble.com/v6wvon4-digital-concentration-camp.html" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/rumble/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Rumble</span></a>
+                <a class="site-icon site-icon--soundcloud" href="https://soundcloud.com/allerlei_von_nicolai/creatures" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/soundcloud/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">SoundCloud</span></a>
+                <a class="site-icon site-icon--bandcamp" href="https://noseyuk.bandcamp.com/track/free-dubstep-instrumental-2013-free-download" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/bandcamp/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Bandcamp</span></a>
+                <a class="site-icon site-icon--twitch" href="https://www.twitch.tv/videos/987654321" tabindex="-1" aria-hidden="true"><span class="site-icon__mark"><img src="https://cdn.simpleicons.org/twitch/ffffff" alt="" loading="eager" /></span><span class="site-icon__label">Twitch</span></a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings" aria-labelledby="settingsTitle">
+          <h2 id="settingsTitle" class="settings__title">通知</h2>
+          <label class="settings__row" for="notifyToggle">
+            <span class="settings__name">任务完成 / 失败时弹通知</span>
+            <span class="settings__switch">
+              <input id="notifyToggle" type="checkbox" />
+              <span class="settings__slider" aria-hidden="true"></span>
+            </span>
+          </label>
+          <p class="settings__hint" id="notifyHint">浏览器未授权时无法弹出通知。</p>
         </section>
 
         <div class="sidebar__foot">
@@ -65,20 +138,37 @@
                 class="console__input"
                 id="url"
                 name="url"
-                type="url"
+                type="text"
                 inputmode="url"
                 autocomplete="off"
                 aria-label="视频链接"
-                placeholder="粘贴视频页面地址"
-                required
+                placeholder="粘贴视频页面地址，或拖入本地视频"
               />
+              <label class="iconbtn console__upload" for="videoFile" id="uploadBtn" role="button" tabindex="0" aria-label="选择本地视频" title="选择本地视频">
+                <i class="ph ph-upload-simple" aria-hidden="true">
+                  <input
+                    class="console__file"
+                    id="videoFile"
+                    name="videoFile"
+                    type="file"
+                    accept="video/*,.mp4,.mov,.mkv,.webm,.avi,.m4v,.flv,.ts,.mpeg,.mpg,.wmv"
+                  />
+                </i>
+              </label>
               <button class="btn btn--primary console__go" type="submit" id="submitBtn">
                 <i class="ph ph-play" aria-hidden="true"></i><span>开始处理</span>
               </button>
             </div>
-            <p class="console__hint" id="urlHint">粘贴单个视频页面地址，回车或点击开始处理</p>
+            <p class="console__hint" id="urlHint">粘贴单个视频页面地址，或把本地视频拖进输入框</p>
 
             <div class="params">
+              <fieldset class="param" style="border:0;margin:0;padding:0">
+                <span class="param__label">是否需要字幕</span>
+                <div class="segmented" role="radiogroup" aria-label="是否需要字幕">
+                  <label class="segmented__opt"><input type="radio" name="needSubtitle" value="on" checked /><span>需要</span></label>
+                  <label class="segmented__opt"><input type="radio" name="needSubtitle" value="off" /><span>仅下载</span></label>
+                </div>
+              </fieldset>
               <div class="param">
                 <span class="param__label">源语言</span>
                 <select class="select" id="sourceLang" name="sourceLang" aria-label="源语言">
@@ -88,11 +178,7 @@
               <div class="param">
                 <span class="param__label">目标语言</span>
                 <select class="select" id="targetLang" name="targetLang" aria-label="目标语言">
-                  <option value="zh-CN" selected>简体中文</option>
-                  <option value="zh-TW">繁体中文</option>
-                  <option value="en">英语</option>
-                  <option value="ja">日语</option>
-                  <option value="ko">韩语</option>
+                  <option value="zh-CN" selected>加载中</option>
                 </select>
               </div>
               <fieldset class="param" style="border:0;margin:0;padding:0">
@@ -147,6 +233,279 @@
             </aside>
           </div>
         </section>
+
+        <!-- ============ 字幕编辑 ============ -->
+        <section class="view" data-view="editor" id="view-editor">
+          <div class="editor">
+            <aside class="editor__rail" aria-label="可选任务">
+              <div class="editor__railhead">
+                <h2>任务</h2>
+                <span class="editor__hint" id="editorHint">选一个任务开始编辑</span>
+              </div>
+              <div class="editor__list" id="editorList"></div>
+            </aside>
+
+            <section class="editor__main">
+              <header class="editor__head">
+                <div class="editor__headtitle">
+                  <h2 id="editorTitle">字幕编辑</h2>
+                  <span class="editor__sub" id="editorSub">左侧选任务，逐条对照编辑原文和译文</span>
+                </div>
+                <div class="editor__actions" id="editorActions" hidden>
+                  <button class="btn btn--ghost btn--sm" id="editorAdd" type="button" title="在末尾追加一条空白字幕">
+                    <i class="ph ph-plus"></i><span>新增条目</span>
+                  </button>
+                  <span class="editor__sep" aria-hidden="true"></span>
+                  <label class="editor__version" title="不填则覆盖原文件；填了则保存为版本文件">
+                    <span>版本</span>
+                    <input class="editor__versioninput" id="editorVersion" type="text" placeholder="不填=覆盖" maxlength="16" />
+                  </label>
+                  <button class="btn btn--ghost btn--sm" id="editorSave" type="button">
+                    <i class="ph ph-floppy-disk"></i><span>保存</span>
+                  </button>
+                  <button class="btn btn--reburn btn--sm" id="editorReburn" type="button" title="基于当前译文重新烧录成品">
+                    <i class="ph ph-fire"></i><span>重新烧录</span>
+                  </button>
+                </div>
+              </header>
+
+              <div class="editor__body">
+                <div class="editor__subs" id="editorSubs"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 下载测试 ============ -->
+        <section class="view" data-view="probe" id="view-probe">
+          <div class="probe">
+            <header class="probe__head">
+              <div>
+                <h2>下载测试</h2>
+                <p>检查链接是否能被 yt-dlp 解析并找到可下载格式。</p>
+              </div>
+              <span class="probe__badge"><i class="ph ph-hard-drives" aria-hidden="true"></i>不下载文件</span>
+            </header>
+
+            <form class="probe__panel" id="probeForm" novalidate>
+              <div class="probe__bar" id="probeBar">
+                <span class="probe__icon" aria-hidden="true"><i class="ph ph-link-simple"></i></span>
+                <input
+                  class="probe__input"
+                  id="probeUrl"
+                  name="probeUrl"
+                  type="url"
+                  inputmode="url"
+                  autocomplete="off"
+                  aria-label="测试链接"
+                  placeholder="粘贴要测试的视频页面地址"
+                  required
+                />
+                <button class="btn btn--primary probe__go" id="probeBtn" type="submit">
+                  <i class="ph ph-pulse" aria-hidden="true"></i><span>开始测试</span>
+                </button>
+              </div>
+              <p class="probe__hint" id="probeHint">等待输入链接</p>
+            </form>
+
+            <div class="probe-result is-idle" id="probeResult" aria-live="polite">
+              <div class="probe-result__icon"><i class="ph ph-link" aria-hidden="true"></i></div>
+              <div class="probe-result__body">
+                <div class="probe-result__title">未开始</div>
+                <div class="probe-result__desc">结果会显示在这里。</div>
+              </div>
+            </div>
+
+            <!-- 测试历史：所有 probe 调用都会落库一份，方便回看与排查 -->
+            <section class="probe-history" aria-label="测试历史">
+              <header class="probe-history__head">
+                <h3>测试历史</h3>
+                <div class="probe-history__actions">
+                  <button class="btn btn--ghost btn--sm" id="probeHistoryRefresh" type="button">
+                    <i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span>刷新</span>
+                  </button>
+                  <button class="btn btn--ghost btn--sm probe-history__clear" id="probeHistoryClear" type="button">
+                    <i class="ph ph-trash" aria-hidden="true"></i><span>清空</span>
+                  </button>
+                </div>
+              </header>
+              <p class="probe-history__hint" id="probeHistoryHint">点击上方"刷新"加载历史记录。</p>
+              <ul class="probe-history__list" id="probeHistoryList"></ul>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 本地资源治理 ============ -->
+        <section class="view" data-view="storage" id="view-storage">
+          <div class="storage">
+            <header class="storage__head">
+              <div>
+                <h2>本地资源</h2>
+                <p>查看任务产物的占用，按条件预览并安全清理；运行中任务会被自动跳过。</p>
+              </div>
+              <button class="btn btn--ghost btn--sm storage__refresh" id="storageRefresh" type="button">
+                <i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span>刷新</span>
+              </button>
+            </header>
+
+            <!-- 顶部统计卡片 -->
+            <div class="storage__cards" id="storageCards" aria-live="polite">
+              <div class="storage-card">
+                <div class="storage-card__label"><i class="ph ph-database" aria-hidden="true"></i>总占用</div>
+                <div class="storage-card__value" id="statTotal">—</div>
+                <div class="storage-card__sub" id="statTotalSub">尚未加载</div>
+              </div>
+              <div class="storage-card">
+                <div class="storage-card__label"><i class="ph ph-list-checks" aria-hidden="true"></i>任务数</div>
+                <div class="storage-card__value" id="statTasks">—</div>
+                <div class="storage-card__sub">含已完成 / 失败</div>
+              </div>
+              <div class="storage-card">
+                <div class="storage-card__label"><i class="ph ph-trash" aria-hidden="true"></i>可清理</div>
+                <div class="storage-card__value" id="statCleanable">—</div>
+                <div class="storage-card__sub" id="statCleanableSub">非运行中任务</div>
+              </div>
+              <div class="storage-card">
+                <div class="storage-card__label"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i>保留</div>
+                <div class="storage-card__value" id="statRetention">—</div>
+                <div class="storage-card__sub">默认不限</div>
+              </div>
+            </div>
+
+            <!-- 筛选 + 操作条 -->
+            <div class="storage__bar">
+              <div class="storage__filters">
+                <label class="storage__filter">
+                  <span>产物类别</span>
+                  <select class="select select--sm" id="storageKind">
+                    <option value="">全部</option>
+                    <option value="source">源视频</option>
+                    <option value="audio">音频</option>
+                    <option value="original_srt">原文字幕</option>
+                    <option value="translated_srt">译文字幕</option>
+                    <option value="output">成品视频</option>
+                    <option value="other">其它</option>
+                  </select>
+                </label>
+                <label class="storage__filter">
+                  <span>仅保留</span>
+                  <select class="select select--sm" id="storageRetention">
+                    <option value="0">不限</option>
+                    <option value="1">1 天以上</option>
+                    <option value="7">7 天以上</option>
+                    <option value="30">30 天以上</option>
+                    <option value="90">90 天以上</option>
+                  </select>
+                </label>
+              </div>
+              <div class="storage__actions">
+                <span class="storage__selinfo" id="storageSelInfo">未选择</span>
+                <button class="btn btn--ghost btn--sm" id="storageSelectAll" type="button">
+                  <i class="ph ph-check-square" aria-hidden="true"></i><span>全选</span>
+                </button>
+                <button class="btn btn--ghost btn--sm" id="storageSelectNone" type="button">
+                  <i class="ph ph-square" aria-hidden="true"></i><span>清空</span>
+                </button>
+                <button class="btn btn--primary btn--sm" id="storagePreview" type="button" disabled>
+                  <i class="ph ph-eye" aria-hidden="true"></i><span>预览清理</span>
+                </button>
+                <button class="btn btn--danger btn--sm" id="storageApply" type="button" disabled>
+                  <i class="ph ph-trash" aria-hidden="true"></i><span>执行清理</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 预览结果摘要 -->
+            <div class="storage__preview" id="storagePreviewBox" hidden>
+              <div class="storage__preview-head">
+                <strong>预览结果</strong>
+                <button class="iconbtn" id="storagePreviewClose" type="button" aria-label="关闭预览">
+                  <i class="ph ph-x" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="storage__preview-body" id="storagePreviewBody"></div>
+            </div>
+
+            <!-- 任务 / 产物表格 -->
+            <div class="storage__tablewrap">
+              <table class="storage-table" id="storageTable">
+                <thead>
+                  <tr>
+                    <th class="storage-table__check">
+                      <label class="storage-check storage-check--header">
+                        <input class="storage-check__input" type="checkbox" id="storageCheckAll" aria-label="全选" />
+                        <span class="storage-check__box" aria-hidden="true"></span>
+                      </label>
+                    </th>
+                    <th class="storage-table__title">任务</th>
+                    <th class="storage-table__status">状态</th>
+                    <th class="storage-table__artifacts">产物</th>
+                    <th class="storage-table__size num">占用</th>
+                    <th class="storage-table__age">创建</th>
+                  </tr>
+                </thead>
+                <tbody id="storageTbody"></tbody>
+              </table>
+              <div class="storage__empty" id="storageEmpty" hidden>
+                <i class="ph ph-tray" aria-hidden="true"></i>
+                <div>暂无任务产物</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 高级设置 ============ -->
+        <section class="view" data-view="translation-settings" id="view-translation-settings">
+          <div class="advanced-settings" id="advancedSettings">
+            <nav class="advanced-tabs" role="tablist" aria-label="高级设置分类">
+              <button class="advanced-tab is-active" id="settings-tab-replicate" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-replicate" data-settings-tab="replicate">
+                <i class="ph ph-wallet" aria-hidden="true"></i><span>Replicate 账户</span>
+              </button>
+              <button class="advanced-tab" id="settings-tab-engines" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-engines" data-settings-tab="engines" tabindex="-1">
+                <i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>翻译引擎</span>
+              </button>
+            </nav>
+
+            <div class="advanced-tab-panel" id="settings-panel-replicate" role="tabpanel" aria-labelledby="settings-tab-replicate" data-settings-panel="replicate">
+              <section class="replicate-billing" id="replicateBilling" aria-live="polite">
+                <div class="replicate-billing__head">
+                  <div class="replicate-billing__identity">
+                    <span class="replicate-billing__icon"><i class="ph ph-wallet"></i></span>
+                    <div>
+                      <span class="eyebrow">ACCOUNT / BILLING</span>
+                      <h2>Replicate 账户余额</h2>
+                      <p>通过官方账户 API 验证 Token；如果官方未返回余额，则保留账单页入口。</p>
+                    </div>
+                  </div>
+                  <button class="btn btn--ghost btn--sm" id="replicateBalanceRefresh" type="button">
+                    <i class="ph ph-arrows-clockwise"></i><span>刷新</span>
+                  </button>
+                </div>
+                <div class="replicate-billing__body" id="replicateBalanceBody">
+                  <span class="engine-status engine-status--checking"><span>正在准备查询…</span></span>
+                </div>
+              </section>
+            </div>
+
+            <div class="advanced-tab-panel" id="settings-panel-engines" role="tabpanel" aria-labelledby="settings-tab-engines" data-settings-panel="engines" hidden>
+              <div class="translation-settings">
+                <header class="translation-settings__head">
+                  <div>
+                    <span class="eyebrow">ADVANCED / TRANSLATION</span>
+                    <h2>翻译引擎</h2>
+                    <p>创建多个服务商配置，按 OpenAI Compatible 或 Anthropic Compatible 协议接入。</p>
+                  </div>
+                  <button class="btn btn--primary" id="engineAdd" type="button"><i class="ph ph-plus"></i><span>新增配置</span></button>
+                </header>
+                <div class="translation-settings__notice">
+                  <i class="ph ph-shield-check" aria-hidden="true"></i>
+                  <span>API Key 只用于后端请求，页面仅显示脱敏状态；保存后可自动检测连接和模型可用性。</span>
+                </div>
+                <div class="engine-list" id="engineList" aria-live="polite"></div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -154,5 +513,7 @@
 
     <script src="config.js"></script>
     <script type="module" src="js/main.js"></script>
+    <script type="module" src="js/ui-replicate-billing.js"></script>
+    <script type="module" src="js/ui-advanced-settings.js"></script>
   </body>
 </html>

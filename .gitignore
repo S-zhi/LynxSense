@@ -12,4 +12,8 @@ logs
 app.db
 app.db-shm
 app.db-wal
+.ci
 
+
+/README.yt-dlp.zh-CN.md
+/skill-todo.md

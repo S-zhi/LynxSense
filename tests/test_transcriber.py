@@ -110,11 +110,12 @@ def test_transcribe_with_remote_url(monkeypatch, tmp_path):
 def test_transcribe_with_local_file(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
     fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
-    _mock_replicate(monkeypatch, {"srt_file": "https://x/sub.srt"})
+    cap = _mock_replicate(monkeypatch, {"srt_file": "https://x/sub.srt"})
     monkeypatch.setattr(transcriber.httpx, "get", lambda url, timeout: SimpleNamespace(
         text=fake_srt, raise_for_status=lambda: None))
     res = transcribe(audio, "t1")
     assert res.segment_count == 1
+    assert cap["input"]["audio_path"].closed is True
 
 
 def test_transcribe_passes_language_and_model(monkeypatch, tmp_path):
@@ -179,18 +180,26 @@ def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
     fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
     calls = {"n": 0}
+    opened_files = []
 
     class FlakyClient:
         def __init__(self, *args, **kwargs):
             pass
 
         def run(self, ref, input):
+            opened_files.append(input["audio_path"])
+            assert input["audio_path"].closed is False
             calls["n"] += 1
             if calls["n"] == 1:
                 raise httpx.ReadTimeout("read timed out")
             return {"srt_file": "https://x/sub.srt"}
 
     monkeypatch.setattr(transcriber.replicate, "Client", FlakyClient)
+    monkeypatch.setattr(transcriber, "settings", SimpleNamespace(
+        replicate_whisper_model="fake-model",
+        replicate_timeout=30,
+        replicate_retries=2,
+    ))
     monkeypatch.setattr(transcriber.httpx, "get", lambda url, timeout: SimpleNamespace(
         text=fake_srt, raise_for_status=lambda: None))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)  # 跳过退避等待
@@ -198,21 +207,35 @@ def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
     res = transcribe(audio, "t1")
     assert res.segment_count == 1
     assert calls["n"] == 2  # 第一次超时 + 第二次成功
+    assert len(opened_files) == 2
+    assert opened_files[0] is not opened_files[1]
+    assert all(f.closed for f in opened_files)
 
 
 def test_transcribe_retries_exhausted(monkeypatch, tmp_path):
     """每次都超时，重试用尽后抛出清晰错误。"""
     audio = make_fake_audio(tmp_path)
+    opened_files = []
 
     class AlwaysTimeout:
         def __init__(self, *args, **kwargs):
             pass
 
         def run(self, ref, input):
+            opened_files.append(input["audio_path"])
+            assert input["audio_path"].closed is False
             raise httpx.ReadTimeout("read timed out")
 
     monkeypatch.setattr(transcriber.replicate, "Client", AlwaysTimeout)
+    monkeypatch.setattr(transcriber, "settings", SimpleNamespace(
+        replicate_whisper_model="fake-model",
+        replicate_timeout=30,
+        replicate_retries=2,
+    ))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)
 
     with pytest.raises(TranscribeError, match="多次超时"):
         transcribe(audio, "t1")
+    assert len(opened_files) == 2
+    assert opened_files[0] is not opened_files[1]
+    assert all(f.closed for f in opened_files)

@@ -15,7 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from src.config import settings
 from src.service.orchestrator import PipelineEvent, PipelineParams, run_pipeline
-from src.store import TaskStore
+from src.service.asset_resolver import ResourceError
+from src.store import STATUSES, TaskStore, TranslationEngineStore
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,25 @@ _executor = ThreadPoolExecutor(
     thread_name_prefix="pipeline",
 )
 _store = TaskStore(settings.db_path)
+_RECOVERABLE_STATUSES = set(STATUSES) - {"SUCCESS", "FAILED"}
+_engine_store = TranslationEngineStore(settings.db_path)
 
 
 def enqueue_pipeline(task_id: str) -> None:
     """提交一个任务去后台执行（不阻塞调用方）。"""
     _executor.submit(_run, task_id)
     logger.info("已入队: %s", task_id)
+
+
+def recover_interrupted_tasks() -> list[str]:
+    """服务启动时重新提交未完成任务，避免任务永久停留在处理中。"""
+    recovered: list[str] = []
+    for rec in _store.list():
+        if rec.status not in _RECOVERABLE_STATUSES:
+            continue
+        enqueue_pipeline(rec.id)
+        recovered.append(rec.id)
+    return recovered
 
 
 def _run(task_id: str) -> None:
@@ -49,6 +63,9 @@ def _run(task_id: str) -> None:
         burn=rec.burn,
         model=rec.model,
         engine=rec.engine,
+        source_type=rec.source_type,
+        need_subtitle=bool(rec.need_subtitle),
+        title=rec.title,
     )
 
     def on_event(ev: PipelineEvent) -> None:
@@ -66,8 +83,25 @@ def _run(task_id: str) -> None:
             fields["output_subtitle"] = ev.outputs.get("subtitle")
         _store.update(task_id, **fields)
 
+    engine_config = None
+    if rec.engine != "deepseek":
+        engine_config = _engine_store.get(rec.engine)
+        if engine_config is None:
+            _store.update(task_id, status="FAILED", error="翻译引擎配置不存在")
+            return
     try:
-        run_pipeline(params, on_event, api_key=settings.deepseek_api_key)
+        pipeline_kwargs = {
+            "api_key": settings.deepseek_api_key if rec.engine == "deepseek" else None,
+        }
+        # 仅在新引擎配置存在时传入扩展参数，保持旧版测试/调用方兼容。
+        if engine_config is not None:
+            pipeline_kwargs["engine_config"] = engine_config
+        run_pipeline(params, on_event, **pipeline_kwargs)
+    except ResourceError as e:
+        logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
+        cur = _store.get(task_id)
+        if cur is not None and cur.status != "FAILED":
+            _store.update(task_id, status="FAILED", error=str(e))
     except Exception:
         # run_pipeline 失败时已通过 on_event 写过 FAILED；这里兜底再确保一次
         logger.exception("流水线执行失败: %s", task_id)

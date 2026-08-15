@@ -88,12 +88,17 @@ function buildRow(t) {
   row.addEventListener("animationend", () => row.classList.remove("entering"), { once: true });
 
   // 元信息（静态）
-  row.querySelector(".qrow__meta").append(
-    tag(`${LANG_LABEL[t.sourceLang] || t.sourceLang} → ${LANG_LABEL[t.targetLang] || t.targetLang}`),
-    tag(t.mode === "bilingual" ? "双语对照" : "仅译文"),
-    tag(t.burn === "hard" ? "硬烧录" : "软字幕"),
-    tag("whisper " + t.model)
-  );
+  const metaBox = row.querySelector(".qrow__meta");
+  if (t.needSubtitle === false) {
+    metaBox.append(tag("仅下载视频"));
+  } else {
+    metaBox.append(
+      tag(`${LANG_LABEL[t.sourceLang] || t.sourceLang} → ${LANG_LABEL[t.targetLang] || t.targetLang}`),
+      tag(t.mode === "bilingual" ? "双语对照" : "仅译文"),
+      tag(t.burn === "hard" ? "硬烧录" : "软字幕"),
+      tag("whisper " + t.model)
+    );
+  }
 
   setHeader(row, t);
   applyDynamic(row, t);

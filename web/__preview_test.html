@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>preview test</title>
+    <link rel="stylesheet" href="styles/base.css" />
+    <link rel="stylesheet" href="styles/layout.css" />
+    <link rel="stylesheet" href="styles/console.css" />
+    <link rel="stylesheet" href="styles/queue.css" />
+    <link rel="stylesheet" href="styles/preview.css" />
+    <link rel="stylesheet" href="styles/probe.css" />
+    <style>
+      /* 用 <img> 忠实模拟真实 <video> 的渲染（object-fit:contain），poster 属性不可靠 */
+      .stage__screen img { width: 100%; height: 100%; display: block; object-fit: contain; background: #0d0e11; }
+    </style>
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+  </head>
+  <body>
+    <div class="container" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand__name">Subtitles AI</span></div>
+        <nav class="nav" id="nav">
+          <button class="nav__item" type="button"><i class="ph ph-rows"></i><span>任务</span></button>
+          <button class="nav__item is-active" type="button"><i class="ph ph-monitor-play"></i><span>视频预览</span></button>
+          <button class="nav__item" type="button"><i class="ph ph-pulse"></i><span>下载测试</span></button>
+        </nav>
+        <div class="sidebar__spacer"></div>
+        <div class="sidebar__foot"><button class="iconbtn"><i class="ph ph-moon"></i></button></div>
+      </aside>
+      <main class="content">
+        <section class="view is-active" data-view="preview" id="view-preview">
+          <div class="screening">
+            <div class="screening__stage" id="previewStage"></div>
+            <aside class="screening__rail">
+              <h2>已完成</h2>
+              <div class="screening__list" id="previewList"></div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      // 16:9 与 9:16 两种海报，用纯色 SVG 模拟视频画面区域，便于看清 letterbox 与裁切。
+      const poster = (w, h, label) =>
+        "data:image/svg+xml," +
+        encodeURIComponent(
+          `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'>
+             <rect width='100%' height='100%' fill='#3a56c8'/>
+             <rect x='2' y='2' width='${w - 4}' height='${h - 4}' fill='none' stroke='#9ab4ff' stroke-width='4'/>
+             <text x='50%' y='50%' fill='#fff' font-size='${Math.min(w, h) / 8}' font-family='sans-serif'
+               text-anchor='middle' dominant-baseline='middle'>${label}</text>
+           </svg>`
+        );
+
+      const orientation = new URLSearchParams(location.search).get("v") || "landscape";
+      // 效果页默认展示资源丢失场景；可用 ?state=ready / ?state=checking 查看其他状态。
+      const previewState = new URLSearchParams(location.search).get("state") || "missing";
+      const activeTrack = new URLSearchParams(location.search).get("track") || "subtitled";
+      const src = orientation === "portrait" ? poster(720, 1280, "9:16 竖屏") : poster(1280, 720, "16:9 横屏");
+      const missing = previewState === "missing";
+      const checking = previewState === "checking";
+
+      const stage = document.getElementById("previewStage");
+      stage.innerHTML = `
+        <div class="stage">
+          <div class="stage__screen${missing ? " is-unavailable" : ""}">
+            ${checking ? `
+              <div class="stage__checking">
+                <span class="stage__checking-kicker">CHECKING AVAILABILITY</span>
+                <div class="stage__checking-title">正在确认${activeTrack === "source" ? "源视频" : "带字幕视频"}</div>
+                <p>资源确认后会自动开始加载。</p>
+              </div>` : missing ? `
+              <div class="stage__missing">
+                <span class="stage__missing-kicker">PREVIEW UNAVAILABLE</span>
+                <div class="stage__missing-title">视频找不到了</div>
+                <p class="stage__missing-desc">成品文件可能已被清理或移动。</p>
+                <p class="stage__missing-hint">请返回任务页重新处理后，再回来预览。</p>
+              </div>` : `<img src="${src}" alt="video" />`}
+          </div>
+          <div class="stage__bar">
+            <div class="stage__title">示例成品视频 · 一个相当长的标题用来测试省略号与换行行为演示文本</div>
+            <div class="stage__tags">
+              <div class="stage__tracks">
+                <button class="stage__track${activeTrack === "source" ? " is-active" : ""}" type="button"><i class="ph ph-video-camera"></i><span>源视频</span></button>
+                <button class="stage__track${activeTrack === "subtitled" ? " is-active" : ""}" type="button"><i class="ph ph-closed-captioning"></i><span>带字幕视频</span></button>
+              </div>
+              <span class="stage__tag">英语 → 简体中文</span>
+              <span class="stage__tag">双语</span>
+              <span class="stage__tag">硬字幕</span>
+            </div>
+            <div class="stage__actions">
+              <button class="btn btn--ghost btn--sm"><i class="ph ph-folder-open"></i><span>打开文件夹</span></button>
+              <button class="btn btn--${missing ? "ghost" : "primary"} btn--sm"${missing ? " disabled" : ""}>
+                <i class="ph ph-${missing ? "video-camera-slash" : "download-simple"}"></i><span>${missing ? "视频不可用" : `下载${activeTrack === "source" ? "源视频" : "带字幕视频"}`}</span>
+              </button>
+              <button class="btn btn--ghost btn--sm"><i class="ph ph-closed-captioning"></i><span>下载字幕</span></button>
+            </div>
+          </div>
+        </div>`;
+
+      const list = document.getElementById("previewList");
+      list.innerHTML = Array.from({ length: 6 })
+        .map(
+          (_, i) => `
+        <button class="pvitem${i === 0 ? " is-active" : ""}" type="button">
+          <span class="pvitem__thumb"><i class="ph ph-film-strip"></i></span>
+          <span class="pvitem__body">
+            <span class="pvitem__title">成品视频 ${i + 1} 标题较长省略测试</span>
+            <span class="pvitem__meta">简体中文 · 硬字幕</span>
+          </span>
+        </button>`
+        )
+        .join("");
+    </script>
+  </body>
+</html>

@@ -208,3 +208,305 @@ def test_progress_swallows_callback_exception():
     hook = _make_progress_adapter(bad)
     # 不应抛出
     hook({"status": "finished"})
+
+
+# ---------- probe_video / 探针辅助函数 ----------
+
+from src.core.downloader import (
+    ProbeResult,
+    _clip_error,
+    _count_formats,
+    _is_probe_url,
+    _probe_failure_reason,
+    probe_video,
+)
+
+
+# ---------- _is_probe_url URL 校验 ----------
+
+def test_is_probe_url_accepts_http():
+    assert _is_probe_url("http://example.com/v") is True
+
+
+def test_is_probe_url_accepts_https():
+    assert _is_probe_url("https://www.youtube.com/watch?v=abc") is True
+
+
+def test_is_probe_url_rejects_empty_string():
+    assert _is_probe_url("") is False
+
+
+def test_is_probe_url_rejects_ftp():
+    assert _is_probe_url("ftp://example.com/v") is False
+
+
+def test_is_probe_url_rejects_file_scheme():
+    assert _is_probe_url("file:///etc/passwd") is False
+
+
+def test_is_probe_url_rejects_scheme_without_netloc():
+    assert _is_probe_url("http://") is False
+
+
+def test_is_probe_url_rejects_garbage_string():
+    assert _is_probe_url("not a url") is False
+
+
+# ---------- _count_formats 格式数统计 ----------
+
+def test_count_formats_uses_formats_list():
+    assert _count_formats({"formats": [{}, {}, {}, {}]}) == 4
+
+
+def test_count_formats_uses_requested_formats_when_no_formats():
+    assert _count_formats({"requested_formats": [{}, {}]}) == 2
+
+
+def test_count_formats_falls_back_to_url_only():
+    # 没有 formats/requested_formats 时，存在 url 也算 1
+    assert _count_formats({"url": "https://cdn/stream"}) == 1
+
+
+def test_count_formats_returns_zero_when_nothing():
+    assert _count_formats({}) == 0
+    assert _count_formats({"formats": "not a list", "url": None}) == 0
+
+
+def test_count_formats_empty_lists():
+    """formats 与 requested_formats 都是空列表、且无 url 时视为 0。"""
+    assert _count_formats({"formats": [], "requested_formats": []}) == 0
+
+
+# ---------- _probe_failure_reason 错误归类 ----------
+
+def test_probe_failure_reason_unsupported_url():
+    assert _probe_failure_reason("Unsupported URL: https://x/") == "yt-dlp 暂不支持这个网站或链接"
+
+
+def test_probe_failure_reason_private_login_cookie():
+    assert _probe_failure_reason("Private video. Sign in if you've access") == "该链接可能需要登录态或 cookies"
+
+
+def test_probe_failure_reason_login_keyword():
+    assert _probe_failure_reason("Login required") == "该链接可能需要登录态或 cookies"
+
+
+def test_probe_failure_reason_no_video_formats():
+    msg = "No video formats found"
+    assert _probe_failure_reason(msg) == "未找到匹配当前配置的可下载格式"
+
+
+def test_probe_failure_reason_requested_format_not_available():
+    msg = "The requested format is not available"
+    assert _probe_failure_reason(msg) == "未找到匹配当前配置的可下载格式"
+
+
+def test_probe_failure_reason_404():
+    assert _probe_failure_reason("HTTP Error 404: Not Found") == "视频不可用或链接已失效"
+
+
+def test_probe_failure_reason_not_available_keyword():
+    assert _probe_failure_reason("Video is not available in your region") == "视频不可用或链接已失效"
+
+
+def test_probe_failure_reason_default_fallback():
+    assert _probe_failure_reason("Some other random failure") == "yt-dlp 无法解析这个链接"
+
+
+# ---------- _clip_error 截断 ----------
+
+def test_clip_error_short_passes_through():
+    assert _clip_error("boom") == "boom"
+
+
+def test_clip_error_truncates_to_500():
+    msg = "x" * 800
+    out = _clip_error(msg)
+    assert len(out) == 500
+    assert out == "x" * 500
+
+
+def test_clip_error_custom_limit():
+    out = _clip_error("abcdefghij", limit=3)
+    assert out == "abc"
+
+
+# ---------- probe_video 主流程 ----------
+
+def test_probe_rejects_invalid_url_without_calling_ydl(monkeypatch):
+    """非法 URL 应在调用 yt-dlp 之前直接返回 ok=False。"""
+    called = []
+
+    class _ShouldNotUse:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def extract_info(self, *a, **k):
+            called.append((a, k))
+            return {}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", _ShouldNotUse)
+
+    res = probe_video("not a url")
+    assert res.ok is False
+    assert res.reason == "请输入有效的视频链接"
+    assert called == []
+
+
+def test_probe_success_with_formats(monkeypatch):
+    """解析出 formats 列表 -> ok=True 且 formats_count 与元信息透传。"""
+
+    def on_extract(url, download, opts):
+        # 探针模式必须传 download=False
+        assert download is False
+        # 探测场景应不开 check_formats（见 downloader.py 注释）
+        assert "check_formats" not in opts
+        return {
+            "title": "Probe Title",
+            "extractor_key": "Youtube",
+            "duration": 123.4,
+            "webpage_url": "https://example.com/v",
+            "formats": [{}, {}, {}],
+        }
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+
+    res = probe_video("https://example.com/v")
+    assert res.ok is True
+    assert res.title == "Probe Title"
+    assert res.extractor == "Youtube"
+    assert res.duration == 123.4
+    assert res.formats_count == 3
+    assert res.webpage_url == "https://example.com/v"
+    assert res.reason is None and res.detail is None
+
+
+def test_probe_success_falls_back_to_extractor(monkeypatch):
+    """无 extractor_key 时回退到 extractor。"""
+
+    def on_extract(url, download, opts):
+        return {"title": "T", "extractor": "Generic", "url": "https://x"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/v")
+    assert res.ok is True
+    assert res.extractor == "Generic"
+    assert res.formats_count == 1
+
+
+def test_probe_no_formats_returns_failure_with_metadata(monkeypatch):
+    """formats_count=0 且无 url -> ok=False，并把元信息回填。"""
+
+    def on_extract(url, download, opts):
+        return {"title": "T", "extractor_key": "X", "duration": 10, "webpage_url": "https://x/v"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/v")
+    assert res.ok is False
+    assert res.reason == "未找到可下载的视频格式"
+    # 元信息回填：title / extractor / duration / webpage_url
+    assert res.title == "T" and res.extractor == "X" and res.duration == 10
+    assert res.webpage_url == "https://x/v"
+
+
+def test_probe_no_formats_falls_back_webpage_url_to_input(monkeypatch):
+    """解析结果无 webpage_url 时回填到入参 URL。"""
+
+    def on_extract(url, download, opts):
+        return {"title": "T"}  # 无 formats / 无 url / 无 webpage_url
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/v")
+    assert res.ok is False
+    assert res.webpage_url == "https://x/v"
+
+
+def test_probe_wraps_ytdlp_download_error(monkeypatch):
+    """yt-dlp DownloadError 归类失败原因并把原文裁剪后放到 detail。"""
+
+    def on_extract(url, download, opts):
+        raise YtDlpDownloadError("Unsupported URL: https://x/")
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/")
+    assert res.ok is False
+    assert res.reason == "yt-dlp 暂不支持这个网站或链接"
+    assert res.detail == "Unsupported URL: https://x/"
+
+
+def test_probe_wraps_generic_exception(monkeypatch):
+    """非 yt-dlp 异常走通用兜底：reason=链接探测失败，detail=裁剪后原文。"""
+
+    def on_extract(url, download, opts):
+        raise ValueError("network gone")
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/")
+    assert res.ok is False
+    assert res.reason == "链接探测失败"
+    assert res.detail == "network gone"
+
+
+def test_probe_truncates_long_error_detail(monkeypatch):
+    """底层长错误应被裁剪到 500 字符以内。"""
+    long_msg = "y" * 1000
+
+    def on_extract(url, download, opts):
+        raise YtDlpDownloadError(long_msg)
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/")
+    assert res.ok is False
+    assert len(res.detail) == 500
+
+
+def test_probe_passes_cookies_file(monkeypatch, tmp_path):
+    """显式 cookies_file 应写入 cookiefile；settings.cookies_file 优先取本次参数。"""
+    captured = {}
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text("# Netscape")
+
+    def on_extract(url, download, opts):
+        captured["opts"] = opts
+        return {"title": "T", "url": "https://x"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    probe_video("https://x/v", cookies_file=cookies)
+    assert captured["opts"]["cookiefile"] == str(cookies)
+
+
+def test_probe_passes_format_selector(monkeypatch):
+    """format_selector 覆盖 settings.download_format。"""
+    captured = {}
+
+    def on_extract(url, download, opts):
+        captured["opts"] = opts
+        return {"title": "T", "url": "https://x"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    probe_video("https://x/v", format_selector="best[height<=480]")
+    assert captured["opts"]["format"] == "best[height<=480]"
+
+
+def test_probe_uses_settings_format_when_no_override(monkeypatch):
+    """未传 format_selector 时退到 settings.download_format。"""
+    captured = {}
+
+    def on_extract(url, download, opts):
+        captured["opts"] = opts
+        return {"title": "T", "url": "https://x"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    probe_video("https://x/v")
+    assert captured["opts"]["format"] == downloader.settings.download_format
+
+
+def test_probe_dataclass_defaults():
+    """ProbeResult 仅 ok 必填，其它字段均有默认值。"""
+    r = ProbeResult(ok=True)
+    assert r.title is None
+    assert r.extractor is None
+    assert r.duration is None
+    assert r.formats_count == 0
+    assert r.webpage_url is None
+    assert r.reason is None
+    assert r.detail is None

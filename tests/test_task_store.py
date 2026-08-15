@@ -6,7 +6,12 @@ import time
 
 import pytest
 
-from src.store import TaskRecord, TaskStore
+from src.store import (
+    RESOURCE_STATUS_AVAILABLE,
+    RESOURCE_STATUS_MISSING,
+    TaskRecord,
+    TaskStore,
+)
 
 
 @pytest.fixture
@@ -42,6 +47,18 @@ def test_get_roundtrip(store):
     got = store.get(rec.id)
     assert got is not None
     assert got == rec  # dataclass 相等
+
+
+def test_create_defaults_source_type_url(store):
+    rec = _create(store)
+    assert rec.source_type == "url"
+
+
+def test_create_upload_persists_source_type_and_title(store):
+    rec = _create(store, source_type="upload", title="my clip")
+    got = store.get(rec.id)
+    assert got.source_type == "upload"
+    assert got.title == "my clip"
 
 
 def test_get_missing(store):
@@ -104,3 +121,79 @@ def test_persistence_across_instances(tmp_path):
     rec = _create(s1)
     s2 = TaskStore(path)  # 新实例读同一文件
     assert s2.get(rec.id) == rec
+
+
+# ---------- resource_status 字段（issue #22） ----------
+
+def test_resource_status_default_available(store):
+    """新创建的任务默认是 AVAILABLE（资源还在）。"""
+    rec = _create(store)
+    assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
+
+
+def test_resource_status_round_trip(store):
+    """resource_status 写入后可读回，模拟服务重启场景。"""
+    rec = _create(store)
+    updated = store.update(rec.id, resource_status=RESOURCE_STATUS_MISSING, error="资源已删除")
+    assert updated.resource_status == RESOURCE_STATUS_MISSING
+    assert updated.error == "资源已删除"
+
+    # 重新打开 store 模拟重启
+    s2 = TaskStore(store.db_path)
+    got = s2.get(rec.id)
+    assert got is not None
+    assert got.resource_status == RESOURCE_STATUS_MISSING
+    assert got.error == "资源已删除"
+
+
+def test_resource_status_migration_adds_column(tmp_path):
+    """旧库没有 resource_status 列时，初始化应补上并默认 AVAILABLE。"""
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    # 旧版表结构（没有 resource_status、source_type、need_subtitle 之外最新列的子集）
+    conn.execute(
+        """
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            source_lang TEXT NOT NULL,
+            target_lang TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            burn TEXT NOT NULL,
+            model TEXT NOT NULL,
+            engine TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'url',
+            need_subtitle INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL,
+            current_step TEXT,
+            title TEXT,
+            error TEXT,
+            output_video TEXT,
+            output_subtitle TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO tasks (id, url, source_lang, target_lang, mode, burn, model, engine, "
+        "status, progress, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "task_legacy1", "http://x/v", "auto", "zh-CN", "mono", "hard", "small", "deepseek",
+            "SUCCESS", 100, 0, 0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    # 触发迁移
+    s = TaskStore(db_path)
+    rec = s.get("task_legacy1")
+    assert rec is not None
+    assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
+    assert rec.status == "SUCCESS"  # 其它字段保持不变
+

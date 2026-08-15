@@ -25,6 +25,13 @@ STATUSES = (
     "FAILED",
 )
 
+# 资源可用性：与流水线 status 解耦，专门描述"任务已经成功 / 失败，
+# 但磁盘上的产物是否还在"。服务重启或运行中下载时若发现资源缺失，
+# 会把 resource_status 置为 MISSING，避免继续暴露已失效的下载链接。
+RESOURCE_STATUS_AVAILABLE = "AVAILABLE"
+RESOURCE_STATUS_MISSING = "MISSING"
+RESOURCE_STATUSES = (RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING)
+
 
 @dataclass
 class TaskRecord:
@@ -35,7 +42,9 @@ class TaskRecord:
     mode: str          # mono | bilingual
     burn: str          # hard | soft
     model: str         # whisper 模型
-    engine: str        # 翻译引擎，目前 deepseek
+    engine: str        # 翻译引擎配置 ID；deepseek 为旧版兼容值
+    source_type: str = "url"  # url=在线链接下载 upload=本地上传视频
+    need_subtitle: int = 1  # 1=需要字幕(完整流水线) 0=仅下载视频
     status: str = "PENDING"
     progress: int = 0
     current_step: Optional[str] = None
@@ -45,6 +54,7 @@ class TaskRecord:
     output_subtitle: Optional[str] = None
     created_at: int = 0   # epoch 毫秒
     updated_at: int = 0
+    resource_status: str = RESOURCE_STATUS_AVAILABLE  # 产物文件是否在盘
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -85,6 +95,8 @@ class TaskStore:
                     burn TEXT NOT NULL,
                     model TEXT NOT NULL,
                     engine TEXT NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT 'url',
+                    need_subtitle INTEGER NOT NULL DEFAULT 1,
                     status TEXT NOT NULL,
                     progress INTEGER NOT NULL,
                     current_step TEXT,
@@ -93,10 +105,21 @@ class TaskStore:
                     output_video TEXT,
                     output_subtitle TEXT,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'
                 )
                 """
             )
+            # 轻量迁移：给旧库补上后加的列
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+            if "need_subtitle" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN need_subtitle INTEGER NOT NULL DEFAULT 1")
+            if "source_type" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN source_type TEXT NOT NULL DEFAULT 'url'")
+            if "resource_status" not in cols:
+                conn.execute(
+                    "ALTER TABLE tasks ADD COLUMN resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'"
+                )
 
     # ---------- 增 ----------
     def create(
@@ -109,6 +132,9 @@ class TaskStore:
         burn: str,
         model: str,
         engine: str,
+        source_type: str = "url",
+        need_subtitle: bool = True,
+        title: Optional[str] = None,
     ) -> TaskRecord:
         now = _now_ms()
         rec = TaskRecord(
@@ -120,6 +146,9 @@ class TaskStore:
             burn=burn,
             model=model,
             engine=engine,
+            source_type=source_type,
+            need_subtitle=int(need_subtitle),
+            title=title,
             status="PENDING",
             progress=0,
             created_at=now,

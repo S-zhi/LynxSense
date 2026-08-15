@@ -13,6 +13,10 @@ from typing import Optional
 
 # 项目根目录（本文件位于 src/config/config.py，向上两级）
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5273", "http://127.0.0.1:5273",
+    "http://localhost:8000", "http://127.0.0.1:8000",
+)
 
 
 def _bootstrap_env() -> None:
@@ -49,6 +53,15 @@ def _opt_env_path(key: str) -> Optional[Path]:
     return Path(val).expanduser() if val else None
 
 
+def _env_list(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """读取逗号分隔的环境变量列表，空值回退到默认列表。"""
+    val = os.getenv(key)
+    if not val:
+        return default
+    items = tuple(item.strip() for item in val.split(",") if item.strip())
+    return items or default
+
+
 @dataclass(frozen=True)
 class Settings:
     # 后端根目录
@@ -62,6 +75,12 @@ class Settings:
 
     # 后台流水线并发数（方案 A：线程池）
     pipeline_workers: int = int(os.getenv("SUBTRANS_WORKERS", "2"))
+
+    # 允许访问本地 API 的前端来源，逗号分隔覆盖
+    cors_allow_origins: tuple[str, ...] = _env_list(
+        "SUBTRANS_CORS_ORIGINS",
+        _DEFAULT_CORS_ORIGINS,
+    )
 
     # yt-dlp 格式选择：优先最佳视频+音频，回退到单一最佳流
     download_format: str = os.getenv("SUBTRANS_DL_FORMAT", "bv*+ba/b")
@@ -94,7 +113,7 @@ class Settings:
     # Replicate 超时/网络错误的重试次数（冷启动常见）
     replicate_retries: int = int(os.getenv("SUBTRANS_REPLICATE_RETRIES", "3"))
 
-    # --- ④ 翻译（DeepSeek，OpenAI 兼容接口）---
+    # --- ④ 翻译（旧版 DeepSeek 兼容配置；新配置位于 SQLite）---
     deepseek_api_key: Optional[str] = (
         os.getenv("SUBTRANS_DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
     )
@@ -103,6 +122,12 @@ class Settings:
     # 每批翻译多少条字幕（太长模型可能截断 JSON，自动减半重试）
     translate_batch_size: int = int(os.getenv("SUBTRANS_TRANSLATE_BATCH", "8"))
     translate_timeout: int = int(os.getenv("SUBTRANS_TRANSLATE_TIMEOUT", "60"))
+
+    # 支持的翻译目标语言列表（逗号分隔）
+    target_languages: tuple[str, ...] = _env_list(
+        "SUBTRANS_TARGET_LANGUAGES",
+        ("zh-CN", "zh-TW", "en", "ja", "ko"),
+    )
 
 
 settings = Settings()

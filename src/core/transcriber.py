@@ -92,7 +92,14 @@ def _run_replicate_with_retry(
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            return client.run(model_ref, input=build_input())
+            input_payload = build_input()
+            try:
+                return client.run(model_ref, input=input_payload)
+            finally:
+                audio_file = input_payload.get("audio_path")
+                close = getattr(audio_file, "close", None)
+                if callable(close):
+                    close()
         except (httpx.TimeoutException, httpx.TransportError) as e:
             last_exc = e
             logger.warning(

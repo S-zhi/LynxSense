@@ -2,11 +2,12 @@
 
 import { Api } from "./api.js";
 import { TERMINAL } from "./constants.js";
+import { createNotifications } from "./notifications.js";
 
 export const state = {
   tasks: [],
   filter: "all",       // all | active | done | failed
-  view: "tasks",       // tasks | preview
+  view: "tasks",       // tasks | preview | editor | probe | storage | translation-settings
   previewId: null,
   loading: true,
   loadError: null,
@@ -14,6 +15,16 @@ export const state = {
 
 const listeners = new Set();
 const subs = new Map(); // taskId -> unsubscribe
+
+// 通知管理器：闭包持有节流/seen 状态，通过 dispatch 入口触发。
+// 仅在浏览器环境下创建（window 存在）；SSR/测试环境可能没有 Notification。
+const notifications = (typeof window !== "undefined")
+  ? createNotifications({
+      Notification: window.Notification,
+      localStorage: window.localStorage,
+      window,
+    })
+  : null;
 
 export function subscribe(fn) {
   listeners.add(fn);
@@ -46,7 +57,9 @@ export async function loadTasks() {
 }
 
 export async function createTask(payload) {
-  const t = await Api.createTask(payload);
+  const t = payload.file
+    ? await Api.createUploadTask(payload)
+    : await Api.createTask(payload);
   state.tasks.unshift(t);
   state.filter = "all";
   emit({ type: "created", id: t.id });
@@ -55,13 +68,15 @@ export async function createTask(payload) {
 }
 
 export async function deleteTask(id) {
+  // 后端确认删除成功后再更新本地状态，避免失败时任务从界面消失。
+  await Api.deleteTask(id);
   const u = subs.get(id);
   if (u) u();
   subs.delete(id);
+  notifications?.forget(id);
   state.tasks = state.tasks.filter((t) => t.id !== id);
   if (state.previewId === id) state.previewId = null;
   emit({ type: "deleted", id });
-  await Api.deleteTask(id);
 }
 
 export async function retryTask(id) {
@@ -69,7 +84,11 @@ export async function retryTask(id) {
   const i = state.tasks.findIndex((x) => x.id === id);
   if (i >= 0) state.tasks[i] = { ...state.tasks[i], ...t };
   emit({ type: "retried", id });
-  if (i >= 0) track(state.tasks[i]);
+  if (i >= 0) {
+    // 重置通知节流窗口，让"任务重新开始"能被通知到。
+    notifications?.forget(id);
+    track(state.tasks[i]);
+  }
 }
 
 /* ---- SSE 跟踪 ---- */
@@ -79,8 +98,13 @@ function track(t) {
   const unsub = Api.subscribeProgress(t.id, (update) => {
     const i = state.tasks.findIndex((x) => x.id === update.id);
     if (i < 0) return;
+    const prevStatus = state.tasks[i].status;
     state.tasks[i] = { ...state.tasks[i], ...update };
     emit({ type: "progress", id: update.id, status: update.status });
+    // 触发浏览器任务通知（受偏好 / 权限 / 节流门控）。
+    if (notifications) {
+      notifications.notify(state.tasks[i], prevStatus);
+    }
     if (TERMINAL.has(update.status)) {
       const u = subs.get(update.id);
       if (u) u();
@@ -93,6 +117,11 @@ function track(t) {
 export function stopAll() {
   subs.forEach((u) => u());
   subs.clear();
+}
+
+/* 通知模块：仅暴露给设置面板使用，避免视图层直接动 Notification。 */
+export function notificationsApi() {
+  return notifications;
 }
 
 /* ---- 选择器 ---- */

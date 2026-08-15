@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlparse
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError as YtDlpDownloadError
@@ -52,6 +53,20 @@ class DownloadResult:
     width: Optional[int]
     height: Optional[int]
     source_url: str
+
+
+@dataclass
+class ProbeResult:
+    """视频链接探测结果，不下载媒体文件。"""
+
+    ok: bool
+    title: Optional[str] = None
+    extractor: Optional[str] = None
+    duration: Optional[float] = None
+    formats_count: int = 0
+    webpage_url: Optional[str] = None
+    reason: Optional[str] = None
+    detail: Optional[str] = None
 
 # 视频下载回调函数 回调函数逻辑 提供修改进度的展示函数 -> 放入执行流程中的hook内
 ProgressHook = Callable[[DownloadProgress], None]
@@ -171,6 +186,69 @@ def download_video(
     return result
 
 
+def probe_video(
+    url: str,
+    *,
+    cookies_file: Optional[Path] = None,
+    format_selector: Optional[str] = None,
+) -> ProbeResult:
+    """探测 URL 是否能被 yt-dlp 解析并找到可下载格式，不落盘下载。"""
+    if not _is_probe_url(url):
+        return ProbeResult(ok=False, reason="请输入有效的视频链接")
+
+    ydl_opts: dict = {
+        "format": format_selector or settings.download_format,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "simulate": True,
+        # 不开 check_formats：它会逐个向格式 URL 发探测请求，
+        # 而部分站点（如 pornhub）签名 CDN 会拒绝这类校验请求，
+        # 导致明明能下载的视频被误判为“无可用格式”。探测只需能解析出格式即可。
+    }
+
+    cookies = cookies_file or settings.cookies_file
+    if cookies:
+        ydl_opts["cookiefile"] = str(cookies)
+
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except YtDlpDownloadError as e:
+        return ProbeResult(
+            ok=False,
+            reason=_probe_failure_reason(str(e)),
+            detail=_clip_error(str(e)),
+        )
+    except Exception as e:
+        return ProbeResult(
+            ok=False,
+            reason="链接探测失败",
+            detail=_clip_error(str(e)),
+        )
+
+    formats_count = _count_formats(info)
+    if formats_count == 0 and not info.get("url"):
+        return ProbeResult(
+            ok=False,
+            title=info.get("title"),
+            extractor=info.get("extractor_key") or info.get("extractor"),
+            duration=info.get("duration"),
+            webpage_url=info.get("webpage_url") or url,
+            reason="未找到可下载的视频格式",
+        )
+
+    return ProbeResult(
+        ok=True,
+        title=info.get("title"),
+        extractor=info.get("extractor_key") or info.get("extractor"),
+        duration=info.get("duration"),
+        formats_count=formats_count,
+        webpage_url=info.get("webpage_url") or url,
+    )
+
+
 def _resolve_output_path(info: dict, out_dir: Path) -> Optional[Path]:
     """从 yt-dlp 的 info 中解析最终产物路径，带多重回退。"""
     # 1) 最可靠：合并后的 requested_downloads[].filepath
@@ -195,8 +273,44 @@ def _resolve_output_path(info: dict, out_dir: Path) -> Optional[Path]:
 
 
 def _safe_filesize(path: Path) -> Optional[int]:
+    """安全读取文件大小，读取失败时返回 None。"""
     try:
         return path.stat().st_size
     except OSError:
         return None
 
+
+def _count_formats(info: dict) -> int:
+    """统计 yt-dlp 解析结果中可见的格式数量。"""
+    formats = info.get("formats")
+    if isinstance(formats, list):
+        return len(formats)
+    requested = info.get("requested_formats")
+    if isinstance(requested, list):
+        return len(requested)
+    return 1 if info.get("url") else 0
+
+
+def _is_probe_url(url: str) -> bool:
+    """检查探针输入是否是 http(s) URL。"""
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _probe_failure_reason(message: str) -> str:
+    """把 yt-dlp 异常摘要归类成用户可读的失败原因。"""
+    text = message.lower()
+    if "unsupported url" in text:
+        return "yt-dlp 暂不支持这个网站或链接"
+    if "private" in text or "login" in text or "cookie" in text:
+        return "该链接可能需要登录态或 cookies"
+    if "no video formats" in text or "requested format is not available" in text:
+        return "未找到匹配当前配置的可下载格式"
+    if "not available" in text or "404" in text:
+        return "视频不可用或链接已失效"
+    return "yt-dlp 无法解析这个链接"
+
+
+def _clip_error(message: str, limit: int = 500) -> str:
+    """截断底层错误，避免接口返回过长日志。"""
+    return message[:limit]
