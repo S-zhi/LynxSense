@@ -154,6 +154,12 @@ const RealApi = {
     return res.json();
   },
 
+  async getReplicateBalance() {
+    const res = await request(this.base, "/api/replicate/balance");
+    if (!res.ok) throw new Error(await readError(res, "获取 Replicate 账户状态失败"));
+    return res.json();
+  },
+
   async listTranslationEngines() {
     const res = await request(this.base, "/api/settings/translation-engines");
     if (!res.ok) throw new Error(await readError(res, "获取翻译引擎失败"));
@@ -465,6 +471,16 @@ const MockApi = (() => {
     async listTargetLanguages() { await delay(80); return CFG.TARGET_LANGUAGES || ["zh-CN", "zh-TW", "en", "ja", "ko"]; },
     // 示例模式下返回 Replicate Whisper 模型权重选项。
     async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
+    async getReplicateBalance() {
+      await delay(80);
+      return {
+        status: "unsupported", authenticated: false, account: null, balance: null,
+        currency: "USD", balanceSupported: false, source: "mock",
+        billingUrl: "https://replicate.com/account/billing", checkedAt: Date.now(),
+        errorCode: "mock_mode",
+        message: "示例模式不会访问真实 Replicate 账户；切换真实 API 后可检测 Token 状态。",
+      };
+    },
     async listTranslationEngines() {
       try { return JSON.parse(localStorage.getItem("subtrans_mock_engines_v1") || "[]"); } catch (_) { return []; }
     },
