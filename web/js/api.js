@@ -260,6 +260,8 @@ const RealApi = {
   downloadUrl(id, kind) {
     return kind === "subtitle"
       ? `${this.base}/api/tasks/${id}/subtitle`
+      : kind === "source"
+        ? `${this.base}/api/tasks/${id}/source`
       : `${this.base}/api/tasks/${id}/download`;
   },
 };
