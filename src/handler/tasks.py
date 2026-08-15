@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
     OUTPUT_VIDEO,
@@ -299,6 +299,13 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 
 # ---------- 文件下载 ----------
 
+@router.head("/{task_id}/source", status_code=204)
+def check_source_video(task_id: str, store: TaskStore = Depends(get_store)):
+    """轻量确认源视频是否可用，避免前端先展示原生播放器加载态。"""
+    download_source_video(task_id, store)
+    return Response(status_code=204)
+
+
 @router.get("/{task_id}/source")
 def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     """返回未烧录字幕的源视频，供预览页在两个视频轨道之间切换。"""
@@ -307,6 +314,13 @@ def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     if state == ResourceState.AVAILABLE and path is not None:
         return FileResponse(path, filename=f"{task_id}-source{path.suffix}")
     raise HTTPException(status_code=409, detail=message)
+
+
+@router.head("/{task_id}/download", status_code=204)
+def check_download_video(task_id: str, store: TaskStore = Depends(get_store)):
+    """轻量确认成品视频是否可用，避免前端误显示播放器转圈。"""
+    download_video(task_id, store)
+    return Response(status_code=204)
 
 
 @router.get("/{task_id}/download")

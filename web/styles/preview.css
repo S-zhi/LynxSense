@@ -99,6 +99,40 @@
   text-align: center;
 }
 
+.stage__checking {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, 360px);
+  padding: 28px 24px;
+  color: #626b79;
+  text-align: center;
+}
+
+.stage__checking-kicker {
+  margin-bottom: 10px;
+  color: #596270;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+}
+
+.stage__checking-title {
+  color: #838c9a;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.stage__checking p {
+  margin: 8px 0 0;
+  color: #596270;
+  font-size: 12.5px;
+}
+
 .stage__missing-kicker {
   margin-bottom: 10px;
   color: #505866;

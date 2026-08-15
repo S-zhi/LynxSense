@@ -222,6 +222,7 @@ def test_download_serves_file(client):
 
     r = client.get(f"/api/tasks/{cid}/download")
     assert r.status_code == 200 and r.content == b"VIDEO"
+    assert client.head(f"/api/tasks/{cid}/download").status_code == 204
     r2 = client.get(f"/api/tasks/{cid}/subtitle")
     assert r2.status_code == 200 and "hi" in r2.text
 
@@ -237,6 +238,7 @@ def test_source_video_serves_original_when_output_exists(client):
     r = client.get(f"/api/tasks/{cid}/source")
     assert r.status_code == 200
     assert r.content == b"SOURCE"
+    assert client.head(f"/api/tasks/{cid}/source").status_code == 204
 
 
 def test_source_video_409_does_not_hide_available_subtitled_output(client):
@@ -250,6 +252,7 @@ def test_source_video_409_does_not_hide_available_subtitled_output(client):
     r = client.get(f"/api/tasks/{cid}/source")
     assert r.status_code == 409
     assert "源视频文件缺失" in r.json()["detail"]
+    assert client.head(f"/api/tasks/{cid}/source").status_code == 409
     assert client._store.get(cid).resource_status == RESOURCE_STATUS_AVAILABLE
 
 
