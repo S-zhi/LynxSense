@@ -13,6 +13,17 @@ const STATUS = {
   UNCONFIGURED: ["unconfigured", "未配置"],
 };
 
+const DEFAULT_DEEPSEEK = {
+  id: "deepseek",
+  name: "DeepSeek",
+  apiType: "openai_compatible",
+  baseUrl: "https://api.deepseek.com",
+  model: "deepseek-chat",
+  enabled: true,
+  hasApiKey: false,
+  availability: "UNCONFIGURED",
+};
+
 let engines = [];
 
 function statusView(value) {
@@ -67,6 +78,8 @@ function values(card) {
 async function refresh(autoCheck = true) {
   try {
     engines = await Api.listTranslationEngines();
+    // DeepSeek 是内置引擎；旧数据库或服务暂时不可用时也保持稳定的界面入口。
+    if (!engines.length) engines = [{ ...DEFAULT_DEEPSEEK }];
     render();
     if (autoCheck) {
       const pending = engines.filter((e) => e.hasApiKey && ["UNKNOWN", "UNAVAILABLE"].includes(e.availability));
@@ -79,6 +92,8 @@ async function refresh(autoCheck = true) {
       }
     }
   } catch (err) {
+    engines = [{ ...DEFAULT_DEEPSEEK }];
+    render();
     toast(err.message || "无法读取翻译引擎配置", "ph-warning-circle");
   }
 }
