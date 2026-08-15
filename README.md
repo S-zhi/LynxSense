@@ -392,7 +392,7 @@ docs: update README
 
 ### 7.1 Release 与 Tag
 
-项目版本在 `pyproject.toml` 中为 `0.1.0`。当前未发现明确的 Release 与 Tag 规则，需要补充发布策略。
+项目版本在 `pyproject.toml` 中维护，当前版本为 `1.0.2`。正式版本使用 `subtitles-ai-v<主版本>.<次版本>.<修订版本>` 格式创建 GitHub Release 与 Tag；向后兼容的修复和小幅改进递增修订版本。
 
 ### 7.2 更新日志
 

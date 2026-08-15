@@ -393,7 +393,7 @@ Do not disclose security vulnerabilities in public Issues. We have established c
 
 ### 7.1 Releases & Tags
 
-The project version in `pyproject.toml` is `0.1.0`. Needs User Input: define the release and tag strategy.
+The project version is maintained in `pyproject.toml`; the current version is `1.0.2`. Stable releases use the `subtitles-ai-v<major>.<minor>.<patch>` format for GitHub Releases and tags. Backward-compatible fixes and small improvements increment the patch version.
 
 ### 7.2 Changelog
 
