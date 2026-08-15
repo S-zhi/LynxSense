@@ -75,7 +75,15 @@ function renderStage(sel) {
   const video = el("video");
   video.controls = true;
   video.preload = "metadata";
-  video.src = Api.downloadUrl(sel.id, "video");
+  video.addEventListener("error", () => {
+    // 成品文件被清理后，下载接口会返回 409。此时不能保留浏览器的原生空播放器，
+    // 否则用户会误以为视频仍可播放。
+    screen.classList.add("is-unavailable");
+    screen.replaceChildren(stageVideoMissing());
+    dlVideo.className = "btn btn--ghost btn--sm";
+    dlVideo.disabled = true;
+    dlVideo.innerHTML = `<i class="ph ph-video-camera-slash"></i><span>视频不可用</span>`;
+  }, { once: true });
   screen.append(video);
 
   const bar = el("div", "stage__bar");
@@ -102,6 +110,8 @@ function renderStage(sel) {
   bar.append(title, tags, actions);
   stage.append(screen, bar);
   stageEl.append(stage);
+  // 等舞台和操作区构建完成后再加载资源，确保 409 回退时可同步禁用下载操作。
+  video.src = Api.downloadUrl(sel.id, "video");
 }
 
 function open(sel, kind) {
@@ -134,5 +144,15 @@ function stageEmpty(icon, title, desc) {
     <div class="state__icon"><i class="ph ${icon}" aria-hidden="true"></i></div>
     <div class="state__title">${title}</div>
     <div class="state__desc">${desc}</div>`;
+  return e;
+}
+
+function stageVideoMissing() {
+  const e = el("div", "stage__missing");
+  e.innerHTML = `
+    <span class="stage__missing-kicker">PREVIEW UNAVAILABLE</span>
+    <div class="stage__missing-title">视频找不到了</div>
+    <p class="stage__missing-desc">成品文件可能已被清理或移动。</p>
+    <p class="stage__missing-hint">请返回任务页重新处理后，再回来预览。</p>`;
   return e;
 }
