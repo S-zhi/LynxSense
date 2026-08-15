@@ -40,13 +40,8 @@ function initEngines(engines = null) {
 
 async function loadEngines() {
   try {
-    let engines = await Api.listTranslationEngines();
-    const pending = engines.filter((e) => e.hasApiKey && e.availability === "UNKNOWN");
-    if (pending.length) {
-      await Promise.all(pending.map((e) => Api.validateTranslationEngine(e.id).catch(() => null)));
-      engines = await Api.listTranslationEngines();
-    }
-    initEngines(engines);
+    // 检测由高级设置模块在应用启动时统一执行，任务页只读取最新状态。
+    initEngines(await Api.listTranslationEngines());
   } catch (_) {
     initEngines();
   }

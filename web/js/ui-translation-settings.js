@@ -6,10 +6,10 @@ import { toast } from "./toast.js";
 import { state } from "./store.js";
 
 const STATUS = {
-  AVAILABLE: ["available", "可用"],
+  AVAILABLE: ["available", "检测成功"],
   CHECKING: ["checking", "检测中"],
   UNKNOWN: ["unknown", "待检测"],
-  UNAVAILABLE: ["unavailable", "不可用"],
+  UNAVAILABLE: ["unavailable", "检测失败"],
   UNCONFIGURED: ["unconfigured", "未配置"],
 };
 
@@ -26,12 +26,50 @@ const DEFAULT_DEEPSEEK = {
 
 let engines = [];
 
-function statusView(value) {
-  return STATUS[String(value || "").toLowerCase()] || STATUS.UNKNOWN;
+export function statusView(value) {
+  return STATUS[String(value || "").toUpperCase()] || STATUS.UNKNOWN;
 }
 
 function typeLabel(value) {
   return value === "anthropic_compatible" ? "Anthropic Compatible" : "OpenAI Compatible";
+}
+
+function isValidationSuccess(result) {
+  return result?.available === true || String(result?.availability || "").toUpperCase() === "AVAILABLE";
+}
+
+function updateEngine(id, patch) {
+  engines = engines.map((engine) => engine.id === id ? { ...engine, ...patch } : engine);
+  render();
+}
+
+async function validateEngine(id) {
+  updateEngine(id, { availability: "CHECKING", lastError: null });
+  try {
+    const result = await Api.validateTranslationEngine(id);
+    const availability = String(
+      result?.availability || (result?.available ? "AVAILABLE" : "UNAVAILABLE"),
+    ).toUpperCase();
+    updateEngine(id, {
+      availability,
+      lastCheckedAt: result?.checkedAt || Date.now(),
+      lastError: result?.message || null,
+    });
+    return { ...result, availability };
+  } catch (err) {
+    updateEngine(id, {
+      availability: "UNAVAILABLE",
+      lastCheckedAt: Date.now(),
+      lastError: err.message || "检测请求失败",
+    });
+    throw new Error(`检测失败：${err.message || "请求未完成"}`);
+  }
+}
+
+function notifyValidation(result) {
+  const success = isValidationSuccess(result);
+  const detail = result?.message ? `：${result.message}` : "";
+  toast(`${success ? "检测成功" : "检测失败"}${detail}`, success ? "ph-check-circle" : "ph-warning-circle");
 }
 
 function cardTemplate(engine) {
@@ -58,7 +96,7 @@ function cardTemplate(engine) {
     <div class="engine-card__foot">
       <label class="engine-card__meta"><input data-field="enabled" type="checkbox" ${engine.enabled !== false ? "checked" : ""} /> 在任务页启用</label>
       <div class="engine-card__actions">
-        ${!isNew ? `<button class="btn btn--ghost btn--sm" data-action="validate" type="button"><i class="ph ph-plugs-connected"></i><span>检测</span></button>` : ""}
+        ${!isNew ? `<button class="btn btn--ghost btn--sm" data-action="validate" type="button"${status[0] === "checking" ? " disabled aria-busy=\"true\"" : ""}><i class="ph ph-plugs-connected"></i><span>${status[0] === "checking" ? "检测中" : "检测"}</span></button>` : ""}
         <button class="btn btn--primary btn--sm" data-action="save" type="button"><i class="ph ph-floppy-disk"></i><span>保存</span></button>
         ${!isNew ? `<button class="iconbtn" data-action="delete" type="button" title="删除配置"><i class="ph ph-trash"></i></button>` : ""}
       </div>
@@ -75,21 +113,16 @@ function values(card) {
   };
 }
 
-async function refresh(autoCheck = true) {
+async function refresh(autoCheck = false) {
   try {
     engines = await Api.listTranslationEngines();
     // DeepSeek 是内置引擎；旧数据库或服务暂时不可用时也保持稳定的界面入口。
     if (!engines.length) engines = [{ ...DEFAULT_DEEPSEEK }];
     render();
     if (autoCheck) {
-      const pending = engines.filter((e) => e.hasApiKey && ["UNKNOWN", "UNAVAILABLE"].includes(e.availability));
-      for (const engine of pending) {
-        try { await Api.validateTranslationEngine(engine.id); } catch (_) {}
-      }
-      if (pending.length) {
-        engines = await Api.listTranslationEngines();
-        render();
-      }
+      // 每次应用启动都重新检测已配置引擎，避免把上一次启动的结果当成当前状态。
+      const configured = engines.filter((e) => e.id && e.hasApiKey);
+      await Promise.allSettled(configured.map((engine) => validateEngine(engine.id)));
     }
   } catch (err) {
     engines = [{ ...DEFAULT_DEEPSEEK }];
@@ -116,16 +149,18 @@ async function onAction(event) {
       const saved = id === "new" ? await Api.createTranslationEngine(payload) : await Api.updateTranslationEngine(id, payload);
       engines = id === "new" ? [...engines, saved] : engines.map((e) => e.id === id ? saved : e);
       render();
-      toast("翻译引擎已保存，正在检测连接", "ph-check-circle");
-      if (saved.hasApiKey) await Api.validateTranslationEngine(saved.id);
-      await refresh(false);
+      if (saved.hasApiKey) {
+        const result = await validateEngine(saved.id);
+        notifyValidation(result);
+      } else {
+        toast("翻译引擎已保存，未配置 API Key", "ph-info");
+      }
       document.dispatchEvent(new CustomEvent("translation-engines-change"));
       return;
     }
     if (action === "validate") {
-      await Api.validateTranslationEngine(id);
-      await refresh(false);
-      toast("引擎检测完成", "ph-check-circle");
+      const result = await validateEngine(id);
+      notifyValidation(result);
       document.dispatchEvent(new CustomEvent("translation-engines-change"));
       return;
     }
@@ -150,8 +185,10 @@ export function initTranslationSettings() {
     list.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
   list.addEventListener("click", onAction);
+  let startupCheckPromise = refresh(true);
   document.addEventListener("viewchange", (event) => {
-    if (event.detail?.view === "translation-settings" && state.view === "translation-settings") refresh();
+    if (event.detail?.view !== "translation-settings" || state.view !== "translation-settings") return;
+    // 如果用户在启动检测完成前打开设置页，等待它结束，避免旧列表覆盖检测中的状态。
+    startupCheckPromise.then(() => refresh(false));
   });
-  if (state.view === "translation-settings") refresh();
 }
