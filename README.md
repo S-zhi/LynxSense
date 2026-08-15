@@ -99,20 +99,18 @@ SUBTRANS_DEEPSEEK_API_KEY=你的 DeepSeek Key
 
 ### 2.3 启动项目
 
-推荐开两个终端运行后端和前端：
+启动本地服务：
 
 ```bash
 uv run uvicorn src.handler.app:app --reload --port 8000
 ```
 
-```bash
-python3 -m http.server 5273 --directory web
-```
-
 然后打开：
 
-- Web 工作台：<http://localhost:5273>
+- Web 工作台：<http://localhost:8000/>
 - FastAPI 文档：<http://localhost:8000/docs>
+
+`8000` 同时提供 API 和前端页面；无需再额外启动 `5273` 静态文件服务器。
 
 ### 2.4 验证启动成功
 
@@ -126,7 +124,7 @@ curl http://localhost:8000/api/health
 {"ok": true}
 ```
 
-前端默认访问 `http://localhost:8000`。如需切换后端地址，可在浏览器控制台执行：
+前端与 API 默认使用同一入口 `http://localhost:8000`，通常无需额外配置。如需切换到其他后端地址，可在浏览器控制台执行：
 
 ```js
 localStorage.setItem("SUBTRANS_API_BASE_URL", "http://localhost:8000")
@@ -156,7 +154,7 @@ uv run python main.py "<视频URL>" --target zh-CN --source auto --mode bilingua
 | `SUBTRANS_DATA_DIR` | 否 | `./data` | 任务产物根目录 |
 | `SUBTRANS_DB` | 否 | `./app.db` | SQLite 任务库路径 |
 | `SUBTRANS_WORKERS` | 否 | `2` | 后台流水线并发任务数 |
-| `SUBTRANS_CORS_ORIGINS` | 否 | `http://localhost:5273,http://127.0.0.1:5273` | 允许访问后端 API 的前端来源，多个值用英文逗号分隔 |
+| `SUBTRANS_CORS_ORIGINS` | 否 | `http://localhost:5273,http://127.0.0.1:5273,http://localhost:8000,http://127.0.0.1:8000` | 允许跨域访问 API 的前端来源，多个值用英文逗号分隔；统一使用 `8000` 时通常无需设置 |
 | `SUBTRANS_DL_FORMAT` | 否 | `bv*+ba/b` | yt-dlp 格式选择 |
 | `SUBTRANS_DL_CONTAINER` | 否 | `mp4` | 下载合并后的容器格式 |
 | `SUBTRANS_DL_RETRIES` | 否 | `3` | 下载失败重试次数 |
@@ -305,8 +303,9 @@ PENDING -> DOWNLOADING -> EXTRACTING -> TRANSCRIBING -> TRANSLATING -> BURNING -
 ```bash
 uv sync
 uv run uvicorn src.handler.app:app --reload --port 8000
-python3 -m http.server 5273 --directory web
 ```
+
+前端文件位于 `web/`；服务启动后由 FastAPI 自动提供。修改前端文件后，刷新 <http://localhost:8000/> 即可查看效果。
 
 前端如需脱离后端预览，可以在 `web/config.js` 中临时设置 `USE_MOCK: true`。
 
@@ -402,6 +401,7 @@ docs: update README
 | `Replicate` 请求超时 | 调大 `SUBTRANS_REPLICATE_TIMEOUT` 或 `SUBTRANS_REPLICATE_RETRIES`，并确认网络可访问 Replicate |
 | 硬烧录失败或缺少 `subtitles` filter | 使用 Homebrew 安装 `ffmpeg-full`，不要安装普通 `ffmpeg`；或临时使用 `--burn soft` |
 | 下载失败或需要登录 | 检查 URL 是否有效；必要时设置 `SUBTRANS_COOKIES` 指向 cookies 文件 |
+| 不确定该打开哪个网页入口 | 统一访问 <http://localhost:8000/>。`5273` 是旧的独立静态服务器入口，不再作为推荐启动方式。 |
 | 前端无法连接后端 | 确认后端运行在 `http://localhost:8000`，或在浏览器 `localStorage` 中通过 `SUBTRANS_API_BASE_URL` 覆盖地址 |
 | 翻译提示缺少 Key | 确认 `.env` 中配置了 `SUBTRANS_DEEPSEEK_API_KEY` 或 `DEEPSEEK_API_KEY`，并重启后端 |
 

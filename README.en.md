@@ -99,20 +99,18 @@ SUBTRANS_DEEPSEEK_API_KEY=your DeepSeek key
 
 ### 2.3 Start the Project
 
-Run the backend and frontend in two terminals:
+Start the local service:
 
 ```bash
 uv run uvicorn src.handler.app:app --reload --port 8000
 ```
 
-```bash
-python3 -m http.server 5273 --directory web
-```
-
 Then open:
 
-- Web workbench: <http://localhost:5273>
+- Web workbench: <http://localhost:8000/>
 - FastAPI docs: <http://localhost:8000/docs>
+
+`8000` serves both the API and the frontend. You do not need to start a separate static-file server on `5273`.
 
 ### 2.4 Verify Successful Startup
 
@@ -126,7 +124,7 @@ Expected response:
 {"ok": true}
 ```
 
-The frontend uses `http://localhost:8000` by default. To override the backend URL, run this in the browser console:
+The frontend and API use the same `http://localhost:8000` entry point by default, so no additional configuration is normally required. To use another backend URL, run this in the browser console:
 
 ```js
 localStorage.setItem("SUBTRANS_API_BASE_URL", "http://localhost:8000")
@@ -156,7 +154,7 @@ uv run python main.py "<video-url>" --target zh-CN --source auto --mode bilingua
 | `SUBTRANS_DATA_DIR` | No | `./data` | Root directory for job artifacts |
 | `SUBTRANS_DB` | No | `./app.db` | SQLite database path |
 | `SUBTRANS_WORKERS` | No | `2` | Number of background pipeline workers |
-| `SUBTRANS_CORS_ORIGINS` | No | `http://localhost:5273,http://127.0.0.1:5273` | Frontend origins allowed to access the backend API, separated by commas |
+| `SUBTRANS_CORS_ORIGINS` | No | `http://localhost:5273,http://127.0.0.1:5273,http://localhost:8000,http://127.0.0.1:8000` | Frontend origins allowed to access the backend API, separated by commas; it is normally unnecessary when using the unified `8000` entry point |
 | `SUBTRANS_DL_FORMAT` | No | `bv*+ba/b` | yt-dlp format selector |
 | `SUBTRANS_DL_CONTAINER` | No | `mp4` | Merged download container format |
 | `SUBTRANS_DL_RETRIES` | No | `3` | Download retry count |
@@ -305,8 +303,9 @@ Job artifacts are stored in `data/{task_id}/` by default:
 ```bash
 uv sync
 uv run uvicorn src.handler.app:app --reload --port 8000
-python3 -m http.server 5273 --directory web
 ```
+
+Frontend files live in `web/` and are served automatically by FastAPI. After editing them, refresh <http://localhost:8000/> to see the result.
 
 To preview the frontend without the backend, temporarily set `USE_MOCK: true` in `web/config.js`.
 
@@ -402,6 +401,7 @@ This project is licensed under the [MIT License](./LICENSE). You are free to use
 | `Replicate` request timeout | Increase `SUBTRANS_REPLICATE_TIMEOUT` or `SUBTRANS_REPLICATE_RETRIES`, and confirm network access to Replicate |
 | Hard-burn fails or the `subtitles` filter is missing | Install `ffmpeg-full` via Homebrew instead of regular `ffmpeg`, or temporarily use `--burn soft` |
 | Download fails or login is required | Check whether the URL is valid; set `SUBTRANS_COOKIES` to a cookies file when needed |
+| Unsure which Web URL to open | Use <http://localhost:8000/>. `5273` is a legacy standalone static-server entry point and is no longer the recommended startup path. |
 | Frontend cannot connect to backend | Confirm the backend runs at `http://localhost:8000`, or override the address with `SUBTRANS_API_BASE_URL` in browser `localStorage` |
 | Translation reports missing key | Confirm `.env` contains `SUBTRANS_DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY`, then restart the backend |
 

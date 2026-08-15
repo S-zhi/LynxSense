@@ -13,7 +13,10 @@ from typing import Optional
 
 # 项目根目录（本文件位于 src/config/config.py，向上两级）
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
-_DEFAULT_CORS_ORIGINS = ("http://localhost:5273", "http://127.0.0.1:5273")
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5273", "http://127.0.0.1:5273",
+    "http://localhost:8000", "http://127.0.0.1:8000",
+)
 
 
 def _bootstrap_env() -> None:
