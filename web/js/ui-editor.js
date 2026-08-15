@@ -1,23 +1,20 @@
-/* 字幕编辑：左侧任务选择 + 右侧视频预览 + 字幕条目编辑。
+/* 字幕编辑：左侧任务选择 + 原文/译文双轨对照编辑。
  * 数据走 Api.getSubtitles / saveSubtitles / reburnSubtitles。
- * 视频预览复用 Api.downloadUrl 指向 /api/tasks/{id}/download。
  */
 
 import { LANG_LABEL } from "./constants.js";
 import { $, el, escapeHtml } from "./utils.js";
 import { state, subscribe } from "./store.js";
-import { Api, USE_MOCK } from "./api.js";
+import { Api } from "./api.js";
 import { toast } from "./toast.js";
 
 let listEl, hintEl, titleEl, subEl, actionsEl, versionInput;
-let videoEl, subsEl;
-let addBtn, saveBtn, reburnBtn, localeBar;
+let subsEl;
+let addBtn, saveBtn, reburnBtn;
 
 let currentTaskId = null;
 let currentDoc = null;        // { taskId, title, burn, hasOriginal, hasTranslated, original, translated }
-let currentLocale = "translated";
 let dirty = false;
-let lastVideoUrl = null;
 
 export function initEditor() {
   listEl = $("#editorList");
@@ -26,30 +23,13 @@ export function initEditor() {
   subEl = $("#editorSub");
   actionsEl = $("#editorActions");
   versionInput = $("#editorVersion");
-  videoEl = $("#editorVideo");
   subsEl = $("#editorSubs");
   addBtn = $("#editorAdd");
   saveBtn = $("#editorSave");
   reburnBtn = $("#editorReburn");
-  localeBar = $(".editor__locale");
-
-  localeBar.addEventListener("click", (e) => {
-    const chip = e.target.closest(".chip");
-    if (!chip) return;
-    if (dirty && !confirm("当前修改尚未保存，切换语言轨道会丢失。确定继续？")) return;
-    currentLocale = chip.dataset.locale;
-    [...localeBar.querySelectorAll(".chip")].forEach((c) =>
-      c.classList.toggle("is-active", c.dataset.locale === currentLocale)
-    );
-    renderSubs();
-  });
-
   addBtn.addEventListener("click", () => onAdd());
   saveBtn.addEventListener("click", () => onSave());
   reburnBtn.addEventListener("click", () => onReburn());
-
-  // 视频播放进度联动：把视频 currentTime 同步到字幕高亮
-  videoEl.addEventListener("timeupdate", highlightActiveSub);
 
   subscribe(renderIfActive);
   renderIfActive();
@@ -81,7 +61,6 @@ function renderList() {
       <div class="state__desc">先在「任务」里跑一次完整流水线，生成 original.srt / translated.srt 后再回来。</div>`;
     listEl.append(e);
     actionsEl.hidden = true;
-    renderVideo(null);
     renderSubsEmpty("未选择任务");
     return;
   }
@@ -108,7 +87,7 @@ function renderList() {
     listEl.append(item);
   }
 
-  // 只在选中变化时拉数据 / 重建视频
+  // 只在选中变化时拉数据。
   ensureLoaded();
 }
 
@@ -133,16 +112,9 @@ async function ensureLoaded() {
   try {
     const doc = await Api.getSubtitles(currentTaskId);
     currentDoc = doc;
-    // 如果当前 locale 在该任务里没有数据，自动切到有的那一个
-    if (currentLocale === "original" && !doc.hasOriginal) currentLocale = "translated";
-    if (currentLocale === "translated" && !doc.hasTranslated) currentLocale = "original";
-    [...localeBar.querySelectorAll(".chip")].forEach((c) =>
-      c.classList.toggle("is-active", c.dataset.locale === currentLocale)
-    );
     renderMain();
   } catch (e) {
     toast(e.message || "加载字幕失败", "ph-warning-circle");
-    renderVideo(null);
     renderSubsEmpty(e.message || "无法加载字幕");
   }
 }
@@ -152,55 +124,31 @@ function renderMain() {
   const t = state.tasks.find((x) => x.id === currentTaskId);
   titleEl.textContent = t ? (t.title || "字幕编辑") : "字幕编辑";
   const burn = t ? (t.burn === "hard" ? "硬字幕" : "软字幕") : "";
-  subEl.textContent = `烧录方式：${burn} · 共 ${currentDoc[currentLocale].length} 条`;
+  subEl.textContent = `烧录方式：${burn} · 原文与译文对照编辑 · 共 ${entryCount()} 条`;
   actionsEl.hidden = false;
-  renderVideo(currentTaskId);
   renderSubs();
-}
-
-/* ---------- 视频预览（与 ui-preview 同源，简化） ---------- */
-
-function renderVideo(taskId) {
-  videoEl.replaceChildren();
-  if (!taskId) {
-    videoEl.append(emptyMsg("ph-monitor-play", "尚未选择任务", "从左侧选一个任务开始。"));
-    lastVideoUrl = null;
-    return;
-  }
-  if (USE_MOCK) {
-    videoEl.append(emptyMsg("ph-flask", "示例模式", "前端示例数据，没有真实视频可播放；字幕编辑仍可体验。"));
-    lastVideoUrl = null;
-    return;
-  }
-  const url = Api.downloadUrl(taskId, "video");
-  lastVideoUrl = url;
-  const video = el("video");
-  video.controls = true;
-  video.preload = "metadata";
-  video.src = url;
-  videoEl.append(video);
-}
-
-function emptyMsg(icon, title, desc) {
-  const e = el("div", "editor__videoempty");
-  e.innerHTML = `
-    <div class="state__icon"><i class="ph ${icon}" aria-hidden="true"></i></div>
-    <div class="state__title">${escapeHtml(title)}</div>
-    <div class="state__desc">${escapeHtml(desc)}</div>`;
-  return e;
 }
 
 /* ---------- 字幕条目 ---------- */
 
-function currentEntries() {
+function editableLocales() {
   if (!currentDoc) return [];
-  return currentDoc[currentLocale] || [];
+  return ["original", "translated"].filter((locale) => {
+    const available = locale === "original" ? currentDoc.hasOriginal : currentDoc.hasTranslated;
+    return available || entriesFor(locale).length > 0;
+  });
 }
 
-function setCurrentEntries(arr) {
-  if (!currentDoc) return;
-  currentDoc[currentLocale] = arr;
-  // hasX 由后端在加载时给出，编辑过程不更新；保存时才落盘
+function entriesFor(locale) {
+  return currentDoc?.[locale] || [];
+}
+
+function entryCount() {
+  return Math.max(...editableLocales().map((locale) => entriesFor(locale).length), 0);
+}
+
+function entryAt(locale, index) {
+  return entriesFor(locale)[index] || null;
 }
 
 function renderSubsEmpty(msg) {
@@ -214,53 +162,66 @@ function renderSubsEmpty(msg) {
 
 function renderSubs() {
   subsEl.replaceChildren();
-  const entries = currentEntries();
-  if (entries.length === 0) {
-    renderSubsEmpty("该轨道暂无字幕");
+  const count = entryCount();
+  if (count === 0) {
+    renderSubsEmpty("没有可编辑的字幕");
     return;
   }
-  for (let i = 0; i < entries.length; i++) {
-    subsEl.append(buildRow(entries[i], i));
+  for (let i = 0; i < count; i++) {
+    subsEl.append(buildRow(i));
   }
-  highlightActiveSub();
 }
 
-function buildRow(entry, i) {
+function buildRow(i) {
+  const original = entryAt("original", i);
+  const translated = entryAt("translated", i);
+  const timing = translated || original;
+  if (!timing) return el("div");
+
   const row = el("div", "subrow");
-  row.dataset.id = entry.id;
+  row.dataset.index = String(i);
   row.innerHTML = `
     <div class="subrow__head">
       <span class="subrow__num num">${i + 1}</span>
       <div class="subrow__times">
-        <input class="subrow__time num" data-field="start" type="text" inputmode="decimal" value="${fmtTime(entry.start)}" aria-label="开始时间" />
+        <input class="subrow__time num" data-field="start" type="text" inputmode="decimal" value="${fmtTime(timing.start)}" aria-label="第 ${i + 1} 条字幕开始时间" />
         <span class="subrow__arrow" aria-hidden="true">→</span>
-        <input class="subrow__time num" data-field="end" type="text" inputmode="decimal" value="${fmtTime(entry.end)}" aria-label="结束时间" />
+        <input class="subrow__time num" data-field="end" type="text" inputmode="decimal" value="${fmtTime(timing.end)}" aria-label="第 ${i + 1} 条字幕结束时间" />
       </div>
       <div class="subrow__ops">
-        <button class="iconbtn" type="button" data-op="seek" title="跳到该时间" aria-label="跳到第 ${i + 1} 条字幕的开始时间"><i class="ph ph-skip-forward"></i></button>
         <button class="iconbtn" type="button" data-op="merge-next" title="与下一条合并" aria-label="将第 ${i + 1} 条字幕与下一条合并"><i class="ph ph-arrows-in-line-vertical"></i></button>
         <button class="iconbtn" type="button" data-op="split" title="从中间拆成两条" aria-label="将第 ${i + 1} 条字幕拆成两条"><i class="ph ph-scissors"></i></button>
         <button class="iconbtn iconbtn--danger" type="button" data-op="delete" title="删除该条" aria-label="删除第 ${i + 1} 条字幕"><i class="ph ph-trash"></i></button>
       </div>
     </div>
-    <textarea class="subrow__text" rows="2" placeholder="字幕文本（双语可用换行）" spellcheck="false"></textarea>`;
+    <div class="subrow__languages">
+      ${languageField("original", "原文", i, !original)}
+      ${languageField("translated", "译文", i, !translated)}
+    </div>`;
 
   const startInput = row.querySelector('[data-field="start"]');
   const endInput = row.querySelector('[data-field="end"]');
-  const textArea = row.querySelector(".subrow__text");
+  const originalText = row.querySelector('[data-locale="original"]');
+  const translatedText = row.querySelector('[data-locale="translated"]');
+  if (originalText) originalText.value = original?.text || "";
+  if (translatedText) translatedText.value = translated?.text || "";
+  row.querySelectorAll(".subrow__text").forEach((textArea) => {
+    textArea.addEventListener("input", () => {
+      const locale = textArea.dataset.locale;
+      const entry = entryAt(locale, i);
+      if (!entry) return;
+      entriesFor(locale)[i] = { ...entry, text: textArea.value };
+      markDirty();
+    });
+  });
 
-  startInput.value = fmtTime(entry.start);
-  endInput.value = fmtTime(entry.end);
-  textArea.value = entry.text || "";
-
-  const onChange = () => {
+  const updateTiming = () => {
     const start = parseTime(startInput.value);
     const end = parseTime(endInput.value);
-    const list = currentEntries();
-    const idx = list.findIndex((x) => x.id === entry.id);
-    if (idx < 0) return;
-    list[idx] = { ...list[idx], start, end, text: textArea.value };
-    setCurrentEntries(list);
+    editableLocales().forEach((locale) => {
+      const entry = entryAt(locale, i);
+      if (entry) entriesFor(locale)[i] = { ...entry, start, end };
+    });
     markDirty();
     if (startInput.classList.contains("is-invalid") || endInput.classList.contains("is-invalid")) {
       validateRow(row);
@@ -269,19 +230,28 @@ function buildRow(entry, i) {
 
   startInput.addEventListener("change", () => {
     if (!validateRow(row)) return;
-    onChange();
+    updateTiming();
   });
   endInput.addEventListener("change", () => {
     if (!validateRow(row)) return;
-    onChange();
+    updateTiming();
   });
-  textArea.addEventListener("input", onChange);
 
   row.querySelectorAll("[data-op]").forEach((btn) => {
-    btn.addEventListener("click", () => handleOp(btn.dataset.op, entry.id));
+    btn.addEventListener("click", () => handleOp(btn.dataset.op, i));
   });
 
   return row;
+}
+
+function languageField(locale, label, index, missing) {
+  const disabled = missing ? " disabled" : "";
+  const hint = missing ? `没有${label}字幕` : `编辑第 ${index + 1} 条${label}`;
+  return `
+    <label class="subrow__field subrow__field--${locale}">
+      <span class="subrow__fieldlabel">${label}</span>
+      <textarea class="subrow__text" data-locale="${locale}" rows="2" placeholder="${hint}" aria-label="${hint}" spellcheck="false"${disabled}></textarea>
+    </label>`;
 }
 
 function validateRow(row) {
@@ -297,64 +267,54 @@ function validateRow(row) {
   return startOk && endOk && orderOk;
 }
 
-function handleOp(op, id) {
-  const list = currentEntries();
-  const idx = list.findIndex((x) => x.id === id);
-  if (idx < 0) return;
-
-  if (op === "seek") {
-    const e = list[idx];
-    const v = videoEl.querySelector("video");
-    if (v) v.currentTime = e.start;
-    return;
-  }
+function handleOp(op, idx) {
+  const total = entryCount();
+  if (idx < 0 || idx >= total) return;
   if (op === "delete") {
-    list.splice(idx, 1);
-    setCurrentEntries(list);
+    editableLocales().forEach((locale) => entriesFor(locale).splice(idx, 1));
     markDirty();
     renderSubs();
     return;
   }
   if (op === "merge-next") {
-    if (idx >= list.length - 1) {
+    if (idx >= total - 1) {
       toast("已经是最后一条，无法与下一条合并", "ph-info");
       return;
     }
-    const a = list[idx];
-    const b = list[idx + 1];
-    const merged = {
-      ...a,
-      end: b.end,
-      text: [a.text, b.text].filter(Boolean).join("\n"),
-    };
-    list.splice(idx, 2, merged);
-    setCurrentEntries(list);
+    editableLocales().forEach((locale) => {
+      const list = entriesFor(locale);
+      const a = list[idx];
+      const b = list[idx + 1];
+      if (!a || !b) return;
+      list.splice(idx, 2, {
+        ...a,
+        end: b.end,
+        text: [a.text, b.text].filter(Boolean).join("\n"),
+      });
+    });
     markDirty();
     renderSubs();
     return;
   }
   if (op === "split") {
-    const a = list[idx];
+    const a = entryAt("translated", idx) || entryAt("original", idx);
+    if (!a) return;
     if (a.end - a.start < 0.4) {
       toast("当前条目时长太短，无法再拆分", "ph-info");
       return;
     }
     const mid = (a.start + a.end) / 2;
-    const lines = (a.text || "").split("\n");
-    const half = Math.max(1, Math.ceil(lines.length / 2));
-    const left = {
-      ...a,
-      end: mid,
-      text: lines.slice(0, half).join("\n"),
-    };
-    const right = {
-      ...a,
-      id: "sub_" + Math.random().toString(36).slice(2, 10),
-      start: mid,
-      text: lines.slice(half).join("\n"),
-    };
-    list.splice(idx, 1, left, right);
-    setCurrentEntries(list);
+    const nextId = "sub_" + Math.random().toString(36).slice(2, 10);
+    editableLocales().forEach((locale) => {
+      const list = entriesFor(locale);
+      const entry = list[idx];
+      if (!entry) return;
+      const lines = (entry.text || "").split("\n");
+      const half = Math.max(1, Math.ceil(lines.length / 2));
+      const left = { ...entry, end: mid, text: lines.slice(0, half).join("\n") };
+      const right = { ...entry, id: nextId, start: mid, text: lines.slice(half).join("\n") };
+      list.splice(idx, 1, left, right);
+    });
     markDirty();
     renderSubs();
     return;
@@ -363,39 +323,18 @@ function handleOp(op, id) {
 
 function onAdd() {
   if (!currentDoc) return;
-  const list = currentEntries();
-  const last = list[list.length - 1];
+  const last = entryAt("translated", entryCount() - 1) || entryAt("original", entryCount() - 1);
   const start = last ? round2(last.end) : 0;
   const end = round2(start + 2);
-  const next = {
-    id: "sub_" + Math.random().toString(36).slice(2, 10),
-    index: list.length + 1,
-    start,
-    end,
-    text: "",
-  };
-  list.push(next);
-  setCurrentEntries(list);
+  const id = "sub_" + Math.random().toString(36).slice(2, 10);
+  editableLocales().forEach((locale) => {
+    const list = entriesFor(locale);
+    list.push({ id, index: list.length + 1, start, end, text: "" });
+  });
   markDirty();
   renderSubs();
   // 滚到新行
   subsEl.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "end" });
-}
-
-/* ---------- 视频高亮联动 ---------- */
-
-function highlightActiveSub() {
-  const v = videoEl.querySelector("video");
-  if (!v) return;
-  const t = v.currentTime || 0;
-  const list = currentEntries();
-  let activeId = null;
-  for (const e of list) {
-    if (t >= e.start && t < e.end) { activeId = e.id; break; }
-  }
-  subsEl.querySelectorAll(".subrow").forEach((row) => {
-    row.classList.toggle("is-active", row.dataset.id === activeId);
-  });
 }
 
 /* ---------- 工具：dirty / 保存 / 烧录 ---------- */
@@ -422,26 +361,24 @@ async function onSave() {
     toast("存在非法时间，请修正后再保存", "ph-warning-circle");
     return;
   }
-  const entries = currentEntries().map((e, i) => ({
-    id: e.id,
-    index: i + 1,
-    start: round2(e.start),
-    end: round2(e.end),
-    text: e.text || "",
-  }));
   const version = (versionInput.value || "").trim() || null;
   saveBtn.disabled = true;
   try {
-    const res = await Api.saveSubtitles(currentTaskId, {
-      locale: currentLocale,
-      entries,
-      version,
-    });
+    const results = [];
+    for (const locale of editableLocales()) {
+      const entries = entriesFor(locale).map((entry, i) => ({
+        id: entry.id,
+        index: i + 1,
+        start: round2(entry.start),
+        end: round2(entry.end),
+        text: entry.text || "",
+      }));
+      results.push(await Api.saveSubtitles(currentTaskId, { locale, entries, version }));
+    }
     clearDirty();
+    const count = results.reduce((sum, result) => sum + result.count, 0);
     toast(
-      version
-        ? `已保存版本 ${res.path}（${res.count} 条）`
-        : `已覆盖 ${res.path}（${res.count} 条）`,
+      version ? `已保存原文和译文版本（共 ${count} 条）` : `已保存原文和译文（共 ${count} 条）`,
       "ph-floppy-disk",
     );
   } catch (e) {
