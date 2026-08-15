@@ -226,6 +226,33 @@ def test_download_serves_file(client):
     assert r2.status_code == 200 and "hi" in r2.text
 
 
+def test_source_video_serves_original_when_output_exists(client):
+    """预览源视频时必须返回 source.*，而不是优先返回烧录后的 output.mp4。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4").write_bytes(b"SOURCE")
+    (d / "output.mp4").write_bytes(b"OUTPUT")
+
+    r = client.get(f"/api/tasks/{cid}/source")
+    assert r.status_code == 200
+    assert r.content == b"SOURCE"
+
+
+def test_source_video_409_does_not_hide_available_subtitled_output(client):
+    """源视频缺失不应连带隐藏仍可播放的带字幕成品。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "output.mp4").write_bytes(b"OUTPUT")
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    r = client.get(f"/api/tasks/{cid}/source")
+    assert r.status_code == 409
+    assert "源视频文件缺失" in r.json()["detail"]
+    assert client._store.get(cid).resource_status == RESOURCE_STATUS_AVAILABLE
+
+
 def test_success_task_exposes_outputs(client):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
     client._store.update(cid, status="SUCCESS", progress=100)

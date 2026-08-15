@@ -299,6 +299,16 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 
 # ---------- 文件下载 ----------
 
+@router.get("/{task_id}/source")
+def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
+    """返回未烧录字幕的源视频，供预览页在两个视频轨道之间切换。"""
+    _require(store, task_id)
+    state, path, message = AssetResolver.resolve_source(task_id)
+    if state == ResourceState.AVAILABLE and path is not None:
+        return FileResponse(path, filename=f"{task_id}-source{path.suffix}")
+    raise HTTPException(status_code=409, detail=message)
+
+
 @router.get("/{task_id}/download")
 def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)

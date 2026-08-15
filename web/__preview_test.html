@@ -56,6 +56,7 @@
 
       const orientation = new URLSearchParams(location.search).get("v") || "landscape";
       const previewState = new URLSearchParams(location.search).get("state") || "ready";
+      const activeTrack = new URLSearchParams(location.search).get("track") || "subtitled";
       const src = orientation === "portrait" ? poster(720, 1280, "9:16 竖屏") : poster(1280, 720, "16:9 横屏");
       const missing = previewState === "missing";
 
@@ -74,6 +75,10 @@
           <div class="stage__bar">
             <div class="stage__title">示例成品视频 · 一个相当长的标题用来测试省略号与换行行为演示文本</div>
             <div class="stage__tags">
+              <div class="stage__tracks">
+                <button class="stage__track${activeTrack === "source" ? " is-active" : ""}" type="button"><i class="ph ph-video-camera"></i><span>源视频</span></button>
+                <button class="stage__track${activeTrack === "subtitled" ? " is-active" : ""}" type="button"><i class="ph ph-closed-captioning"></i><span>带字幕视频</span></button>
+              </div>
               <span class="stage__tag">英语 → 简体中文</span>
               <span class="stage__tag">双语</span>
               <span class="stage__tag">硬字幕</span>
@@ -81,7 +86,7 @@
             <div class="stage__actions">
               <button class="btn btn--ghost btn--sm"><i class="ph ph-folder-open"></i><span>打开文件夹</span></button>
               <button class="btn btn--${missing ? "ghost" : "primary"} btn--sm"${missing ? " disabled" : ""}>
-                <i class="ph ph-${missing ? "video-camera-slash" : "download-simple"}"></i><span>${missing ? "视频不可用" : "下载视频"}</span>
+                <i class="ph ph-${missing ? "video-camera-slash" : "download-simple"}"></i><span>${missing ? "视频不可用" : `下载${activeTrack === "source" ? "源视频" : "带字幕视频"}`}</span>
               </button>
               <button class="btn btn--ghost btn--sm"><i class="ph ph-closed-captioning"></i><span>下载字幕</span></button>
             </div>

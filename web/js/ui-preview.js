@@ -8,6 +8,7 @@ import { toast } from "./toast.js";
 
 let stageEl, listEl;
 let lastStageId = undefined;
+let selectedTrack = "subtitled";
 
 export function initPreview() {
   stageEl = $("#previewStage");
@@ -69,6 +70,10 @@ function renderStage(sel) {
     return;
   }
 
+  const hasSubtitledVideo = sel.needSubtitle !== false;
+  const track = hasSubtitledVideo ? selectedTrack : "source";
+  const videoKind = track === "source" ? "source" : "video";
+  const trackLabel = track === "source" ? "源视频" : "带字幕视频";
   const stage = el("div", "stage");
 
   const screen = el("div", "stage__screen");
@@ -79,10 +84,10 @@ function renderStage(sel) {
     // 成品文件被清理后，下载接口会返回 409。此时不能保留浏览器的原生空播放器，
     // 否则用户会误以为视频仍可播放。
     screen.classList.add("is-unavailable");
-    screen.replaceChildren(stageVideoMissing());
+    screen.replaceChildren(stageVideoMissing(trackLabel));
     dlVideo.className = "btn btn--ghost btn--sm";
     dlVideo.disabled = true;
-    dlVideo.innerHTML = `<i class="ph ph-video-camera-slash"></i><span>视频不可用</span>`;
+    dlVideo.innerHTML = `<i class="ph ph-video-camera-slash"></i><span>${trackLabel}不可用</span>`;
   }, { once: true });
   screen.append(video);
 
@@ -90,7 +95,22 @@ function renderStage(sel) {
   const title = el("div", "stage__title");
   title.textContent = sel.title || "成品视频";
   const tags = el("div", "stage__tags");
+  const tracks = el("div", "stage__tracks");
+  const sourceTrack = stageTrack("source", "源视频", track === "source");
+  const subtitledTrack = stageTrack("subtitled", "带字幕视频", track === "subtitled");
+  if (!hasSubtitledVideo) {
+    subtitledTrack.disabled = true;
+    subtitledTrack.title = "该任务未生成字幕成品";
+  }
+  tracks.append(sourceTrack, subtitledTrack);
+  tracks.addEventListener("click", (event) => {
+    const next = event.target.closest("[data-track]")?.dataset.track;
+    if (!next || next === track || (next === "subtitled" && !hasSubtitledVideo)) return;
+    selectedTrack = next;
+    renderStage(sel);
+  });
   tags.append(
+    tracks,
     stageTag(`${LANG_LABEL[sel.sourceLang] || sel.sourceLang} → ${LANG_LABEL[sel.targetLang] || sel.targetLang}`),
     stageTag(sel.mode === "bilingual" ? "双语" : "单语"),
     stageTag(sel.burn === "hard" ? "硬字幕" : "软字幕")
@@ -100,18 +120,22 @@ function renderStage(sel) {
   folder.innerHTML = `<i class="ph ph-folder-open"></i><span>打开文件夹</span>`;
   folder.addEventListener("click", () => openFolder(sel));
   const dlVideo = el("button", "btn btn--primary btn--sm");
-  dlVideo.innerHTML = `<i class="ph ph-download-simple"></i><span>下载视频</span>`;
-  dlVideo.addEventListener("click", () => open(sel, "video"));
+  dlVideo.innerHTML = `<i class="ph ph-download-simple"></i><span>下载${trackLabel}</span>`;
+  dlVideo.addEventListener("click", () => open(sel, videoKind));
   const dlSub = el("button", "btn btn--ghost btn--sm");
   dlSub.innerHTML = `<i class="ph ph-closed-captioning"></i><span>下载字幕</span>`;
   dlSub.addEventListener("click", () => open(sel, "subtitle"));
+  if (!hasSubtitledVideo) {
+    dlSub.disabled = true;
+    dlSub.title = "该任务未生成字幕";
+  }
   actions.append(folder, dlVideo, dlSub);
 
   bar.append(title, tags, actions);
   stage.append(screen, bar);
   stageEl.append(stage);
   // 等舞台和操作区构建完成后再加载资源，确保 409 回退时可同步禁用下载操作。
-  video.src = Api.downloadUrl(sel.id, "video");
+  video.src = Api.downloadUrl(sel.id, videoKind);
 }
 
 function open(sel, kind) {
@@ -138,6 +162,15 @@ function stageTag(text) {
   return s;
 }
 
+function stageTrack(id, label, active) {
+  const button = el("button", "stage__track" + (active ? " is-active" : ""));
+  button.type = "button";
+  button.dataset.track = id;
+  button.setAttribute("aria-pressed", String(active));
+  button.innerHTML = `<i class="ph ${id === "source" ? "ph-video-camera" : "ph-closed-captioning"}" aria-hidden="true"></i><span>${label}</span>`;
+  return button;
+}
+
 function stageEmpty(icon, title, desc) {
   const e = el("div", "stage__empty");
   e.innerHTML = `
@@ -147,12 +180,12 @@ function stageEmpty(icon, title, desc) {
   return e;
 }
 
-function stageVideoMissing() {
+function stageVideoMissing(trackLabel) {
   const e = el("div", "stage__missing");
   e.innerHTML = `
     <span class="stage__missing-kicker">PREVIEW UNAVAILABLE</span>
-    <div class="stage__missing-title">视频找不到了</div>
-    <p class="stage__missing-desc">成品文件可能已被清理或移动。</p>
+    <div class="stage__missing-title">${trackLabel}找不到了</div>
+    <p class="stage__missing-desc">视频文件可能已被清理或移动。</p>
     <p class="stage__missing-hint">请返回任务页重新处理后，再回来预览。</p>`;
   return e;
 }
