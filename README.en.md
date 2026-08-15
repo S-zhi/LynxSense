@@ -1,423 +1,277 @@
 English | [简体中文](./README.md)
 
-# Subtitles AI
+<div align="center">
+  <img src="./web/assets/subtitles-ai-logo.svg" width="88" alt="Subtitles AI Logo" />
+  <h1>Subtitles AI</h1>
+  <p><strong>Turn any video into subtitles that are ready to understand, translate, and deliver.</strong></p>
+  <p>A visual subtitle workbench for people and an MCP-native video workflow for AI agents.</p>
 
-![Python](https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)
-![uv](https://img.shields.io/badge/uv-managed-6340AC?logo=uv&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)
-![Vanilla JS](https://img.shields.io/badge/frontend-Vanilla%20JS-F7DF1E?logo=javascript&logoColor=black)
-![Replicate](https://img.shields.io/badge/ASR-Replicate%20Whisper-000000?logo=replicate&logoColor=white)
-![DeepSeek](https://img.shields.io/badge/Translate-DeepSeek-4D6BFE)
-![FFmpeg](https://img.shields.io/badge/FFmpeg-libass-388E3C?logo=ffmpeg&logoColor=white)
-![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
+  <p>
+    <a href="#-quick-start">Quick Start</a> ·
+    <a href="#-mcp-integration">MCP Integration</a> ·
+    <a href="#-web-workbench">Web Workbench</a> ·
+    <a href="./docs/mcp-server.md">Documentation</a>
+  </p>
 
-Subtitles AI is a local video subtitle translation workbench. Given a video URL, it automatically downloads the video, extracts audio, transcribes speech, translates subtitles, and burns or muxes subtitles into the output video.
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white" alt="Python" />
+    <img src="https://img.shields.io/badge/MCP-2.x-6C5CE7" alt="MCP" />
+    <img src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+    <img src="https://img.shields.io/badge/FFmpeg-libass-388E3C?logo=ffmpeg&logoColor=white" alt="FFmpeg" />
+    <img src="https://img.shields.io/badge/License-MIT-F5C518" alt="MIT License" />
+  </p>
+</div>
 
-![Subtitles AI screenshot](./img_2.png)
+![Subtitles AI visual workbench](./docs/assets/subtitles-ai-workbench.png)
 
-## 1. Product Overview
+Subtitles AI combines video download, audio extraction, speech recognition, subtitle translation, and subtitle muxing into one automated pipeline. Paste a video page URL or drop in a local video to produce a translated SRT file and a finished video. The same workflow can also be connected to an MCP-compatible AI client, allowing an agent to validate the environment, create jobs, track progress, and return artifacts.
 
-### 1.1 Project Introduction
+## ✨ Two Ways to Use It
 
-This project is designed for personal workflows that need semi-automated video subtitle processing. You can manage jobs from the Web workbench or run the full pipeline from the command line. Transcription uses Replicate-hosted Whisper, translation uses DeepSeek, and video processing uses local FFmpeg.
+| | 🤖 MCP Integration | 🖥️ Web Workbench |
+| --- | --- | --- |
+| Best for | Users who want Codex, Claude Desktop, or another AI client to process videos | Users who prefer direct browser interaction |
+| Interaction | Ask an agent in natural language to create, inspect, and retry jobs | Paste a URL or drop in a video, then choose language and subtitle options |
+| Core experience | Discoverable tools, trackable state, structured results | Job queue, live progress, preview, subtitle editing, and downloads |
+| Connection | stdio or Streamable HTTP | Local `http://localhost:8000` |
 
-### 1.2 Feature Showcase
+```mermaid
+flowchart LR
+    Input["Video URL / local video"] --> Entry{"Choose an entry point"}
+    Entry -->|Natural language| Agent["AI Agent + MCP"]
+    Entry -->|Visual controls| Web["Web workbench"]
+    Agent --> API["Subtitles AI API"]
+    Web --> API
+    API --> Pipeline["Download → Transcribe → Translate → Burn"]
+    Pipeline --> Output["Final video + SRT"]
+```
 
-- Process one URL through the full pipeline: download, extract audio, transcribe, translate, and generate the final video.
-- Web workbench for job creation, job lists, live progress, result preview, and artifact downloads.
-- CLI entry point in `main.py` with target language, source language, subtitle mode, burn mode, and model options.
-- Supports translated-only subtitles and bilingual subtitles.
-- Supports hard-burned subtitles and soft subtitle tracks.
-- Stores intermediate artifacts in one directory per job for debugging and reuse.
+## 🚀 Quick Start
 
-### 1.3 Platform & Technology Support
+### 1. Prepare the environment
 
-| Type | Support |
-| --- | --- |
-| Operating systems | Currently supported and verified on macOS only; Linux / Windows are not adapted yet |
-| Python | `>=3.10,<3.13`; the repository currently uses `3.11` in `.python-version` |
-| Package manager | uv |
-| Backend | FastAPI + Uvicorn |
-| Frontend | Vanilla HTML / CSS / JavaScript ES Modules |
-| Storage | SQLite with WAL mode |
-| Video processing | yt-dlp, ffmpeg-full, ffprobe; hard-burned subtitles require libass |
-| Cloud services | Replicate, DeepSeek |
-
-### 1.4 Documentation Navigation
-
-- [Quick Start](#2-quick-start)
-- [Configuration & Commands](#3-configuration--commands)
-- [Architecture & Project Structure](#4-architecture--project-structure)
-- [Developer Guide](#5-developer-guide)
-- [Contributing](#6-contributing)
-- [Security Vulnerability Reporting](#64-security-vulnerability-reporting)
-- [Versioning](#7-versioning)
-- [License](#8-license)
-
-### 1.5 AI Collaboration Documents
-
-The repository currently does not include `AGENTS.md`, `CLAUDE.md`, or `.github/copilot-instructions.md`. If AI agent collaboration rules are needed, add them as separate documents and keep README as an entry point only.
-
-## 2. Quick Start
-
-### 2.1 Install System and Project Dependencies
-
-The project is currently adapted for macOS only. First install `uv` and `ffmpeg-full` with `libass` via Homebrew:
+The project is currently verified on macOS. It requires Python `3.10–3.12`, [uv](https://docs.astral.sh/uv/), and FFmpeg with `libass`:
 
 ```bash
 brew install uv
 brew tap homebrew-ffmpeg/ffmpeg
 brew install ffmpeg-full
+uv sync
 ```
 
-Do not install regular `ffmpeg` as a replacement for `ffmpeg-full`. Regular `ffmpeg` may miss `libass`, which can make hard-burned subtitles fail with `No such filter: 'subtitles'` or an unavailable subtitle filter.
-
-Verify the system dependencies:
+Verify that the subtitle filter is available:
 
 ```bash
-uv --version
 ffmpeg -hide_banner -filters | grep " subtitles "
 ```
 
-Then install Python project dependencies:
+> A regular FFmpeg build may not include `libass`, which prevents hard subtitle burning. You can use soft subtitles instead.
+
+### 2. Configure credentials
 
 ```bash
-uv sync
+cp .env.example .env
 ```
 
-### 2.2 Configure Environment Variables
-
-Copy the project-root `.env.example` to `.env` and fill in the real secrets:
+Fill in the following values in `.env`:
 
 ```ini
-REPLICATE_API_TOKEN=your Replicate token
-SUBTRANS_DEEPSEEK_API_KEY=your DeepSeek key
+REPLICATE_API_TOKEN=your-replicate-token
+SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 ```
 
-`.env` is ignored by `.gitignore`. Do not commit real secrets to the repository.
+Credentials are read only by the business service. Never put them in MCP tool arguments or commit them to the repository.
 
-### 2.3 Start the Project
-
-Start the local service:
+### 3. Start the business service
 
 ```bash
 uv run uvicorn src.handler.app:app --reload --port 8000
 ```
 
-Then open:
-
-- Web workbench: <http://localhost:8000/>
-- FastAPI docs: <http://localhost:8000/docs>
-
-`8000` serves both the API and the frontend. You do not need to start a separate static-file server on `5273`.
-
-### 2.4 Verify Successful Startup
+Verify the service:
 
 ```bash
-curl http://localhost:8000/api/health
+curl http://127.0.0.1:8000/api/health
+# {"ok":true}
 ```
 
-Expected response:
+Choose either path:
 
-```json
-{"ok": true}
-```
+- For direct use, open <http://localhost:8000/>.
+- For AI-agent use, continue to [MCP Integration](#-mcp-integration).
 
-Check whether the full pipeline dependencies are ready:
+## 🤖 MCP Integration
 
-```bash
-curl http://localhost:8000/api/health/ready
-```
+The MCP Server is an independent adapter for the business API. It never accesses SQLite directly and does not hold Replicate or DeepSeek credentials.
 
-The frontend and API use the same `http://localhost:8000` entry point by default, so no additional configuration is normally required. To use another backend URL, run this in the browser console:
+### stdio: connect a desktop AI client
 
-```js
-localStorage.setItem("SUBTRANS_API_BASE_URL", "http://localhost:8000")
-```
-
-### 2.5 Basic CLI Commands
-
-To run without the Web UI:
-
-```bash
-uv run python main.py "<video-url>"
-```
-
-```bash
-uv run python main.py "<video-url>" --target zh-CN --source auto --mode bilingual --burn hard --model small
-```
-
-## 3. Configuration & Commands
-
-### 3.1 Environment Variables
-
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `REPLICATE_API_TOKEN` | Yes | None | Replicate API token for speech transcription |
-| `SUBTRANS_DEEPSEEK_API_KEY` | Yes | None | DeepSeek API key for subtitle translation |
-| `DEEPSEEK_API_KEY` | No | None | Compatibility variable used when `SUBTRANS_DEEPSEEK_API_KEY` is not set |
-| `SUBTRANS_DATA_DIR` | No | `./data` | Root directory for job artifacts |
-| `SUBTRANS_DB` | No | `./app.db` | SQLite database path |
-| `SUBTRANS_WORKERS` | No | `2` | Number of background pipeline workers |
-| `SUBTRANS_CORS_ORIGINS` | No | `http://localhost:5273,http://127.0.0.1:5273,http://localhost:8000,http://127.0.0.1:8000` | Frontend origins allowed to access the backend API, separated by commas; it is normally unnecessary when using the unified `8000` entry point |
-| `SUBTRANS_DL_FORMAT` | No | `bv*+ba/b` | yt-dlp format selector |
-| `SUBTRANS_DL_CONTAINER` | No | `mp4` | Merged download container format |
-| `SUBTRANS_DL_RETRIES` | No | `3` | Download retry count |
-| `SUBTRANS_COOKIES` | No | Empty | Path to a cookies file for sites requiring login or verification |
-| `SUBTRANS_FFMPEG` | No | `ffmpeg` | ffmpeg executable |
-| `SUBTRANS_FFPROBE` | No | `ffprobe` | ffprobe executable |
-| `SUBTRANS_AUDIO_SR` | No | `16000` | Extracted audio sample rate |
-| `SUBTRANS_AUDIO_CH` | No | `1` | Extracted audio channel count |
-| `SUBTRANS_WHISPER_MODEL` | No | `stayallive/whisper-subtitles:<locked-version>` | Replicate Whisper model identifier |
-| `SUBTRANS_REPLICATE_TIMEOUT` | No | `1800` | Replicate inference timeout in seconds |
-| `SUBTRANS_REPLICATE_RETRIES` | No | `3` | Replicate network or timeout retry count |
-| `SUBTRANS_DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek OpenAI-compatible API base URL |
-| `SUBTRANS_DEEPSEEK_MODEL` | No | `deepseek-chat` | DeepSeek model name |
-| `SUBTRANS_TRANSLATE_BATCH` | No | `8` | Subtitle entries per translation batch |
-| `SUBTRANS_TRANSLATE_TIMEOUT` | No | `60` | Translation request timeout in seconds |
-
-### 3.2 Configuration Files
-
-- `.env`: local secrets and runtime settings. It is automatically loaded when importing `src.config.config` or running `main.py`.
-- `web/config.js`: frontend runtime configuration, including `API_BASE_URL`, `USE_MOCK`, request timeout, and translation engines.
-- `pyproject.toml`: Python dependencies, package discovery, and pytest configuration.
-
-### 3.3 Commands & Parameters
-
-```bash
-uv run python main.py "<video-url>" [options]
-```
-
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `url` | Required | Video page URL |
-| `-t, --target` | `zh-CN` | Target language |
-| `-s, --source` | `auto` | Source language; auto-detected by default |
-| `--mode` | `mono` | `mono` for translated-only subtitles, `bilingual` for bilingual subtitles |
-| `--burn` | `hard` | `hard` for hard-burned subtitles, `soft` for soft subtitle tracks |
-| `--model` | `small` | Whisper model weight, such as `tiny.en`, `small`, or `medium` |
-| `--task-id` | Auto-generated | Job ID, also used as the artifact directory name |
-
-Common debugging commands:
-
-```bash
-uv run python -m src.core.downloader "<URL>" <task_id>
-uv run python -m src.core.audio_extractor data/<task_id>/source.mp4 <task_id>
-uv run python -m src.core.transcriber data/<task_id>/audio.wav <task_id> en
-uv run python -m src.core.translator data/<task_id>/original.srt <task_id> zh-CN mono
-uv run python -m src.core.subtitle_burner data/<task_id>/source.mp4 data/<task_id>/translated.srt <task_id> hard
-```
-
-### 3.4 Backend API
-
-Interactive API docs are available at <http://localhost:8000/docs>.
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/health` | Health check |
-| `GET` | `/api/health/ready` | Redacted configuration, dependency, and storage readiness check |
-| `POST` | `/api/tasks` | Create a job and enqueue it |
-| `GET` | `/api/tasks` | List jobs |
-| `GET` | `/api/tasks/{id}` | Get job details |
-| `DELETE` | `/api/tasks/{id}` | Delete a job and its artifacts |
-| `POST` | `/api/tasks/{id}/retry` | Reset and re-enqueue a job |
-| `GET` | `/api/tasks/{id}/download` | Download the output video |
-| `GET` | `/api/tasks/{id}/subtitle` | Download the translated subtitle |
-| `POST` | `/api/tasks/{id}/folder` | Open the local job folder |
-| `GET` | `/api/tasks/{id}/stream` | SSE live progress stream |
-| `GET` | `/api/srt/languages` | List source languages |
-| `GET` | `/api/srt/model-weights` | List model weights |
-| `GET` | `/api/storage/stats` | Local storage stats: total size, kind breakdown, per-task usage |
-| `POST` | `/api/storage/cleanup_preview` | Preview the impact of a cleanup (RUNNING tasks are skipped) |
-| `POST` | `/api/storage/cleanup` | Execute cleanup by filters; RUNNING tasks are always skipped |
-| `GET` | `/api/storage/retention` | Read the simplified retention policy (days=null = unlimited) |
-| `PUT` | `/api/storage/retention` | Write the simplified retention policy |
-
-### 3.5 MCP Server
-
-The MCP Server is a separate adapter over the business API. It does not access SQLite or
-the pipeline directly. See [MCP Server documentation](docs/mcp-server.md) for startup
-commands and tool details.
-
-`POST /api/tasks` request body:
+Add the following to your MCP client configuration and replace `/absolute/path/to/Subtitles-AI` with the absolute repository path:
 
 ```json
 {
-  "url": "https://example.com/video",
-  "sourceLang": "auto",
-  "targetLang": "zh-CN",
-  "mode": "mono",
-  "burn": "hard",
-  "model": "small",
-  "engine": "deepseek"
+  "mcpServers": {
+    "subtitles-ai": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/Subtitles-AI",
+        "run",
+        "python",
+        "-m",
+        "src.mcp_server.server"
+      ],
+      "env": {
+        "SUBTRANS_API_BASE_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
 }
 ```
 
-## 4. Architecture & Project Structure
+After restarting the MCP client, try:
 
-### 4.1 System Architecture
+> Check whether the subtitle service is ready, translate this video into bilingual Chinese and English soft subtitles, and give me the download links when it finishes: `<video URL>`
+
+The agent follows a trackable workflow:
+
+```text
+check_subtitle_setup → probe_video → start_subtitle_pipeline
+→ get_task_status (poll) → get_task_artifacts (after success)
+```
+
+### Streamable HTTP: connect a remote or shared host
+
+```bash
+SUBTRANS_MCP_TRANSPORT=streamable-http \
+  uv run python -m src.mcp_server.server
+```
+
+Default MCP endpoint: `http://127.0.0.1:3001/mcp`.
+
+### MCP tools
+
+| Tool | Purpose |
+| --- | --- |
+| `check_subtitle_setup` | Validate the business service, credentials, FFmpeg, and storage |
+| `probe_video` | Validate a video URL before downloading |
+| `start_subtitle_pipeline` | Asynchronously create a download / transcription / translation / burn job |
+| `get_task_status` | Read the current stage, progress, and error details |
+| `get_task_artifacts` | Return video and subtitle URLs for a successful job |
+| `list_tasks` | List recent jobs |
+| `retry_task` | Retry a failed job after user confirmation |
+
+See [MCP Server documentation](./docs/mcp-server.md) and the [MCP Agent guide](./docs/mcp-agent-guide.md) for full configuration, error codes, and agent behavior.
+
+## 🖥️ Web Workbench
+
+The Web workbench and API share port `8000`; no separate frontend server is required.
+
+1. Open <http://localhost:8000/>.
+2. Paste a video page URL or drop in a local video.
+3. Select source and target languages, translated-only or bilingual subtitles, hard or soft subtitles, and a recognition model.
+4. Select **Start Processing** and follow live progress in the queue.
+5. Preview the result, edit subtitles, and download the video or SRT file.
+
+Highlights:
+
+- **Job center** — batch queue, live stages, and failed-job retries.
+- **Video preview** — inspect the finished result in the browser.
+- **Subtitle editor** — review and adjust recognized or translated subtitles.
+- **Local resources** — inspect disk usage, retention, and cleanup previews.
+- **Flexible output** — download-only, translated or bilingual, hard or soft subtitles.
+
+## 🧩 Command Line
+
+Run the full pipeline without opening the Web UI:
+
+```bash
+uv run python main.py "<video URL>"
+uv run python main.py "<video URL>" \
+  --target zh-CN --source auto --mode bilingual --burn soft --model small
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `url` | Required | Video page URL |
+| `--target` | `zh-CN` | Target language |
+| `--source` | `auto` | Source language, detected by default |
+| `--mode` | `mono` | `mono` translated-only, `bilingual` bilingual |
+| `--burn` | `hard` | `hard` burned in, `soft` subtitle track |
+| `--model` | `small` | Whisper model weight |
+
+## 🏗️ How It Works
 
 ```mermaid
 flowchart LR
-    Browser["Web workbench"] --> API["FastAPI handler"]
-    API --> Runner["service.runner thread pool"]
-    Runner --> Orchestrator["service.orchestrator"]
-    Orchestrator --> Downloader["downloader / yt-dlp"]
-    Orchestrator --> Audio["audio_extractor / ffmpeg"]
-    Orchestrator --> ASR["transcriber / Replicate"]
-    Orchestrator --> Translator["translator / DeepSeek"]
-    Orchestrator --> Burner["subtitle_burner / ffmpeg"]
-    API --> Store["TaskStore / SQLite"]
-    Runner --> Store
-    Store --> API
+    Client["Web / CLI / MCP"] --> API["FastAPI"]
+    API --> Runner["Background job queue"]
+    Runner --> Download["yt-dlp download"]
+    Download --> Audio["FFmpeg audio extraction"]
+    Audio --> ASR["Replicate Whisper"]
+    ASR --> Translate["DeepSeek translation"]
+    Translate --> Burn["FFmpeg subtitle muxing"]
+    Burn --> Store["Video + SRT + SQLite state"]
 ```
 
-Pipeline states:
+Job states:
 
 ```text
-PENDING -> DOWNLOADING -> EXTRACTING -> TRANSCRIBING -> TRANSLATING -> BURNING -> SUCCESS
+PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
+→ TRANSLATING → BURNING → SUCCESS
 ```
 
-Any failed step moves the job to `FAILED` and stores the failed step and error message.
+A failed step moves the job to `FAILED` and records the failing stage and error. Artifacts are stored in `data/{task_id}/` by default.
 
-### 4.2 Project Structure
+## ⚙️ Common Configuration
 
-```text
-.
-├── main.py                 CLI entry point
-├── pyproject.toml          Dependencies and pytest configuration
-├── uv.lock                 uv lockfile
-├── src/
-│   ├── config/             Global settings and storage paths
-│   ├── core/               Download, audio, transcription, translation, burning, and SRT tools
-│   ├── service/            Pipeline orchestration, background runner, and SRT schema
-│   ├── store/              SQLite task store
-│   └── handler/            FastAPI routes
-├── web/                    Frontend workbench
-├── tests/                  pytest tests
-└── README——1.md            Historical README material
-```
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SUBTRANS_DATA_DIR` | `./data` | Job artifact directory |
+| `SUBTRANS_DB` | `./app.db` | SQLite database path |
+| `SUBTRANS_WORKERS` | `2` | Background worker count |
+| `SUBTRANS_COOKIES` | Empty | Cookies file for sites that require login or verification |
+| `SUBTRANS_WHISPER_MODEL` | Pinned version | Replicate Whisper model |
+| `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | Translation model |
+| `SUBTRANS_API_BASE_URL` | `http://127.0.0.1:8000` | Business API used by MCP |
+| `SUBTRANS_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |
 
-Job artifacts are stored in `data/{task_id}/` by default:
+See [.env.example](./.env.example) and [mcp.env.example](./mcp.env.example) for all options. Once started, API documentation is available at <http://localhost:8000/docs>.
 
-| File | Description |
-| --- | --- |
-| `source.mp4` | Downloaded video |
-| `audio.wav` | Extracted audio |
-| `original.srt` | Source-language subtitles |
-| `translated.srt` | Translated subtitles |
-| `output.mp4` | Final video with subtitles |
-
-## 5. Developer Guide
-
-### 5.1 Local Development
+## 🧪 Development & Verification
 
 ```bash
 uv sync
-uv run uvicorn src.handler.app:app --reload --port 8000
-```
-
-Frontend files live in `web/` and are served automatically by FastAPI. After editing them, refresh <http://localhost:8000/> to see the result.
-
-To preview the frontend without the backend, temporarily set `USE_MOCK: true` in `web/config.js`.
-
-### 5.2 Pre-submission Checks
-
-The project already has pytest configured. Before submitting changes, run at least:
-
-```bash
 uv run pytest -q
+cd web && npm test
 ```
 
-For one module:
-
-```bash
-uv run pytest tests/test_translator.py -q
-```
-
-Networked end-to-end tests are skipped by default. To run real downloads and cloud service calls:
-
-```bash
-SUBTRANS_LIVE_TEST=1 uv run pytest tests/test_live_pipeline.py -v -s
-```
-
-### 5.3 Cloud CI Verification
-
-The repository currently does not include `.github/workflows/`. Needs User Input: add CI configuration. Recommended checks include dependency installation, pytest, and a basic startup or health check.
-
-## 6. Contributing
-
-For Issue templates, Pull Request process, Commit Message conventions, local testing, and compliance info, please refer to the detailed [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-### 6.1 Issue
-
-Public Issues are appropriate for:
-
-- Bug reports
-- Feature requests
-- Documentation problems
-- Reproducible usage questions
-
-Do not report security vulnerabilities in public Issues. For detailed templates and guidelines, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md#2-如何反馈问题-issue-规范).
-
-### 6.2 Pull Request
-
-Recommended flow:
-
-1. Fork this project.
-2. Create a feature branch.
-3. Make the change and run relevant local checks.
-4. Run `uv run pytest -q`.
-5. Open a Pull Request with the scope, verification steps, and known risks.
-
-For a more detailed code review and merge flow, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md#3-开发流程-fork--pr-规范).
-
-### 6.3 Commit & Branch Convention
-
-This project follows the **Conventional Commits** specification. Suggested commit messages:
+Key directories:
 
 ```text
-feat: add subtitle preview controls
-fix: handle ffmpeg subtitle filter errors
-docs: update README
+src/core/          Download, audio, transcription, translation, subtitle burning
+src/handler/       FastAPI routes and frontend static hosting
+src/mcp_server/    MCP Server, tools, and business API client
+src/service/       Pipeline orchestration and background execution
+src/store/         SQLite job storage
+web/               Vanilla HTML / CSS / JavaScript workbench
+tests/             Python tests
 ```
 
-For full commit type definitions and examples, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md#4-代码及提交规范-commit-message--style).
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before contributing. Report security issues privately through [SECURITY.md](./SECURITY.md), not through a public Issue.
 
-### 6.4 Security Vulnerability Reporting
+## ❓ Troubleshooting
 
-Do not disclose security vulnerabilities in public Issues. We have established clear security disclosure procedures and channels. Please refer to [SECURITY.md](./SECURITY.md) in the project root directory. Security researchers and users can submit potential security risks through the private channels specified in that file (such as GitHub Security Advisories or the security email) for more timely response and assistance.
-
-## 7. Versioning
-
-### 7.1 Releases & Tags
-
-The project version is maintained in `pyproject.toml`; the current version is `1.0.2`. Stable releases use the `subtitles-ai-v<major>.<minor>.<patch>` format for GitHub Releases and tags. Backward-compatible fixes and small improvements increment the patch version.
-
-### 7.2 Changelog
-
-The repository currently does not include `CHANGELOG.md`. Needs User Input: add a changelog for new features, bug fixes, performance improvements, and breaking changes.
-
-### 7.3 Upgrade Guide
-
-No separate upgrade guide was found. For environment variable, data directory, database, or external model changes, document migration steps in the changelog.
-
-## 8. License
-
-This project is licensed under the [MIT License](./LICENSE). You are free to use, modify, and redistribute this project. See the [LICENSE](./LICENSE) file for more details.
-
-## 9. Troubleshooting
-
-| Symptom | Resolution |
+| Problem | Resolution |
 | --- | --- |
-| `Replicate` request timeout | Increase `SUBTRANS_REPLICATE_TIMEOUT` or `SUBTRANS_REPLICATE_RETRIES`, and confirm network access to Replicate |
-| Hard-burn fails or the `subtitles` filter is missing | Install `ffmpeg-full` via Homebrew instead of regular `ffmpeg`, or temporarily use `--burn soft` |
-| Download fails or login is required | Check whether the URL is valid; set `SUBTRANS_COOKIES` to a cookies file when needed |
-| Unsure which Web URL to open | Use <http://localhost:8000/>. `5273` is a legacy standalone static-server entry point and is no longer the recommended startup path. |
-| Frontend cannot connect to backend | Confirm the backend runs at `http://localhost:8000`, or override the address with `SUBTRANS_API_BASE_URL` in browser `localStorage` |
-| Translation reports missing key | Confirm `.env` contains `SUBTRANS_DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY`, then restart the backend |
+| Hard subtitles report a missing `subtitles` filter | Install `ffmpeg-full`, or use `--burn soft` |
+| Download fails or the site requires authentication | Check the URL and set `SUBTRANS_COOKIES` to a cookies file |
+| MCP returns `BUSINESS_UNAVAILABLE` | Start the `uvicorn` business service, then rerun the setup check |
+| MCP returns `NOT_INITIALIZED` | Complete `.env` credentials and restart the business service |
+| Frontend cannot reach the backend | Confirm <http://localhost:8000/api/health> is available |
 
-## 10. Compliance
+## 📄 License & Compliance
 
-Use this tool only for video content that you are authorized to access, download, transcribe, translate, and redistribute. Check the target site's terms of service, copyright restrictions, and applicable local laws before use.
+This project is released under the [MIT License](./LICENSE).
+
+Only process video content that you are authorized to access, download, transcribe, translate, and redistribute. Follow the target site's terms of service, copyright restrictions, and applicable local law.
