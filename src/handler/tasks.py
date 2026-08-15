@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import List, Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from src.config import (
@@ -27,11 +27,25 @@ from src.config import (
 )
 from src.core.downloader import probe_video
 from src.handler.subtitle_editor import release_lock
-from src.handler.deps import get_store
-from src.handler.schemas import TaskCreate, TaskOut, TaskProbeIn, TaskProbeOut, to_out
+from src.handler.deps import get_probe_store, get_store
+from src.handler.schemas import (
+    ProbeRecordOut,
+    ProbeRecordsClearOut,
+    TaskCreate,
+    TaskOut,
+    TaskProbeIn,
+    TaskProbeOut,
+    _probe_record_to_out,
+    to_out,
+)
 from src.service.runner import enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
-from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskStore
+from src.store import (
+    RESOURCE_STATUS_AVAILABLE,
+    RESOURCE_STATUS_MISSING,
+    ProbeStore,
+    TaskStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,9 +209,29 @@ def get_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 
 
 @router.post("/probe", response_model=TaskProbeOut)
-def probe_task(body: TaskProbeIn) -> TaskProbeOut:
-    """探测视频链接是否能被 yt-dlp 解析并找到可下载格式。"""
+def probe_task(
+    body: TaskProbeIn,
+    probes: ProbeStore = Depends(get_probe_store),
+) -> TaskProbeOut:
+    """探测视频链接是否能被 yt-dlp 解析并找到可下载格式。
+
+    每次探测都持久化一行到 probe_records，便于用户回看历史、
+    排查"链接换格式还是不可下载"等问题。失败也会记录（含 reason/detail），
+    错误信息不会因为页面刷新而丢失。
+    """
     result = probe_video(body.url)
+    # 探测本身失败不影响响应；同时把 ok=False 的记录也存下来，方便回看错误
+    probes.record(
+        url=body.url,
+        ok=result.ok,
+        title=result.title,
+        extractor=result.extractor,
+        duration=result.duration,
+        formats_count=result.formats_count,
+        webpage_url=result.webpage_url,
+        reason=result.reason,
+        detail=result.detail,
+    )
     return TaskProbeOut(
         ok=result.ok,
         title=result.title,
@@ -208,6 +242,34 @@ def probe_task(body: TaskProbeIn) -> TaskProbeOut:
         reason=result.reason,
         detail=result.detail,
     )
+
+
+@router.get("/probe/records", response_model=List[ProbeRecordOut])
+def list_probe_records(
+    limit: int = Query(50, ge=1, le=500),
+    probes: ProbeStore = Depends(get_probe_store),
+) -> List[ProbeRecordOut]:
+    """按时间倒序返回最近的下载测试记录。limit 默认 50，上限 500。"""
+    return [_probe_record_to_out(r) for r in probes.list(limit=limit)]
+
+
+@router.delete("/probe/records", response_model=ProbeRecordsClearOut)
+def clear_probe_records(
+    probes: ProbeStore = Depends(get_probe_store),
+) -> ProbeRecordsClearOut:
+    """一键清空所有下载测试历史。"""
+    deleted = probes.clear()
+    return ProbeRecordsClearOut(deleted=deleted)
+
+
+@router.delete("/probe/records/{record_id}", status_code=204)
+def delete_probe_record(
+    record_id: str,
+    probes: ProbeStore = Depends(get_probe_store),
+) -> None:
+    """删除单条下载测试历史；不存在返回 404。"""
+    if not probes.delete(record_id):
+        raise HTTPException(status_code=404, detail="测试记录不存在")
 
 
 @router.delete("/{task_id}", status_code=204)
