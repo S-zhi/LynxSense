@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from src.config import settings
 
 
-from src.handler import health, srt, subtitle_editor, tasks, storage, translation_engines
+from src.handler import health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
 
 from src.handler.deps import get_store
 from src.service.runner import recover_interrupted_tasks
@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(storage.router)
     app.include_router(subtitle_editor.router)
     app.include_router(health.router)
+    app.include_router(replicate.router)
     app.include_router(translation_engines.router)
 
     # 最后挂载前端静态文件（必须放在 API router 之后，否则会拦截 /api/*）。

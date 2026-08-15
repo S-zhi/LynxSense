@@ -1,3 +1,15 @@
+.advanced-settings { display:flex; flex-direction:column; gap:18px; }
+.advanced-tabs { display:flex; align-items:flex-end; gap:3px; min-height:46px; border-bottom:1px solid var(--border); }
+.advanced-tab { position:relative; display:inline-flex; align-items:center; gap:8px; min-height:46px; padding:0 14px; color:var(--text-3); background:transparent; border:0; border-bottom:2px solid transparent; font:600 12px var(--font-mono); cursor:pointer; transition:color .18s ease, border-color .18s ease, background .18s ease; }
+.advanced-tab::after { content:""; position:absolute; right:12px; bottom:-2px; left:12px; height:2px; background:var(--accent); transform:scaleX(0); transform-origin:center; transition:transform .2s ease; }
+.advanced-tab i { font-size:17px; }
+.advanced-tab:hover { color:var(--text); background:var(--surface-2); }
+.advanced-tab.is-active { color:var(--accent-text); }
+.advanced-tab.is-active::after { transform:scaleX(1); }
+.advanced-tab:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.advanced-tab-panel[hidden] { display:none; }
+.advanced-tab-panel { animation:advanced-panel-in .22s ease both; }
+@keyframes advanced-panel-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
 .translation-settings { display:flex; flex-direction:column; gap:16px; }
 .translation-settings__head { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; flex-wrap:wrap; }
 .translation-settings__head h2 { margin:4px 0 3px; font-size:22px; letter-spacing:-.035em; }
@@ -5,6 +17,21 @@
 .eyebrow { color:var(--accent-text); font:600 10px/1 var(--font-mono); letter-spacing:.08em; }
 .translation-settings__notice { display:flex; align-items:center; gap:9px; padding:10px 13px; color:var(--text-2); background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 18%, var(--border)); border-radius:var(--r-row); font-size:12px; }
 .translation-settings__notice i { color:var(--accent); font-size:17px; }
+.replicate-billing { display:flex; flex-direction:column; gap:13px; padding:16px 17px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-row); box-shadow:var(--shadow-1); }
+.replicate-billing__head { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.replicate-billing__identity { display:flex; align-items:center; gap:10px; min-width:0; }
+.replicate-billing__icon { width:36px; height:36px; display:grid; place-items:center; flex:none; border-radius:11px; color:var(--accent); background:var(--surface-2); font-size:19px; }
+.replicate-billing h2 { margin:4px 0 3px; font-size:22px; letter-spacing:-.035em; }
+.replicate-billing p { margin:3px 0 0; color:var(--text-3); font-size:11px; }
+.replicate-billing__body { display:flex; align-items:center; justify-content:space-between; gap:14px; padding-top:3px; border-top:1px solid var(--border); }
+.replicate-billing__metric { display:grid; gap:3px; min-width:120px; }
+.replicate-billing__label { color:var(--text-3); font-size:11px; }
+.replicate-billing__metric strong { font-size:24px; letter-spacing:-.04em; }
+.replicate-billing__detail { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; color:var(--text-3); font-size:11px; text-align:right; }
+.replicate-billing__account { color:var(--text-2); font-family:var(--font-mono); }
+.replicate-billing__message { max-width:440px; }
+.replicate-billing__detail a { color:var(--accent-text); white-space:nowrap; }
+@media (max-width:760px) { .replicate-billing__head, .replicate-billing__body { align-items:flex-start; flex-direction:column; } .replicate-billing__detail { align-items:flex-start; flex-wrap:wrap; justify-content:flex-start; text-align:left; } }
 .engine-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 .engine-card { position:relative; display:flex; flex-direction:column; gap:13px; padding:17px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-row); box-shadow:var(--shadow-1); overflow:hidden; }
 .engine-card::before { content:""; position:absolute; inset:0 0 auto; height:3px; background:linear-gradient(90deg,var(--accent),transparent 78%); opacity:.8; }
