@@ -21,19 +21,35 @@ const LANGUAGE_DISPLAY = typeof Intl !== "undefined" && Intl.DisplayNames
   ? new Intl.DisplayNames(["zh-CN"], { type: "language" })
   : null;
 
-function initEngines() {
-  // 初始化翻译引擎下拉框。
+function initEngines(engines = null) {
+  // 初始化翻译引擎下拉框；引擎来自高级设置中的持久化配置。
   const sel = $("#engine");
   sel.innerHTML = "";
-  CFG.TRANSLATION_ENGINES.forEach((e) => {
+  const items = engines?.length ? engines : [{ id: "deepseek", name: "DeepSeek（兼容旧配置）", availability: "UNKNOWN", enabled: true }];
+  items.forEach((e) => {
     const o = el("option");
-    o.value = e.value;
-    o.textContent = e.enabled ? e.label : e.label + "（暂未开放）";
-    o.disabled = !e.enabled;
+    o.value = e.id || e.value;
+    const unavailable = !e.enabled || (e.availability && e.availability !== "AVAILABLE" && e.id !== "deepseek");
+    o.textContent = unavailable ? `${e.name || e.label}（${e.availability === "UNCONFIGURED" ? "未配置" : "不可用"}）` : (e.name || e.label);
+    o.disabled = unavailable;
     sel.append(o);
   });
-  const first = CFG.TRANSLATION_ENGINES.find((e) => e.enabled);
-  if (first) sel.value = first.value;
+  const first = items.find((e) => e.enabled && (e.availability === "AVAILABLE" || e.id === "deepseek")) || items[0];
+  if (first) sel.value = first.id || first.value;
+}
+
+async function loadEngines() {
+  try {
+    let engines = await Api.listTranslationEngines();
+    const pending = engines.filter((e) => e.hasApiKey && e.availability === "UNKNOWN");
+    if (pending.length) {
+      await Promise.all(pending.map((e) => Api.validateTranslationEngine(e.id).catch(() => null)));
+      engines = await Api.listTranslationEngines();
+    }
+    initEngines(engines);
+  } catch (_) {
+    initEngines();
+  }
 }
 
 function option(value, label = value) {
@@ -154,6 +170,8 @@ async function initSrtOptions() {
 export function initConsole() {
   // 初始化控制台表单交互。
   initEngines();
+  loadEngines();
+  document.addEventListener("translation-engines-change", () => loadEngines());
   initSrtOptions();
 
   const form = $("#taskForm");

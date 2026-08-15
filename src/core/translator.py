@@ -1,4 +1,4 @@
-"""流水线第④步：翻译字幕（DeepSeek）。
+"""流水线第④步：翻译字幕（可配置 OpenAI/Anthropic 兼容协议）。
 
 输入：original.srt（识别阶段产物） + 任务 ID + 源/目标语言 + 模式
 输出：TranslateResult（其中 srt_path 指向 data/{task_id}/translated.srt）
@@ -6,10 +6,10 @@
 时间轴严格保留：只翻译每条字幕的文本，时间戳原样复制。
 mode="bilingual" 时每条字幕保留原文 + 译文两行。
 
-翻译走 DeepSeek 的 OpenAI 兼容 /chat/completions 接口，按批发送以减少请求数。
+翻译按配置选择 OpenAI-compatible 或 Anthropic-compatible 接口，按批发送以减少请求数。
 网络调用集中在 _call_deepseek（懒加载 httpx），便于单测 mock。
 
-当前仅支持 DeepSeek，后续可在此扩展更多引擎。
+旧版 DeepSeek 环境变量仍作为兼容路径保留。
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from src.config import settings, ensure_task_dir, TRANSLATED_SRT
+from src.core.translation_engines import TranslationEngineError, make_engine_client
 from src.core.srt_utils import Subtitle, parse_srt, write_srt
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ def translate_texts(
     *,
     api_key: Optional[str] = None,
     on_batch: Optional[BatchHook] = None,
+    engine_config=None,
 ) -> List[str]:
     """翻译一批文本，保持顺序与数量一致。
 
@@ -112,14 +114,16 @@ def translate_texts(
     if not texts:
         return []
     key = api_key or settings.deepseek_api_key
+    if engine_config is not None:
+        key = getattr(engine_config, "api_key", None) or (engine_config.get("api_key") if isinstance(engine_config, dict) else None)
     if not key:
-        raise TranslateError("缺少 DeepSeek API Key（设置 SUBTRANS_DEEPSEEK_API_KEY）")
+        raise TranslateError("缺少翻译引擎 API Key")
 
     batch_size = max(1, settings.translate_batch_size)
     out: List[str] = []
     for start in range(0, len(texts), batch_size):
         batch = texts[start:start + batch_size]
-        translated = _translate_with_fallback(batch, source_lang, target_lang, key)
+        translated = _translate_with_fallback(batch, source_lang, target_lang, key, engine_config=engine_config)
         out.extend(translated)
         if on_batch is not None:
             on_batch(len(out), len(texts))
@@ -127,12 +131,12 @@ def translate_texts(
 
 
 def _translate_with_fallback(
-    batch: List[str], source_lang: str, target_lang: str, api_key: str
+    batch: List[str], source_lang: str, target_lang: str, api_key: str, *, engine_config=None
 ) -> List[str]:
     """翻译一个批次，数量不匹配时自动减半拆分重试。"""
     size = len(batch)
     try:
-        translated = _translate_batch(batch, source_lang, target_lang, api_key)
+        translated = _translate_batch(batch, source_lang, target_lang, api_key, engine_config=engine_config)
         if len(translated) == size:
             return translated
     except Exception:
@@ -145,12 +149,12 @@ def _translate_with_fallback(
     # 减半拆分：递归处理两个子批
     half = max(1, size // 2)
     logger.warning("批量 %d 翻译结果不匹配，拆分为 %d + %d 重试", size, half, size - half)
-    left = _translate_with_fallback(batch[:half], source_lang, target_lang, api_key)
-    right = _translate_with_fallback(batch[half:], source_lang, target_lang, api_key)
+    left = _translate_with_fallback(batch[:half], source_lang, target_lang, api_key, engine_config=engine_config)
+    right = _translate_with_fallback(batch[half:], source_lang, target_lang, api_key, engine_config=engine_config)
     return left + right
 
 
-def _translate_batch(batch: List[str], source_lang: str, target_lang: str, api_key: str) -> List[str]:
+def _translate_batch(batch: List[str], source_lang: str, target_lang: str, api_key: str, *, engine_config=None) -> List[str]:
     tgt = _lang_name(target_lang)
     src = _lang_name(source_lang)
     numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(batch))
@@ -166,16 +170,17 @@ def _translate_batch(batch: List[str], source_lang: str, target_lang: str, api_k
         "with no extra text:\n\n"
         f"{numbered}"
     )
-    content = _call_deepseek(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        api_key=api_key,
-        base_url=settings.deepseek_base_url,
-        model=settings.deepseek_model,
-        timeout=settings.translate_timeout,
-    )
+    if engine_config is None:
+        content = _call_deepseek(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            api_key=api_key, base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model, timeout=settings.translate_timeout,
+        )
+    else:
+        try:
+            content = make_engine_client(engine_config).complete(system, user)
+        except TranslationEngineError as exc:
+            raise TranslateError(str(exc)) from exc
     return _parse_translation_response(content, len(batch))
 
 
@@ -208,6 +213,7 @@ def translate_srt(
     mode: str = "mono",
     on_progress: Optional[ProgressHook] = None,
     api_key: Optional[str] = None,
+    engine_config=None,
 ) -> TranslateResult:
     """翻译 SRT 文件到 data/{task_id}/translated.srt，时间轴保持不变。
 
@@ -241,7 +247,7 @@ def translate_srt(
     logger.info("开始翻译: task=%s 条数=%d -> %s", task_id, len(subs), target_lang)
     translated = translate_texts(
         [s.text for s in subs], source_lang, target_lang,
-        api_key=api_key, on_batch=_on_batch,
+        api_key=api_key, on_batch=_on_batch, engine_config=engine_config,
     )
 
     out_subs = [

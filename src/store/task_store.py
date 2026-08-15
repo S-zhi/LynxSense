@@ -42,7 +42,7 @@ class TaskRecord:
     mode: str          # mono | bilingual
     burn: str          # hard | soft
     model: str         # whisper 模型
-    engine: str        # 翻译引擎，目前 deepseek
+    engine: str        # 翻译引擎配置 ID；deepseek 为旧版兼容值
     source_type: str = "url"  # url=在线链接下载 upload=本地上传视频
     need_subtitle: int = 1  # 1=需要字幕(完整流水线) 0=仅下载视频
     status: str = "PENDING"

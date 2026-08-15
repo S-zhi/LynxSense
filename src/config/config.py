@@ -113,7 +113,7 @@ class Settings:
     # Replicate 超时/网络错误的重试次数（冷启动常见）
     replicate_retries: int = int(os.getenv("SUBTRANS_REPLICATE_RETRIES", "3"))
 
-    # --- ④ 翻译（DeepSeek，OpenAI 兼容接口）---
+    # --- ④ 翻译（旧版 DeepSeek 兼容配置；新配置位于 SQLite）---
     deepseek_api_key: Optional[str] = (
         os.getenv("SUBTRANS_DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
     )
