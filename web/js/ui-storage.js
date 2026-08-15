@@ -197,13 +197,18 @@ function renderTable() {
 
     // 复选框：运行中任务禁用
     const checkTd = el("td", "storage-table__check");
-    const cb = el("input");
+    const check = el("label", "storage-check");
+    const cb = el("input", "storage-check__input");
     cb.type = "checkbox";
     cb.checked = local.selected.has(t.taskId);
     cb.disabled = isRunning;
     cb.title = isRunning ? "运行中任务会被自动跳过" : "选择此任务";
+    cb.setAttribute("aria-label", cb.title);
+    const checkBox = el("span", "storage-check__box");
+    checkBox.setAttribute("aria-hidden", "true");
     cb.addEventListener("change", () => toggleSelect(t.taskId, cb.checked));
-    checkTd.append(cb);
+    check.append(cb, checkBox);
+    checkTd.append(check);
 
     // 标题
     const titleTd = el("td", "storage-table__title");
@@ -320,7 +325,15 @@ function updateActions() {
   const hasSelection = n > 0;
   els.previewBtn.disabled = !hasSelection;
   els.apply.disabled = !hasSelection;
-  els.checkAll.checked = false;
+
+  // 让表头选择器反映真实状态：全选、部分选择和无可选项分别可见。
+  const selectable = local.stats
+    ? local.stats.byTask.filter((t) => !RUNNING.has(t.status))
+    : [];
+  const selectedCount = selectable.filter((t) => local.selected.has(t.taskId)).length;
+  els.checkAll.checked = selectable.length > 0 && selectedCount === selectable.length;
+  els.checkAll.indeterminate = selectedCount > 0 && selectedCount < selectable.length;
+  els.checkAll.disabled = selectable.length === 0;
 }
 
 /* ---------- 预览 / 执行 ---------- */

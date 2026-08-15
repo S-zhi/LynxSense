@@ -431,7 +431,12 @@
               <table class="storage-table" id="storageTable">
                 <thead>
                   <tr>
-                    <th class="storage-table__check"><input type="checkbox" id="storageCheckAll" aria-label="全选" /></th>
+                    <th class="storage-table__check">
+                      <label class="storage-check storage-check--header">
+                        <input class="storage-check__input" type="checkbox" id="storageCheckAll" aria-label="全选" />
+                        <span class="storage-check__box" aria-hidden="true"></span>
+                      </label>
+                    </th>
                     <th class="storage-table__title">任务</th>
                     <th class="storage-table__status">状态</th>
                     <th class="storage-table__artifacts">产物</th>
