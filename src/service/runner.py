@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from src.config import settings
 from src.service.orchestrator import PipelineEvent, PipelineParams, run_pipeline
 from src.service.asset_resolver import ResourceError
-from src.store import STATUSES, TaskStore
+from src.store import STATUSES, TaskStore, TranslationEngineStore
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ _executor = ThreadPoolExecutor(
 )
 _store = TaskStore(settings.db_path)
 _RECOVERABLE_STATUSES = set(STATUSES) - {"SUCCESS", "FAILED"}
+_engine_store = TranslationEngineStore(settings.db_path)
 
 
 def enqueue_pipeline(task_id: str) -> None:
@@ -82,8 +83,20 @@ def _run(task_id: str) -> None:
             fields["output_subtitle"] = ev.outputs.get("subtitle")
         _store.update(task_id, **fields)
 
+    engine_config = None
+    if rec.engine != "deepseek":
+        engine_config = _engine_store.get(rec.engine)
+        if engine_config is None:
+            _store.update(task_id, status="FAILED", error="翻译引擎配置不存在")
+            return
     try:
-        run_pipeline(params, on_event, api_key=settings.deepseek_api_key)
+        pipeline_kwargs = {
+            "api_key": settings.deepseek_api_key if rec.engine == "deepseek" else None,
+        }
+        # 仅在新引擎配置存在时传入扩展参数，保持旧版测试/调用方兼容。
+        if engine_config is not None:
+            pipeline_kwargs["engine_config"] = engine_config
+        run_pipeline(params, on_event, **pipeline_kwargs)
     except ResourceError as e:
         logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         cur = _store.get(task_id)

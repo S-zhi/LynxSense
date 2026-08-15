@@ -8,6 +8,7 @@ import { initPreview } from "./ui-preview.js";
 import { initEditor } from "./ui-editor.js";
 import { initProbe } from "./ui-probe.js";
 import { initStorage } from "./ui-storage.js";
+import { initTranslationSettings } from "./ui-translation-settings.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
 
 initTheme();
@@ -18,6 +19,7 @@ initPreview();
 initEditor();
 initProbe();
 initStorage();
+initTranslationSettings();
 
 loadTasks();
 

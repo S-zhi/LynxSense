@@ -9,6 +9,12 @@ from .task_store import (
     TaskRecord,
     TaskStore,
 )
+from .translation_engine_store import (
+    AVAILABILITY,
+    ENGINE_TYPES,
+    TranslationEngine,
+    TranslationEngineStore,
+)
 
 __all__ = [
     "ProbeRecord",
@@ -19,4 +25,8 @@ __all__ = [
     "RESOURCE_STATUS_MISSING",
     "RESOURCE_STATUSES",
     "STATUSES",
+    "AVAILABILITY",
+    "ENGINE_TYPES",
+    "TranslationEngine",
+    "TranslationEngineStore",
 ]
