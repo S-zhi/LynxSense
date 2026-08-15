@@ -88,7 +88,7 @@ uv sync
 
 ### 2.2 配置环境变量
 
-仓库当前没有 `.env.example`，需要补充。首次运行前，请在项目根目录手动创建 `.env`：
+复制项目根目录的 `.env.example` 为 `.env`，并填写真实密钥：
 
 ```ini
 REPLICATE_API_TOKEN=你的 Replicate Token
@@ -122,6 +122,12 @@ curl http://localhost:8000/api/health
 
 ```json
 {"ok": true}
+```
+
+检查完整流水线依赖是否就绪：
+
+```bash
+curl http://localhost:8000/api/health/ready
 ```
 
 前端与 API 默认使用同一入口 `http://localhost:8000`，通常无需额外配置。如需切换到其他后端地址，可在浏览器控制台执行：
@@ -210,6 +216,7 @@ uv run python -m src.core.subtitle_burner data/<task_id>/source.mp4 data/<task_i
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/health/ready` | 脱敏的配置、依赖和存储就绪检查 |
 | `POST` | `/api/tasks` | 创建任务并加入后台队列 |
 | `GET` | `/api/tasks` | 获取任务列表 |
 | `GET` | `/api/tasks/{id}` | 获取任务详情 |
@@ -226,6 +233,11 @@ uv run python -m src.core.subtitle_burner data/<task_id>/source.mp4 data/<task_i
 | `POST` | `/api/storage/cleanup` | 执行清理：按筛选条件清理，强制跳过 RUNNING 任务 |
 | `GET` | `/api/storage/retention` | 读取简化保留策略（days=null 表示不限） |
 | `PUT` | `/api/storage/retention` | 写入简化保留策略 |
+
+### 3.5 MCP Server
+
+MCP Server 是独立的业务 API 适配层，不直接访问 SQLite 或流水线代码。启动方式和
+工具说明见 [MCP Server 文档](docs/mcp-server.md)。
 
 `POST /api/tasks` 请求体：
 
