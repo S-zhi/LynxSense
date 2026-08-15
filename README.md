@@ -1,422 +1,277 @@
 [English](./README.en.md) | 简体中文
 
-# Subtitles AI · 字幕翻译工作台
+<div align="center">
+  <img src="./web/assets/subtitles-ai-logo.svg" width="88" alt="Subtitles AI Logo" />
+  <h1>Subtitles AI</h1>
+  <p><strong>把任意视频变成可理解、可翻译、可交付的字幕成片。</strong></p>
+  <p>既是开箱即用的可视化字幕工作台，也是可被 AI Agent 调用的 MCP 字幕能力。</p>
 
-![Python](https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)
-![uv](https://img.shields.io/badge/uv-managed-6340AC?logo=uv&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)
-![Vanilla JS](https://img.shields.io/badge/frontend-Vanilla%20JS-F7DF1E?logo=javascript&logoColor=black)
-![Replicate](https://img.shields.io/badge/ASR-Replicate%20Whisper-000000?logo=replicate&logoColor=white)
-![DeepSeek](https://img.shields.io/badge/Translate-DeepSeek-4D6BFE)
-![FFmpeg](https://img.shields.io/badge/FFmpeg-libass-388E3C?logo=ffmpeg&logoColor=white)
-![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
+  <p>
+    <a href="#-快速开始">快速开始</a> ·
+    <a href="#-mcp-接入">MCP 接入</a> ·
+    <a href="#-web-工作台">Web 工作台</a> ·
+    <a href="./docs/mcp-server.md">完整文档</a>
+  </p>
 
-Subtitles AI 是一个本地视频字幕翻译工作台。输入视频 URL 后，它会按流水线自动完成下载、音频提取、语音识别、字幕翻译和字幕烧录，输出带翻译字幕的视频与 SRT 文件。
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white" alt="Python" />
+    <img src="https://img.shields.io/badge/MCP-2.x-6C5CE7" alt="MCP" />
+    <img src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+    <img src="https://img.shields.io/badge/FFmpeg-libass-388E3C?logo=ffmpeg&logoColor=white" alt="FFmpeg" />
+    <img src="https://img.shields.io/badge/License-MIT-F5C518" alt="MIT License" />
+  </p>
+</div>
 
-![Subtitles AI 界面截图](./img_2.png)
+![Subtitles AI 可视化工作台](./docs/assets/subtitles-ai-workbench.png)
 
-## 1. 产品介绍
+Subtitles AI 将视频下载、音频提取、语音识别、字幕翻译与字幕烧录串成一条自动化流水线。粘贴视频页面地址或拖入本地视频，即可获得翻译后的 SRT 与成品视频；也可以把同一套能力接入支持 MCP 的 AI 客户端，让 Agent 自主检查环境、创建任务、跟踪进度并交付产物。
 
-### 1.1 项目定位
+## ✨ 两种使用方式
 
-本项目适合需要批量或半自动处理视频字幕的个人工作流：通过 Web 工作台查看任务进度，也可以用命令行直接跑完整流程。识别依赖 Replicate 托管 Whisper，翻译依赖 DeepSeek，视频处理依赖本机 FFmpeg。
+| | 🤖 MCP 接入 | 🖥️ Web 工作台 |
+| --- | --- | --- |
+| 适合谁 | 希望让 Codex、Claude Desktop 等 AI 客户端处理视频的用户 | 希望直接在浏览器中操作的用户 |
+| 怎么使用 | 用自然语言让 Agent 创建、查询、重试字幕任务 | 粘贴 URL 或拖入视频，选择语言与字幕参数 |
+| 核心体验 | 工具可发现、状态可追踪、结果结构化返回 | 任务队列、实时进度、视频预览、字幕编辑与下载 |
+| 接入方式 | stdio 或 Streamable HTTP | 本地打开 `http://localhost:8000` |
 
-### 1.2 功能展示
+```mermaid
+flowchart LR
+    Input["视频 URL / 本地视频"] --> Entry{"选择入口"}
+    Entry -->|自然语言| Agent["AI Agent + MCP"]
+    Entry -->|可视化操作| Web["Web 工作台"]
+    Agent --> API["Subtitles AI API"]
+    Web --> API
+    API --> Pipeline["下载 → 识别 → 翻译 → 烧录"]
+    Pipeline --> Output["成品视频 + SRT 字幕"]
+```
 
-- 一条 URL 跑完整流程：下载视频、提取音频、识别字幕、翻译字幕、生成成品视频。
-- Web 工作台支持任务创建、任务列表、实时进度、结果预览和产物下载。
-- 命令行入口 `main.py` 支持目标语言、源语言、字幕模式、烧录方式和模型参数。
-- 支持仅译文字幕或双语对照字幕。
-- 支持硬烧录字幕和软字幕轨道。
-- 每个任务的中间产物都保存在独立目录，便于排查和复用。
+## 🚀 快速开始
 
-### 1.3 平台与技术支持
+### 1. 准备环境
 
-| 类型 | 支持情况 |
-| --- | --- |
-| 操作系统 | 当前仅支持并验证 macOS；Linux / Windows 尚未适配 |
-| Python | `>=3.10,<3.13`，仓库当前 `.python-version` 为 `3.11` |
-| 包管理 | uv |
-| 后端 | FastAPI + Uvicorn |
-| 前端 | 原生 HTML / CSS / JavaScript ES Modules |
-| 存储 | SQLite，WAL 模式 |
-| 视频处理 | yt-dlp、ffmpeg-full、ffprobe；硬烧录依赖 libass |
-| 云服务 | Replicate、DeepSeek |
-
-### 1.4 文档导航
-
-- [快速开始](#2-快速开始)
-- [配置与命令说明](#3-配置与命令说明)
-- [系统架构与项目结构](#4-系统架构与项目结构)
-- [开发者指南](#5-开发者指南)
-- [贡献指南](#6-贡献指南)
-- [安全漏洞报告](#64-安全漏洞报告)
-- [版本管理](#7-版本管理)
-- [许可证](#8-许可证)
-
-### 1.5 AI 协作文档
-
-仓库当前未发现 `AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md`。如需沉淀 AI Agent 协作规则，需要补充独立文档，README 只保留入口。
-
-## 2. 快速开始
-
-### 2.1 安装系统依赖与项目依赖
-
-当前项目仅按 macOS 环境适配。请先通过 Homebrew 安装 `uv` 和带 `libass` 的 `ffmpeg-full`：
+当前已在 macOS 验证，需要 Python `3.10–3.12`、[uv](https://docs.astral.sh/uv/) 和带 `libass` 的 FFmpeg：
 
 ```bash
 brew install uv
 brew tap homebrew-ffmpeg/ffmpeg
 brew install ffmpeg-full
-```
-
-请不要安装普通 `ffmpeg` 替代 `ffmpeg-full`。普通 `ffmpeg` 可能缺少 `libass`，会导致硬字幕烧录时报 `No such filter: 'subtitles'` 或字幕滤镜不可用。
-
-确认系统依赖可用：
-
-```bash
-uv --version
-ffmpeg -hide_banner -filters | grep " subtitles "
-```
-
-然后安装 Python 项目依赖：
-
-```bash
 uv sync
 ```
 
-### 2.2 配置环境变量
+确认字幕滤镜可用：
 
-复制项目根目录的 `.env.example` 为 `.env`，并填写真实密钥：
-
-```ini
-REPLICATE_API_TOKEN=你的 Replicate Token
-SUBTRANS_DEEPSEEK_API_KEY=你的 DeepSeek Key
+```bash
+ffmpeg -hide_banner -filters | grep " subtitles "
 ```
 
-`.env` 已在 `.gitignore` 中忽略。不要把真实密钥提交到仓库。
+> 普通版 FFmpeg 可能不包含 `libass`，硬字幕会因此无法烧录；遇到该情况也可以选择软字幕模式。
 
-### 2.3 启动项目
+### 2. 配置密钥
 
-启动本地服务：
+```bash
+cp .env.example .env
+```
+
+在 `.env` 中填写：
+
+```ini
+REPLICATE_API_TOKEN=your-replicate-token
+SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
+```
+
+密钥只由业务服务读取，不应写入 MCP 参数或提交到仓库。
+
+### 3. 启动业务服务
 
 ```bash
 uv run uvicorn src.handler.app:app --reload --port 8000
 ```
 
-然后打开：
-
-- Web 工作台：<http://localhost:8000/>
-- FastAPI 文档：<http://localhost:8000/docs>
-
-`8000` 同时提供 API 和前端页面；无需再额外启动 `5273` 静态文件服务器。
-
-### 2.4 验证启动成功
+验证服务：
 
 ```bash
-curl http://localhost:8000/api/health
+curl http://127.0.0.1:8000/api/health
+# {"ok":true}
 ```
 
-成功时会返回：
+现在可以选择以下任一路径：
+
+- 想直接操作：打开 <http://localhost:8000/>。
+- 想让 AI Agent 操作：继续阅读 [MCP 接入](#-mcp-接入)。
+
+## 🤖 MCP 接入
+
+MCP Server 是业务 API 的独立适配层。它不会直接访问 SQLite，也不会持有 Replicate 或 DeepSeek 密钥。
+
+### stdio：接入桌面 AI 客户端
+
+在 MCP 客户端配置中加入以下内容，并把 `/absolute/path/to/Subtitles-AI` 改为本仓库的绝对路径：
 
 ```json
-{"ok": true}
+{
+  "mcpServers": {
+    "subtitles-ai": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/Subtitles-AI",
+        "run",
+        "python",
+        "-m",
+        "src.mcp_server.server"
+      ],
+      "env": {
+        "SUBTRANS_API_BASE_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
 ```
 
-检查完整流水线依赖是否就绪：
+重启 MCP 客户端后，可以直接说：
+
+> 检查字幕服务是否就绪，把这个视频翻译成中英双语字幕，使用软字幕，并在完成后给我下载地址：`<视频 URL>`
+
+Agent 会按以下可追踪流程执行：
+
+```text
+check_subtitle_setup → probe_video → start_subtitle_pipeline
+→ get_task_status（轮询）→ get_task_artifacts（成功后）
+```
+
+### Streamable HTTP：接入远程或共享 Host
 
 ```bash
-curl http://localhost:8000/api/health/ready
+SUBTRANS_MCP_TRANSPORT=streamable-http \
+  uv run python -m src.mcp_server.server
 ```
 
-前端与 API 默认使用同一入口 `http://localhost:8000`，通常无需额外配置。如需切换到其他后端地址，可在浏览器控制台执行：
+默认 MCP 地址：`http://127.0.0.1:3001/mcp`。
 
-```js
-localStorage.setItem("SUBTRANS_API_BASE_URL", "http://localhost:8000")
-```
+### MCP 能力一览
 
-### 2.5 基础命令展示
+| 工具 | 用途 |
+| --- | --- |
+| `check_subtitle_setup` | 检查业务服务、密钥、FFmpeg 与存储是否就绪 |
+| `probe_video` | 在下载前验证视频 URL |
+| `start_subtitle_pipeline` | 异步创建下载 / 识别 / 翻译 / 烧录任务 |
+| `get_task_status` | 查询阶段、进度与错误信息 |
+| `get_task_artifacts` | 获取成功任务的视频与字幕地址 |
+| `list_tasks` | 查看最近任务 |
+| `retry_task` | 经用户确认后重试失败任务 |
 
-不开 Web 页面时，可以直接用命令行处理一个视频：
+完整配置、错误码和 Agent 行为规范见 [MCP Server 文档](./docs/mcp-server.md) 与 [MCP Agent 指南](./docs/mcp-agent-guide.md)。
+
+## 🖥️ Web 工作台
+
+Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务。
+
+1. 打开 <http://localhost:8000/>。
+2. 粘贴视频页面地址，或拖入本地视频。
+3. 选择源语言、目标语言、仅译文 / 双语字幕、硬烧录 / 软字幕和识别模型。
+4. 点击「开始处理」，在任务队列中查看实时进度。
+5. 完成后预览视频、编辑字幕，并下载视频或 SRT 文件。
+
+主要能力：
+
+- **任务中心**：批量任务队列、实时阶段与失败重试。
+- **视频预览**：在浏览器中直接检查最终效果。
+- **字幕编辑**：查看并调整识别或翻译后的字幕。
+- **本地资源**：查看磁盘占用、保留策略和清理预览。
+- **灵活输出**：仅下载视频、单语 / 双语字幕、硬烧录 / 软字幕。
+
+## 🧩 命令行使用
+
+不启动 Web 页面也可以直接运行完整流水线：
 
 ```bash
-uv run python main.py "<视频URL>"
-```
-
-```bash
-uv run python main.py "<视频URL>" --target zh-CN --source auto --mode bilingual --burn hard --model small
-```
-
-## 3. 配置与命令说明
-
-### 3.1 环境变量
-
-| 变量名 | 是否必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `REPLICATE_API_TOKEN` | 是 | 无 | Replicate API Token，用于语音识别 |
-| `SUBTRANS_DEEPSEEK_API_KEY` | 是 | 无 | DeepSeek API Key，用于字幕翻译 |
-| `DEEPSEEK_API_KEY` | 否 | 无 | DeepSeek Key 的兼容变量，未设置 `SUBTRANS_DEEPSEEK_API_KEY` 时使用 |
-| `SUBTRANS_DATA_DIR` | 否 | `./data` | 任务产物根目录 |
-| `SUBTRANS_DB` | 否 | `./app.db` | SQLite 任务库路径 |
-| `SUBTRANS_WORKERS` | 否 | `2` | 后台流水线并发任务数 |
-| `SUBTRANS_CORS_ORIGINS` | 否 | `http://localhost:5273,http://127.0.0.1:5273,http://localhost:8000,http://127.0.0.1:8000` | 允许跨域访问 API 的前端来源，多个值用英文逗号分隔；统一使用 `8000` 时通常无需设置 |
-| `SUBTRANS_DL_FORMAT` | 否 | `bv*+ba/b` | yt-dlp 格式选择 |
-| `SUBTRANS_DL_CONTAINER` | 否 | `mp4` | 下载合并后的容器格式 |
-| `SUBTRANS_DL_RETRIES` | 否 | `3` | 下载失败重试次数 |
-| `SUBTRANS_COOKIES` | 否 | 空 | cookies 文件路径，供需要登录或校验的网站使用 |
-| `SUBTRANS_FFMPEG` | 否 | `ffmpeg` | ffmpeg 可执行文件 |
-| `SUBTRANS_FFPROBE` | 否 | `ffprobe` | ffprobe 可执行文件 |
-| `SUBTRANS_AUDIO_SR` | 否 | `16000` | 提取音频采样率 |
-| `SUBTRANS_AUDIO_CH` | 否 | `1` | 提取音频声道数 |
-| `SUBTRANS_WHISPER_MODEL` | 否 | `stayallive/whisper-subtitles:<locked-version>` | Replicate Whisper 模型标识 |
-| `SUBTRANS_REPLICATE_TIMEOUT` | 否 | `1800` | Replicate 推理超时时间，单位秒 |
-| `SUBTRANS_REPLICATE_RETRIES` | 否 | `3` | Replicate 网络或超时重试次数 |
-| `SUBTRANS_DEEPSEEK_BASE_URL` | 否 | `https://api.deepseek.com` | DeepSeek OpenAI 兼容接口地址 |
-| `SUBTRANS_DEEPSEEK_MODEL` | 否 | `deepseek-chat` | DeepSeek 模型名 |
-| `SUBTRANS_TRANSLATE_BATCH` | 否 | `8` | 每批翻译字幕条数 |
-| `SUBTRANS_TRANSLATE_TIMEOUT` | 否 | `60` | 单批翻译请求超时时间，单位秒 |
-
-### 3.2 配置文件说明
-
-- `.env`：本地敏感配置和运行参数，导入 `src.config.config` 或运行 `main.py` 时会自动加载。
-- `web/config.js`：前端运行时配置，包括 `API_BASE_URL`、`USE_MOCK`、请求超时和翻译引擎列表。
-- `pyproject.toml`：Python 依赖、包发现规则和 pytest 配置。
-
-### 3.3 命令与参数说明
-
-```bash
-uv run python main.py "<视频URL>" [选项]
+uv run python main.py "<视频 URL>"
+uv run python main.py "<视频 URL>" \
+  --target zh-CN --source auto --mode bilingual --burn soft --model small
 ```
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `url` | 必填 | 视频页面地址 |
-| `-t, --target` | `zh-CN` | 目标语言 |
-| `-s, --source` | `auto` | 源语言，默认自动检测 |
-| `--mode` | `mono` | `mono` 仅译文，`bilingual` 双语对照 |
-| `--burn` | `hard` | `hard` 硬烧录，`soft` 软字幕 |
-| `--model` | `small` | Whisper 模型权重，例如 `tiny.en`、`small`、`medium` |
-| `--task-id` | 自动生成 | 指定任务 ID，并决定产物目录 |
+| `--target` | `zh-CN` | 目标语言 |
+| `--source` | `auto` | 源语言，默认自动检测 |
+| `--mode` | `mono` | `mono` 仅译文，`bilingual` 双语 |
+| `--burn` | `hard` | `hard` 硬字幕，`soft` 软字幕 |
+| `--model` | `small` | Whisper 模型权重 |
 
-常用调试命令：
-
-```bash
-uv run python -m src.core.downloader "<URL>" <task_id>
-uv run python -m src.core.audio_extractor data/<task_id>/source.mp4 <task_id>
-uv run python -m src.core.transcriber data/<task_id>/audio.wav <task_id> en
-uv run python -m src.core.translator data/<task_id>/original.srt <task_id> zh-CN mono
-uv run python -m src.core.subtitle_burner data/<task_id>/source.mp4 data/<task_id>/translated.srt <task_id> hard
-```
-
-### 3.4 后端 API
-
-完整交互文档见 <http://localhost:8000/docs>。
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/api/health` | 健康检查 |
-| `GET` | `/api/health/ready` | 脱敏的配置、依赖和存储就绪检查 |
-| `POST` | `/api/tasks` | 创建任务并加入后台队列 |
-| `GET` | `/api/tasks` | 获取任务列表 |
-| `GET` | `/api/tasks/{id}` | 获取任务详情 |
-| `DELETE` | `/api/tasks/{id}` | 删除任务和产物目录 |
-| `POST` | `/api/tasks/{id}/retry` | 重置任务并重新入队 |
-| `GET` | `/api/tasks/{id}/download` | 下载成品视频 |
-| `GET` | `/api/tasks/{id}/subtitle` | 下载译文字幕 |
-| `POST` | `/api/tasks/{id}/folder` | 打开本地任务目录 |
-| `GET` | `/api/tasks/{id}/stream` | SSE 实时进度 |
-| `GET` | `/api/srt/languages` | 获取源语言列表 |
-| `GET` | `/api/srt/model-weights` | 获取模型权重列表 |
-| `GET` | `/api/storage/stats` | 本地资源统计：总占用、类别分布、按任务排序 |
-| `POST` | `/api/storage/cleanup_preview` | 预览可清理的任务与产物（运行中会被跳过） |
-| `POST` | `/api/storage/cleanup` | 执行清理：按筛选条件清理，强制跳过 RUNNING 任务 |
-| `GET` | `/api/storage/retention` | 读取简化保留策略（days=null 表示不限） |
-| `PUT` | `/api/storage/retention` | 写入简化保留策略 |
-
-### 3.5 MCP Server
-
-MCP Server 是独立的业务 API 适配层，不直接访问 SQLite 或流水线代码。启动方式和
-工具说明见 [MCP Server 文档](docs/mcp-server.md)。
-
-`POST /api/tasks` 请求体：
-
-```json
-{
-  "url": "https://example.com/video",
-  "sourceLang": "auto",
-  "targetLang": "zh-CN",
-  "mode": "mono",
-  "burn": "hard",
-  "model": "small",
-  "engine": "deepseek"
-}
-```
-
-## 4. 系统架构与项目结构
-
-### 4.1 系统架构
+## 🏗️ 工作原理
 
 ```mermaid
 flowchart LR
-    Browser["Web 工作台"] --> API["FastAPI handler"]
-    API --> Runner["service.runner 线程池"]
-    Runner --> Orchestrator["service.orchestrator 编排"]
-    Orchestrator --> Downloader["downloader / yt-dlp"]
-    Orchestrator --> Audio["audio_extractor / ffmpeg"]
-    Orchestrator --> ASR["transcriber / Replicate"]
-    Orchestrator --> Translator["translator / DeepSeek"]
-    Orchestrator --> Burner["subtitle_burner / ffmpeg"]
-    API --> Store["TaskStore / SQLite"]
-    Runner --> Store
-    Store --> API
+    Client["Web / CLI / MCP"] --> API["FastAPI"]
+    API --> Runner["后台任务队列"]
+    Runner --> Download["yt-dlp 下载"]
+    Download --> Audio["FFmpeg 提取音频"]
+    Audio --> ASR["Replicate Whisper 识别"]
+    ASR --> Translate["DeepSeek 翻译"]
+    Translate --> Burn["FFmpeg 字幕封装"]
+    Burn --> Store["视频 + SRT + SQLite 状态"]
 ```
 
-流水线状态：
+任务状态：
 
 ```text
-PENDING -> DOWNLOADING -> EXTRACTING -> TRANSCRIBING -> TRANSLATING -> BURNING -> SUCCESS
+PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
+→ TRANSLATING → BURNING → SUCCESS
 ```
 
-任一步失败会进入 `FAILED`，并记录失败步骤和错误信息。
+任一步失败会进入 `FAILED`，并保存失败阶段与错误信息。任务产物默认位于 `data/{task_id}/`。
 
-### 4.2 项目目录结构
+## ⚙️ 常用配置
 
-```text
-.
-├── main.py                 命令行入口
-├── pyproject.toml          依赖和 pytest 配置
-├── uv.lock                 uv 锁文件
-├── src/
-│   ├── config/             全局配置和存储路径策略
-│   ├── core/               下载、音频、识别、翻译、烧录和 SRT 工具
-│   ├── service/            流水线编排、后台执行器和 SRT schema
-│   ├── store/              SQLite 任务存储
-│   └── handler/            FastAPI 路由
-├── web/                    前端工作台
-├── tests/                  pytest 测试
-└── README——1.md            历史 README 材料
-```
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SUBTRANS_DATA_DIR` | `./data` | 任务产物目录 |
+| `SUBTRANS_DB` | `./app.db` | SQLite 数据库路径 |
+| `SUBTRANS_WORKERS` | `2` | 后台并发任务数 |
+| `SUBTRANS_COOKIES` | 空 | 需要登录或验证的网站 cookies 文件 |
+| `SUBTRANS_WHISPER_MODEL` | 锁定版本 | Replicate Whisper 模型 |
+| `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | 翻译模型 |
+| `SUBTRANS_API_BASE_URL` | `http://127.0.0.1:8000` | MCP 访问的业务 API 地址 |
+| `SUBTRANS_MCP_TRANSPORT` | `stdio` | `stdio` 或 `streamable-http` |
 
-任务产物默认保存在 `data/{task_id}/`：
+完整配置项见 [.env.example](./.env.example) 与 [mcp.env.example](./mcp.env.example)。启动后可访问 <http://localhost:8000/docs> 查看 API 文档。
 
-| 文件 | 说明 |
-| --- | --- |
-| `source.mp4` | 下载的视频 |
-| `audio.wav` | 提取后的音频 |
-| `original.srt` | 原文字幕 |
-| `translated.srt` | 译文字幕 |
-| `output.mp4` | 带字幕的成品视频 |
-
-## 5. 开发者指南
-
-### 5.1 本地开发
+## 🧪 开发与验证
 
 ```bash
 uv sync
-uv run uvicorn src.handler.app:app --reload --port 8000
-```
-
-前端文件位于 `web/`；服务启动后由 FastAPI 自动提供。修改前端文件后，刷新 <http://localhost:8000/> 即可查看效果。
-
-前端如需脱离后端预览，可以在 `web/config.js` 中临时设置 `USE_MOCK: true`。
-
-### 5.2 提交前检查
-
-当前项目已有 pytest 测试配置。提交前建议至少运行：
-
-```bash
 uv run pytest -q
+cd web && npm test
 ```
 
-针对单个模块可运行：
-
-```bash
-uv run pytest tests/test_translator.py -q
-```
-
-联网端到端测试默认跳过；如需真实下载和调用云服务，可显式开启：
-
-```bash
-SUBTRANS_LIVE_TEST=1 uv run pytest tests/test_live_pipeline.py -v -s
-```
-
-### 5.3 云端 CI 验证
-
-仓库当前未发现 `.github/workflows/`，需要补充 CI 配置。建议至少覆盖依赖安装、pytest、基础启动或健康检查。
-
-## 6. 贡献指南
-
-关于 Issue 反馈模板、Pull Request 流程、Commit Message 规范、测试运行与合规说明等，请参见详细的 [CONTRIBUTING.md](./CONTRIBUTING.md)。
-
-### 6.1 Issue
-
-适合提交公开 Issue 的内容：
-
-- Bug 反馈
-- 功能建议
-- 文档问题
-- 可复现的使用问题
-
-安全漏洞不要通过公开 Issue 提交。详细的 Issue 模板和规范请参考 [CONTRIBUTING.md](./CONTRIBUTING.md#2-如何反馈问题-issue-规范)。
-
-### 6.2 Pull Request
-
-建议流程：
-
-1. Fork 本项目。
-2. 创建功能分支。
-3. 完成本地修改和必要检查。
-4. 运行 `uv run pytest -q`。
-5. 提交 Pull Request，并说明变更范围、验证方式和已知风险。
-
-更详细的代码审核与合并流程，请参考 [CONTRIBUTING.md](./CONTRIBUTING.md#3-开发流程-fork--pr-规范)。
-
-### 6.3 Commit 与分支规范
-
-本项目使用 **Conventional Commits (约定式提交)** 规范。提交信息建议使用清晰的动词前缀，例如：
+项目主要目录：
 
 ```text
-feat: add subtitle preview controls
-fix: handle ffmpeg subtitle filter errors
-docs: update README
+src/core/          下载、音频、识别、翻译与字幕烧录
+src/handler/       FastAPI 路由与前端静态托管
+src/mcp_server/    MCP Server、工具与业务 API 客户端
+src/service/       流水线编排与后台执行
+src/store/         SQLite 任务存储
+web/               原生 HTML / CSS / JavaScript 工作台
+tests/             Python 测试
 ```
 
-完整的 Commit 类型定义与示例，请参考 [CONTRIBUTING.md](./CONTRIBUTING.md#4-代码及提交规范-commit-message--style)。
+参与开发前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。安全问题请通过 [SECURITY.md](./SECURITY.md) 中的私密渠道报告，不要创建公开 Issue。
 
-### 6.4 安全漏洞报告
+## ❓ 常见问题
 
-请不要在公开 Issue 中披露安全漏洞。我们已经建立了明确的安全披露方式与处理机制，详见项目根目录下的 [SECURITY.md](./SECURITY.md)。安全研究人员及用户可通过该文件载明的私密渠道（如 GitHub Security Advisories 或安全邮箱）反馈潜在的安全隐患，以获得更及时的响应和协助。
-
-## 7. 版本管理
-
-### 7.1 Release 与 Tag
-
-项目版本在 `pyproject.toml` 中维护，当前版本为 `1.0.2`。正式版本使用 `subtitles-ai-v<主版本>.<次版本>.<修订版本>` 格式创建 GitHub Release 与 Tag；向后兼容的修复和小幅改进递增修订版本。
-
-### 7.2 更新日志
-
-仓库当前未发现 `CHANGELOG.md`，需要补充更新日志。建议记录新功能、Bug 修复、性能优化和破坏性变更。
-
-### 7.3 升级指南
-
-当前未发现独立升级指南。涉及环境变量、数据目录、数据库结构或外部服务模型变更时，建议在更新日志中明确迁移步骤。
-
-## 8. 许可证
-
-本项目基于 [MIT](./LICENSE) 协议发布。你可以自由地使用、修改和再分发本项目，详见 [LICENSE](./LICENSE) 文件。
-
-## 9. 排障
-
-| 现象 | 处理方式 |
+| 问题 | 处理方式 |
 | --- | --- |
-| `Replicate` 请求超时 | 调大 `SUBTRANS_REPLICATE_TIMEOUT` 或 `SUBTRANS_REPLICATE_RETRIES`，并确认网络可访问 Replicate |
-| 硬烧录失败或缺少 `subtitles` filter | 使用 Homebrew 安装 `ffmpeg-full`，不要安装普通 `ffmpeg`；或临时使用 `--burn soft` |
-| 下载失败或需要登录 | 检查 URL 是否有效；必要时设置 `SUBTRANS_COOKIES` 指向 cookies 文件 |
-| 不确定该打开哪个网页入口 | 统一访问 <http://localhost:8000/>。`5273` 是旧的独立静态服务器入口，不再作为推荐启动方式。 |
-| 前端无法连接后端 | 确认后端运行在 `http://localhost:8000`，或在浏览器 `localStorage` 中通过 `SUBTRANS_API_BASE_URL` 覆盖地址 |
-| 翻译提示缺少 Key | 确认 `.env` 中配置了 `SUBTRANS_DEEPSEEK_API_KEY` 或 `DEEPSEEK_API_KEY`，并重启后端 |
+| 硬字幕提示缺少 `subtitles` filter | 安装 `ffmpeg-full`，或改用 `--burn soft` |
+| 下载失败或网站要求登录 | 检查 URL，并通过 `SUBTRANS_COOKIES` 指定 cookies 文件 |
+| MCP 返回 `BUSINESS_UNAVAILABLE` | 先启动 `uvicorn` 业务服务，再运行环境检查 |
+| MCP 返回 `NOT_INITIALIZED` | 补齐 `.env` 中的密钥并重启业务服务 |
+| 前端无法连接后端 | 确认 <http://localhost:8000/api/health> 可访问 |
 
-## 10. 合规使用
+## 📄 许可证与合规
 
-本工具仅用于处理你有权访问、下载、转写、翻译和再发布的视频内容。使用前请确认目标网站服务条款、版权限制和所在地法律要求。
+本项目基于 [MIT License](./LICENSE) 发布。
+
+请仅处理你有权访问、下载、转写、翻译和再发布的视频，并遵守目标网站服务条款、版权限制及所在地法律。
