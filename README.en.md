@@ -374,7 +374,7 @@ For full commit type definitions and examples, please refer to [CONTRIBUTING.md]
 
 ### 6.4 Security Vulnerability Reporting
 
-Do not disclose security vulnerabilities in public Issues. The repository currently does not include `SECURITY.md` or a security disclosure email. Needs User Input: add a security disclosure channel.
+Do not disclose security vulnerabilities in public Issues. We have established clear security disclosure procedures and channels. Please refer to [SECURITY.md](./SECURITY.md) in the project root directory. Security researchers and users can submit potential security risks through the private channels specified in that file (such as GitHub Security Advisories or the security email) for more timely response and assistance.
 
 ## 7. Versioning
 
