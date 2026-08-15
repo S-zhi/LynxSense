@@ -77,19 +77,7 @@ function renderStage(sel) {
   const stage = el("div", "stage");
 
   const screen = el("div", "stage__screen");
-  const video = el("video");
-  video.controls = true;
-  video.preload = "metadata";
-  video.addEventListener("error", () => {
-    // 成品文件被清理后，下载接口会返回 409。此时不能保留浏览器的原生空播放器，
-    // 否则用户会误以为视频仍可播放。
-    screen.classList.add("is-unavailable");
-    screen.replaceChildren(stageVideoMissing(trackLabel));
-    dlVideo.className = "btn btn--ghost btn--sm";
-    dlVideo.disabled = true;
-    dlVideo.innerHTML = `<i class="ph ph-video-camera-slash"></i><span>${trackLabel}不可用</span>`;
-  }, { once: true });
-  screen.append(video);
+  screen.append(stageVideoChecking(trackLabel));
 
   const bar = el("div", "stage__bar");
   const title = el("div", "stage__title");
@@ -120,6 +108,7 @@ function renderStage(sel) {
   folder.innerHTML = `<i class="ph ph-folder-open"></i><span>打开文件夹</span>`;
   folder.addEventListener("click", () => openFolder(sel));
   const dlVideo = el("button", "btn btn--primary btn--sm");
+  dlVideo.disabled = true;
   dlVideo.innerHTML = `<i class="ph ph-download-simple"></i><span>下载${trackLabel}</span>`;
   dlVideo.addEventListener("click", () => open(sel, videoKind));
   const dlSub = el("button", "btn btn--ghost btn--sm");
@@ -134,8 +123,39 @@ function renderStage(sel) {
   bar.append(title, tags, actions);
   stage.append(screen, bar);
   stageEl.append(stage);
-  // 等舞台和操作区构建完成后再加载资源，确保 409 回退时可同步禁用下载操作。
-  video.src = Api.downloadUrl(sel.id, videoKind);
+  // 先确认资源可用，再创建 <video>。这样 409 不会暴露原生播放器的加载转圈。
+  void prepareStageVideo(stage, screen, dlVideo, Api.downloadUrl(sel.id, videoKind), trackLabel);
+}
+
+async function prepareStageVideo(stage, screen, dlVideo, videoUrl, trackLabel) {
+  try {
+    const response = await fetch(videoUrl, { method: "HEAD" });
+    if (!stageEl.contains(stage)) return;
+    if (!response.ok) {
+      showStageVideoMissing(screen, dlVideo, trackLabel);
+      return;
+    }
+
+    const video = el("video");
+    video.controls = true;
+    video.preload = "metadata";
+    video.addEventListener("error", () => {
+      if (stageEl.contains(stage)) showStageVideoMissing(screen, dlVideo, trackLabel);
+    }, { once: true });
+    screen.replaceChildren(video);
+    dlVideo.disabled = false;
+    video.src = videoUrl;
+  } catch (_) {
+    if (stageEl.contains(stage)) showStageVideoMissing(screen, dlVideo, trackLabel);
+  }
+}
+
+function showStageVideoMissing(screen, dlVideo, trackLabel) {
+  screen.classList.add("is-unavailable");
+  screen.replaceChildren(stageVideoMissing(trackLabel));
+  dlVideo.className = "btn btn--ghost btn--sm";
+  dlVideo.disabled = true;
+  dlVideo.innerHTML = `<i class="ph ph-video-camera-slash"></i><span>${trackLabel}不可用</span>`;
 }
 
 function open(sel, kind) {
@@ -187,5 +207,14 @@ function stageVideoMissing(trackLabel) {
     <div class="stage__missing-title">${trackLabel}找不到了</div>
     <p class="stage__missing-desc">视频文件可能已被清理或移动。</p>
     <p class="stage__missing-hint">请返回任务页重新处理后，再回来预览。</p>`;
+  return e;
+}
+
+function stageVideoChecking(trackLabel) {
+  const e = el("div", "stage__checking");
+  e.innerHTML = `
+    <span class="stage__checking-kicker">CHECKING AVAILABILITY</span>
+    <div class="stage__checking-title">正在确认${trackLabel}</div>
+    <p>资源确认后会自动开始加载。</p>`;
   return e;
 }
