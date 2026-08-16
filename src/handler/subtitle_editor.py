@@ -27,7 +27,7 @@ from src.config import (
     TRANSLATED_SRT,
     task_dir,
 )
-from src.core.srt_utils import Subtitle, parse_srt, write_srt
+from src.core.srt_utils import Subtitle, parse_srt, read_srt_content, write_srt
 from src.core.subtitle_burner import BurnError, burn_subtitles
 from src.handler.deps import get_store
 from src.store import TaskStore
@@ -229,9 +229,16 @@ def save_subtitles(
         for e in sorted_entries
     ]
 
+    encoding = "utf-8-sig"
+    if target_path.exists():
+        try:
+            _, encoding = read_srt_content(target_path)
+        except Exception:
+            pass
+
     with _lock_for(task_id):
-        # 版本文件：若已存在则直接覆盖（用户主动保存即确认）；不污染源文件
-        write_srt(subs, target_path)
+        # 版本文件：若已存在则直接覆盖（用户主动保存即确认）；保留原始编码或默认 utf-8-sig
+        write_srt(subs, target_path, encoding=encoding)
 
     logger.info(
         "字幕已保存: task=%s locale=%s version=%s count=%d -> %s",

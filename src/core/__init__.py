@@ -15,7 +15,15 @@ from .audio_extractor import (
     AudioResult,
     extract_audio,
 )
-from .srt_utils import Subtitle, format_timestamp, parse_srt, parse_timestamp, write_srt
+from .srt_utils import (
+    Subtitle,
+    decode_srt_bytes,
+    format_timestamp,
+    parse_srt,
+    parse_timestamp,
+    read_srt_content,
+    write_srt,
+)
 from .transcriber import (
     TranscribeError,
     TranscribeProgress,
@@ -42,7 +50,7 @@ __all__ = [
     # ② 提取音频
     "extract_audio", "AudioResult", "AudioProgress", "AudioExtractError",
     # SRT 工具
-    "Subtitle", "format_timestamp", "parse_timestamp", "write_srt", "parse_srt",
+    "Subtitle", "decode_srt_bytes", "format_timestamp", "parse_timestamp", "read_srt_content", "write_srt", "parse_srt",
     # ③ 语音识别
     "transcribe", "TranscribeResult", "TranscribeProgress", "TranscribeError",
     # ④ 翻译
