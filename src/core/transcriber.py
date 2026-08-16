@@ -34,7 +34,7 @@ class TranscribeError(RuntimeError):
 @dataclass
 class TranscribeProgress:
     percent: Optional[float]
-    status: str   # "starting" | "processing" | "succeeded"
+    status: str   # "starting" | "processing" | "retrying" | "succeeded"
 
 
 @dataclass
@@ -45,7 +45,7 @@ class TranscribeResult:
     segment_count: int
     duration: Optional[float]
 
-# TODO replicate
+
 ProgressHook = Callable[[TranscribeProgress], None]
 
 
@@ -78,12 +78,14 @@ def _run_replicate_with_retry(
     timeout: int,
     retries: int,
     on_progress: Optional[ProgressHook] = None,
+    last_pct: Optional[float] = 1.0,
 ):
     """调用 Replicate，超时/网络错误时按退避重试（应对模型冷启动）。
 
     - 用带长读超时的 Client，让冷启动的等待请求不至于过早 read-timeout。
     - 仅对超时/网络类异常重试；模型报错 / 鉴权失败直接抛出，不浪费重试。
     - build_input 每次调用返回全新 input（本地文件 handle 用过即废，必须重开）。
+    - 重试时保持 last_pct 与 RETRYING 状态，不硬重置进度为 1.0。
     """
     client = replicate.Client(
         api_token=os.getenv("REPLICATE_API_TOKEN"),
@@ -108,7 +110,7 @@ def _run_replicate_with_retry(
             if attempt < retries:
                 backoff = min(10 * 2 ** (attempt - 1), 60)  # 10s, 20s, 40s, 上限 60s
                 if on_progress is not None:
-                    _safe_callback(on_progress, 1.0, "starting")  # 冷启动重试中
+                    _safe_callback(on_progress, last_pct, "retrying")  # 保持上次进度，发送重试状态
                 time.sleep(backoff)
         except Exception as e:  # 模型报错 / 鉴权等非瞬时错误，不重试
             raise TranscribeError(f"Replicate 语音识别失败: {e}") from e
@@ -139,7 +141,7 @@ def transcribe(
         language: 源语言代码；None / "" / "auto" 表示自动检测。
         model_name: Whisper 模型名，如 "tiny.en" / "small"。
     """
-    # TODO 回调函数整体伪造
+    # 进度提示：Replicate 简单 API 调用等待模型冷启动完成并返回结果；等待期间保持 starting/retrying 状态
     _load_env()
     if not os.getenv("REPLICATE_API_TOKEN"):
         raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）")
