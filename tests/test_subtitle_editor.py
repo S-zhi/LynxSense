@@ -349,3 +349,49 @@ def test_write_locks_leak_cleanup(client, monkeypatch):
 
     # 验证锁字典已经被清除了该任务的锁，防止内存泄漏
     assert new_tid not in _write_locks
+
+
+def test_save_subtitles_lock_released_on_disk_full(client, monkeypatch):
+    """写盘抛 OSError (例如磁盘满) 时，save_subtitles 的 finally 仍应释放并 pop 进程内锁。"""
+    from src.handler.subtitle_editor import _write_locks
+
+    def fake_write_srt_fail(subs, path):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(editor_routes, "write_srt", fake_write_srt_fail)
+
+    body = {
+        "locale": "translated",
+        "entries": [
+            {"id": "a1", "index": 1, "start": 0.0, "end": 1.0, "text": "测试异常"},
+        ],
+    }
+
+    with pytest.raises(OSError, match="No space left on device"):
+        client.put(f"/api/tasks/{client._tid}/subtitles", json=body)
+
+    # 验证即便写盘发生异常，_write_locks 也成功删除了该 task_id 的 Lock
+    assert client._tid not in _write_locks
+
+
+def test_release_lock_when_held_by_other_thread():
+    """release_lock 仅在 Lock 空闲时才 pop，当前有线程持有时跳过 pop。"""
+    from src.handler.subtitle_editor import _write_locks, _lock_for, release_lock
+
+    tid = "held_test_task"
+    lock = _lock_for(tid)
+    assert tid in _write_locks
+
+    # 模拟线程持有锁
+    lock.acquire()
+    try:
+        # 此时锁被持有，release_lock 不应误删该锁
+        release_lock(tid)
+        assert tid in _write_locks
+        assert _write_locks[tid] is lock
+    finally:
+        lock.release()
+
+    # 锁释放后，再次调用 release_lock 成功 pop
+    release_lock(tid)
+    assert tid not in _write_locks

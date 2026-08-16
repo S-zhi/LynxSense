@@ -51,9 +51,21 @@ def _lock_for(task_id: str) -> threading.Lock:
 
 
 def release_lock(task_id: str) -> None:
-    """清理进程内锁字典 _write_locks 中的任务锁，防止内存泄漏。"""
+    """清理进程内锁字典 _write_locks 中的任务锁，防止内存泄漏。
+
+    仅在 Lock 未被任何线程持有（能非阻塞 acquire 成功）时才从字典 pop；
+    若当前有线程正在使用，则跳过清理，防止误删使用中的锁。
+    """
     with _write_locks_guard:
-        _write_locks.pop(task_id, None)
+        lk = _write_locks.get(task_id)
+        if lk is None:
+            return
+        if lk.acquire(blocking=False):
+            try:
+                if _write_locks.get(task_id) is lk:
+                    _write_locks.pop(task_id, None)
+            finally:
+                lk.release()
 
 
 def _require(store: TaskStore, task_id: str):
@@ -205,46 +217,49 @@ def save_subtitles(
     默认覆盖 `original.srt` / `translated.srt`；
     当 `version` 给出时（如 "v2"）写入 `original.v2.srt`，原文件保留。
     """
-    rec = _require(store, task_id)
-    d = task_dir(task_id)
-    if not d.exists():
-        raise HTTPException(status_code=409, detail="任务目录尚未生成")
+    try:
+        with _lock_for(task_id):
+            rec = _require(store, task_id)
+            d = task_dir(task_id)
+            if not d.exists():
+                raise HTTPException(status_code=409, detail="任务目录尚未生成")
 
-    target_path, rel_name = _resolve_target_path(d, body.locale, body.version)
+            target_path, rel_name = _resolve_target_path(d, body.locale, body.version)
 
-    # 校验：版本文件不能覆盖已有的关键产物名
-    if body.version is not None and rel_name in {ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO}:
-        raise HTTPException(status_code=400, detail="非法的版本文件名")
+            # 校验：版本文件不能覆盖已有的关键产物名
+            if body.version is not None and rel_name in {ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO}:
+                raise HTTPException(status_code=400, detail="非法的版本文件名")
 
-    # 按 index 升序写回（即使前端发了乱序，磁盘上也按 SRT 规范）
-    sorted_entries = sorted(body.entries, key=lambda e: (e.start, e.index))
+            # 按 index 升序写回（即使前端发了乱序，磁盘上也按 SRT 规范）
+            sorted_entries = sorted(body.entries, key=lambda e: (e.start, e.index))
 
-    subs = [
-        Subtitle(
-            index=e.index,
-            start=float(e.start),
-            end=float(e.end),
-            text=e.text,
-        )
-        for e in sorted_entries
-    ]
+            subs = [
+                Subtitle(
+                    index=e.index,
+                    start=float(e.start),
+                    end=float(e.end),
+                    text=e.text,
+                )
+                for e in sorted_entries
+            ]
 
-    with _lock_for(task_id):
-        # 版本文件：若已存在则直接覆盖（用户主动保存即确认）；不污染源文件
-        write_srt(subs, target_path)
+            # 版本文件：若已存在则直接覆盖（用户主动保存即确认）；不污染源文件
+            write_srt(subs, target_path)
 
-    logger.info(
-        "字幕已保存: task=%s locale=%s version=%s count=%d -> %s",
-        task_id, body.locale, body.version or "-", len(subs), rel_name,
-    )
+            logger.info(
+                "字幕已保存: task=%s locale=%s version=%s count=%d -> %s",
+                task_id, body.locale, body.version or "-", len(subs), rel_name,
+            )
 
-    return SubtitleUpdateOut(
-        ok=True,
-        taskId=task_id,
-        locale=body.locale,
-        path=rel_name,
-        count=len(subs),
-    )
+            return SubtitleUpdateOut(
+                ok=True,
+                taskId=task_id,
+                locale=body.locale,
+                path=rel_name,
+                count=len(subs),
+            )
+    finally:
+        release_lock(task_id)
 
 
 @router.post("/{task_id}/subtitles/burn", response_model=ReburnOut)

@@ -209,7 +209,6 @@ def create_upload_task(
     except Exception as e:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(status_code=500, detail="保存上传文件失败") from e
     finally:
         file.file.close()
@@ -217,7 +216,6 @@ def create_upload_task(
     if not dest.exists() or dest.stat().st_size == 0:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
 
     enqueue_pipeline(rec.id)
