@@ -160,6 +160,28 @@ def test_save_subtitles_version_writes_sidecar(client):
     assert "世界" in (d / "translated.srt").read_text(encoding="utf-8")
 
 
+def test_save_subtitles_preserves_gbk_encoding(client):
+    """当原文件为 GBK 编码时，保存更新后仍保持 GBK 编码。"""
+    d = client._tmp / client._tid
+    gbk_file = d / "original.srt"
+    gbk_content = "1\n00:00:00,000 --> 00:00:01,500\n旧GBK文本\n".encode("gbk")
+    gbk_file.write_bytes(gbk_content)
+
+    body = {
+        "locale": "original",
+        "entries": [
+            {"id": "g1", "index": 1, "start": 0.0, "end": 1.5, "text": "新GBK编辑文本"},
+        ],
+    }
+    r = client.put(f"/api/tasks/{client._tid}/subtitles", json=body)
+    assert r.status_code == 200
+
+    raw_saved = gbk_file.read_bytes()
+    # 验证保存后的文本能用 GBK 成功解码，且包含新文本
+    saved_text = raw_saved.decode("gbk")
+    assert "新GBK编辑文本" in saved_text
+
+
 def test_save_subtitles_sorts_by_start(client):
     """前端发乱序条目，磁盘上也应按 start 升序写回。"""
     body = {
