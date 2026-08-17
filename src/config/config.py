@@ -6,10 +6,56 @@
 
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+DEFAULT_LANG_NAMES: dict[str, str] = {
+    "auto": "the source language",
+    "zh-CN": "Simplified Chinese (简体中文)",
+    "zh-TW": "Traditional Chinese (繁體中文)",
+    "zh": "Chinese (中文)",
+    "en": "English",
+    "ja": "Japanese (日本語)",
+    "ko": "Korean (한국어)",
+    "es": "Spanish (Español)",
+    "fr": "French (Français)",
+    "de": "German (Deutsch)",
+    "ru": "Russian (Русский)",
+    "it": "Italian (Italiano)",
+    "pt": "Portuguese (Português)",
+    "vi": "Vietnamese (Tiếng Việt)",
+    "th": "Thai (ไทย)",
+    "ar": "Arabic (العربية)",
+    "id": "Indonesian (Bahasa Indonesia)",
+    "hi": "Hindi (हिन्दी)",
+    "nl": "Dutch (Nederlands)",
+    "pl": "Polish (Polski)",
+    "tr": "Turkish (Türkçe)",
+    "sv": "Swedish (Svenska)",
+    "uk": "Ukrainian (Українська)",
+    "cs": "Czech (Čeština)",
+    "da": "Danish (Dansk)",
+    "fi": "Finnish (Suomi)",
+    "el": "Greek (Ελληνικά)",
+    "he": "Hebrew (עבריت)",
+    "hu": "Hungarian (Magyar)",
+    "no": "Norwegian (Norsk)",
+    "ro": "Romanian (Română)",
+    "sk": "Slovak (Slovenčina)",
+    "af": "Afrikaans",
+    "ca": "Catalan (Català)",
+    "bg": "Bulgarian (Български)",
+    "hr": "Croatian (Hrvatski)",
+    "ms": "Malay (Bahasa Melayu)",
+    "fa": "Persian (فارسی)",
+    "ur": "Urdu (اردو)",
+    "bn": "Bengali (বাংলা)",
+    "ta": "Tamil (தமிழ்)",
+    "sw": "Swahili (Kiswahili)",
+}
 
 # 项目根目录（本文件位于 src/config/config.py，向上两级）
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -60,6 +106,22 @@ def _env_list(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
         return default
     items = tuple(item.strip() for item in val.split(",") if item.strip())
     return items or default
+
+
+def _env_json_dict(key: str, default: dict[str, str]) -> dict[str, str]:
+    """读取 JSON 字典格式的环境变量，合并到默认字典。非合法 JSON 则使用默认字典。"""
+    val = os.getenv(key)
+    if not val:
+        return default
+    try:
+        data = json.loads(val)
+        if isinstance(data, dict):
+            merged = dict(default)
+            merged.update({str(k): str(v) for k, v in data.items()})
+            return merged
+    except Exception:
+        pass
+    return default
 
 
 @dataclass(frozen=True)
@@ -126,7 +188,20 @@ class Settings:
     # 支持的翻译目标语言列表（逗号分隔）
     target_languages: tuple[str, ...] = _env_list(
         "SUBTRANS_TARGET_LANGUAGES",
-        ("zh-CN", "zh-TW", "en", "ja", "ko"),
+        (
+            "zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "ru", "it",
+            "pt", "vi", "th", "ar", "id", "hi", "nl", "pl", "tr", "sv",
+            "uk", "cs", "da", "fi", "el", "he", "hu", "no", "ro", "sk",
+            "af", "ca", "bg", "hr", "ms", "fa", "ur", "bn", "ta", "sw",
+        ),
+    )
+
+    # 语言代码到名称的映射字典，可由 SUBTRANS_LANG_NAMES 环境变量（JSON 字符串）覆盖/追加
+    lang_names: dict[str, str] = field(
+        default_factory=lambda: _env_json_dict(
+            "SUBTRANS_LANG_NAMES",
+            DEFAULT_LANG_NAMES,
+        )
     )
 
 

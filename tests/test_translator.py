@@ -161,3 +161,25 @@ def test_translate_srt_empty(tmp_path, out_dir):
     res = translate_srt(p, "task1", "auto", "zh-CN")
     assert res.count == 0
     assert res.srt_path.exists()
+
+
+def test_lang_name_lookup_and_config_override(monkeypatch):
+    """测试 ISO 语言名称的转换以及 SUBTRANS_LANG_NAMES 覆盖/扩展能力。"""
+    from src.config.config import Settings, DEFAULT_LANG_NAMES
+    # 内置新增常用语言测试
+    assert translator._lang_name("id") == DEFAULT_LANG_NAMES["id"]
+    assert translator._lang_name("hi") == DEFAULT_LANG_NAMES["hi"]
+    assert translator._lang_name("nl") == DEFAULT_LANG_NAMES["nl"]
+    assert translator._lang_name("uk") == DEFAULT_LANG_NAMES["uk"]
+    assert translator._lang_name("unknown_code") == "unknown_code"
+
+    # 测试通过 Settings 自定义 lang_names
+    custom_s = SimpleNamespace(
+        lang_names={
+            "id": "Indonesian Custom",
+            "custom-code": "Custom Language Name",
+        }
+    )
+    monkeypatch.setattr(translator, "settings", custom_s)
+    assert translator._lang_name("id") == "Indonesian Custom"
+    assert translator._lang_name("custom-code") == "Custom Language Name"
