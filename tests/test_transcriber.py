@@ -176,11 +176,12 @@ def test_transcribe_no_api_token(monkeypatch, tmp_path):
 # ---------- 冷启动重试 ----------
 
 def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
-    """第一次读超时（冷启动），重试后成功。"""
+    """第一次读超时（冷启动），重试后成功，验证重试期间发送 retrying 状态。"""
     audio = make_fake_audio(tmp_path)
     fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
     calls = {"n": 0}
     opened_files = []
+    progress_events = []
 
     class FlakyClient:
         def __init__(self, *args, **kwargs):
@@ -204,12 +205,16 @@ def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
         text=fake_srt, raise_for_status=lambda: None))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)  # 跳过退避等待
 
-    res = transcribe(audio, "t1")
+    res = transcribe(audio, "t1", on_progress=progress_events.append)
     assert res.segment_count == 1
     assert calls["n"] == 2  # 第一次超时 + 第二次成功
     assert len(opened_files) == 2
     assert opened_files[0] is not opened_files[1]
     assert all(f.closed for f in opened_files)
+
+    statuses = [p.status for p in progress_events]
+    assert statuses == ["starting", "retrying", "succeeded", "succeeded"]
+    assert progress_events[1].percent == 1.0  # 维持进度 1.0%，不复位为错误硬编码值
 
 
 def test_transcribe_retries_exhausted(monkeypatch, tmp_path):
