@@ -294,9 +294,10 @@ def test_srt_model_weights(client, monkeypatch):
 
 def test_srt_target_languages(client):
     """测试获取配置/后端下发的目标语言选项。"""
+    from src.config import settings
     r = client.get("/api/srt/target-languages")
     assert r.status_code == 200
-    assert r.json() == ["zh-CN", "zh-TW", "en", "ja", "ko"]
+    assert r.json() == list(settings.target_languages)
 
 
 # ---------- issue #22：终态任务产物丢失 ----------
