@@ -68,8 +68,9 @@ def test_hard_cmd_uses_subtitles_filter(inputs, tmp_path, monkeypatch):
         captured["cwd"] = kw.get("cwd")
         Path(cmd[-1]).write_bytes(b"out")
 
+    out_dir = tmp_path / "out"
     monkeypatch.setattr(sb, "has_subtitles_filter", lambda b: True)  # 假装有 libass
-    monkeypatch.setattr(sb, "ensure_task_dir", _ensure(tmp_path / "out"))
+    monkeypatch.setattr(sb, "ensure_task_dir", _ensure(out_dir))
     monkeypatch.setattr(sb, "probe_duration", lambda p, b: 10.0)
     monkeypatch.setattr(sb, "run_ffmpeg", fake_run)
 
@@ -77,10 +78,50 @@ def test_hard_cmd_uses_subtitles_filter(inputs, tmp_path, monkeypatch):
     assert res.mode == "hard"
     assert res.output_path.exists()
     cmd = captured["cmd"]
-    # 滤镜引用 basename，配合 cwd 规避路径转义
-    assert any(f"subtitles={srt.name}" in str(c) for c in cmd)
+    # 滤镜引用 safe basename tmp_burn.srt，配合 out_dir cwd 规避路径转义
+    assert any("subtitles=tmp_burn.srt" in str(c) for c in cmd)
     assert "-c:a" in cmd and "copy" in cmd
-    assert captured["cwd"] == str(srt.resolve().parent)
+    assert captured["cwd"] == str(out_dir.resolve())
+
+
+@pytest.mark.parametrize("filename", [
+    "translated's v2.srt",
+    "translated.草稿.srt",
+    "my translated subs (v2) [final].srt",
+    "sub:title=v1.srt",
+    "path_with_backslash\\test.srt",
+])
+def test_hard_burn_with_special_chars_in_filename(inputs, tmp_path, monkeypatch, filename):
+    video, _ = inputs
+    special_srt = tmp_path / filename
+    write_srt([Subtitle(1, 0, 1, "hi")], special_srt)
+
+    captured = {}
+
+    def fake_run(cmd, on_tick=None, **kw):
+        captured["cmd"] = cmd
+        captured["cwd"] = kw.get("cwd")
+        # Ensure tmp_burn.srt was copied into out_dir during run_ffmpeg
+        tmp_burn = Path(kw["cwd"]) / "tmp_burn.srt"
+        assert tmp_burn.exists()
+        Path(cmd[-1]).write_bytes(b"out")
+
+    out_dir = tmp_path / "out_task"
+    monkeypatch.setattr(sb, "has_subtitles_filter", lambda b: True)
+    monkeypatch.setattr(sb, "ensure_task_dir", _ensure(out_dir))
+    monkeypatch.setattr(sb, "probe_duration", lambda p, b: 10.0)
+    monkeypatch.setattr(sb, "run_ffmpeg", fake_run)
+
+    res = burn_subtitles(video, special_srt, "task_special", mode="hard")
+    assert res.mode == "hard"
+    assert res.output_path.exists()
+    cmd = captured["cmd"]
+
+    # Filter argument should use safe ASCII filename "tmp_burn.srt"
+    assert any("subtitles=tmp_burn.srt" in str(c) for c in cmd)
+    assert captured["cwd"] == str(out_dir.resolve())
+    # Temporary file should be cleaned up after burn finishes
+    assert not (out_dir / "tmp_burn.srt").exists()
 
 
 def test_hard_mode_requires_libass(inputs, tmp_path, monkeypatch):
