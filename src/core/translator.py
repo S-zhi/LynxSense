@@ -49,28 +49,10 @@ class TranslateResult:
 ProgressHook = Callable[[TranslateProgress], None]
 BatchHook = Callable[[int, int], None]
 
-_LANG_NAMES = {
-    "auto": "the source language",
-    "zh-CN": "Simplified Chinese",
-    "zh-TW": "Traditional Chinese",
-    "zh": "Chinese",
-    "en": "English",
-    "ja": "Japanese",
-    "ko": "Korean",
-    "es": "Spanish",
-    "fr": "French",
-    "de": "German",
-    "ru": "Russian",
-    "it": "Italian",
-    "pt": "Portuguese",
-    "vi": "Vietnamese",
-    "th": "Thai",
-    "ar": "Arabic",
-}
-
 
 def _lang_name(code: str) -> str:
-    return _LANG_NAMES.get(code, code)
+    names = getattr(settings, "lang_names", {})
+    return names.get(code, code)
 
 
 def _call_deepseek(messages: list, *, api_key: str, base_url: str, model: str, timeout: int) -> str:

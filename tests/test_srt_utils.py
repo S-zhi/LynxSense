@@ -1,12 +1,14 @@
-"""SRT 读写工具单测。"""
+"""SRT 读写工具单测（含多编码解析）。"""
 
 from __future__ import annotations
 
 from src.core.srt_utils import (
     Subtitle,
+    decode_srt_bytes,
     format_timestamp,
     parse_srt,
     parse_timestamp,
+    read_srt_content,
     write_srt,
 )
 
@@ -46,7 +48,7 @@ def test_write_reindexes(tmp_path):
     subs = [Subtitle(99, 0, 1, "a"), Subtitle(7, 1, 2, "b")]
     p = tmp_path / "x.srt"
     write_srt(subs, p)
-    content = p.read_text(encoding="utf-8")
+    content = p.read_text(encoding="utf-8-sig")
     assert content.startswith("1\n")
     assert "\n2\n" in content
 
@@ -74,3 +76,73 @@ def test_parse_empty(tmp_path):
     p = tmp_path / "x.srt"
     p.write_text("", encoding="utf-8")
     assert parse_srt(p) == []
+
+
+def test_parse_gbk_encoding(tmp_path):
+    p = tmp_path / "gbk.srt"
+    content_str = "1\n00:00:00,000 --> 00:00:01,500\n测试字幕\n"
+    p.write_bytes(content_str.encode("gbk"))
+
+    subs = parse_srt(p)
+    assert len(subs) == 1
+    assert subs[0].text == "测试字幕"
+
+
+def test_parse_utf16le_with_and_without_bom(tmp_path):
+    content_str = "1\n00:00:00,000 --> 00:00:01,500\n测试字幕\n"
+
+    # 带 BOM 的 UTF-16
+    p1 = tmp_path / "utf16_bom.srt"
+    p1.write_bytes(content_str.encode("utf-16"))
+    subs1 = parse_srt(p1)
+    assert len(subs1) == 1
+    assert subs1[0].text == "测试字幕"
+
+    # 不带 BOM 的 UTF-16 LE
+    p2 = tmp_path / "utf16_nobom.srt"
+    p2.write_bytes(content_str.encode("utf-16-le"))
+    subs2 = parse_srt(p2)
+    assert len(subs2) == 1
+    assert subs2[0].text == "测试字幕"
+
+
+def test_parse_utf16be(tmp_path):
+    content_str = "1\n00:00:00,000 --> 00:00:01,500\n测试字幕\n"
+    p = tmp_path / "utf16be.srt"
+    p.write_bytes(content_str.encode("utf-16-be"))
+    subs = parse_srt(p)
+    assert len(subs) == 1
+    assert subs[0].text == "测试字幕"
+
+
+def test_parse_crlf_line_endings(tmp_path):
+    p = tmp_path / "crlf.srt"
+    p.write_bytes("1\r\n00:00:00,000 --> 00:00:01,000\r\n测试字幕\r\n".encode("gbk"))
+    subs = parse_srt(p)
+    assert len(subs) == 1
+    assert subs[0].text == "测试字幕"
+
+
+def test_write_srt_custom_encoding(tmp_path):
+    subs = [Subtitle(1, 0.0, 1.0, "GBK测试")]
+    p = tmp_path / "out_gbk.srt"
+    write_srt(subs, p, encoding="gbk")
+
+    # 验证磁盘数据为合法 GBK
+    raw = p.read_bytes()
+    text, enc = decode_srt_bytes(raw)
+    assert enc in ("gbk", "gb18030")
+    assert "GBK测试" in text
+
+
+def test_decode_srt_bytes_empty():
+    text, enc = decode_srt_bytes(b"")
+    assert text == ""
+    assert enc == "utf-8"
+
+
+def test_read_srt_content_raw_text():
+    srt_str = "1\n00:00:00,000 --> 00:00:01,000\nhello"
+    subs = parse_srt(srt_str)
+    assert len(subs) == 1
+    assert subs[0].text == "hello"

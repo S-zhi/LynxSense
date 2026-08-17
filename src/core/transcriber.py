@@ -22,7 +22,7 @@ import httpx
 import replicate
 
 from src.config import settings, ensure_task_dir, ORIGINAL_SRT
-from src.core.srt_utils import Subtitle, write_srt
+from src.core.srt_utils import Subtitle, decode_srt_bytes, write_srt
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,11 @@ def _download_text(url: str) -> str:
     """下载远程文本（SRT）。"""
     resp = httpx.get(url, timeout=30)
     resp.raise_for_status()
-    return resp.text
+    raw = getattr(resp, "content", None)
+    if raw is None:
+        raw = getattr(resp, "text", "").encode("utf-8")
+    text, _ = decode_srt_bytes(raw)
+    return text
 
 
 def _parse_srt_segments(srt_text: str) -> List[dict]:

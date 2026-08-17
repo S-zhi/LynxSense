@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -49,7 +50,8 @@ ProgressHook = Callable[[BurnProgress], None]
 
 def _hard_cmd(video: Path, srt: Path, out: Path) -> list[str]:
     # subtitles 滤镜对路径里的 : ' \ 等极其敏感，转义很脆弱。
-    # 改为：ffmpeg 以 srt 所在目录为 cwd，滤镜只引用 basename（无特殊字符），
+    # 改为：把 SRT 拷贝到任务目录下的 safe 临时文件名 tmp_burn.srt，
+    # ffmpeg 以 out_dir 为 cwd，滤镜只引用 basename（纯 ASCII 无特殊字符/空格/中文），
     # 视频/输出走绝对路径（不经滤镜解析，不受影响）。
     return [
         settings.ffmpeg_bin, "-y",
@@ -112,6 +114,7 @@ def burn_subtitles(
     out_dir = ensure_task_dir(task_id)
     out_path = out_dir / OUTPUT_VIDEO
 
+    tmp_burn_path = out_dir / "tmp_burn.srt"
     cwd: Optional[str] = None
     if mode == "hard":
         if not has_subtitles_filter(settings.ffmpeg_bin):
@@ -120,8 +123,9 @@ def burn_subtitles(
                 "请安装带 libass 的 ffmpeg（如 `brew reinstall ffmpeg`），"
                 "或改用软字幕模式（mode='soft'）。"
             )
-        cmd = _hard_cmd(video_path, srt_path, out_path)
-        cwd = str(srt_path.resolve().parent)  # 让滤镜引用 srt basename
+        shutil.copy2(srt_path, tmp_burn_path)
+        cmd = _hard_cmd(video_path, tmp_burn_path, out_path)
+        cwd = str(out_dir.resolve())  # 让滤镜引用 safe basename tmp_burn.srt
     elif mode == "soft":
         cmd = _soft_cmd(video_path, srt_path, out_path)
     else:
@@ -140,12 +144,19 @@ def burn_subtitles(
         ))
 
     logger.info("开始烧录字幕: task=%s mode=%s", task_id, mode)
-    run_ffmpeg(
-        cmd, _tick,
-        error_cls=BurnError,
-        not_found_msg=f"找不到 ffmpeg（{settings.ffmpeg_bin}）。请安装 ffmpeg 或设置 SUBTRANS_FFMPEG。",
-        cwd=cwd,
-    )
+    try:
+        run_ffmpeg(
+            cmd, _tick,
+            error_cls=BurnError,
+            not_found_msg=f"找不到 ffmpeg（{settings.ffmpeg_bin}）。请安装 ffmpeg 或设置 SUBTRANS_FFMPEG。",
+            cwd=cwd,
+        )
+    finally:
+        if tmp_burn_path.exists():
+            try:
+                tmp_burn_path.unlink()
+            except OSError:
+                pass
 
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise BurnError("ffmpeg 执行完成但未生成有效输出文件")
