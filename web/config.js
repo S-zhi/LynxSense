@@ -14,7 +14,12 @@ window.APP_CONFIG = {
   TRANSLATION_ENGINES: [{ value: "deepseek", label: "DeepSeek（兼容旧配置）", enabled: true }],
 
   // 默认支持的目标语言列表
-  TARGET_LANGUAGES: ["zh-CN", "zh-TW", "en", "ja", "ko"],
+  TARGET_LANGUAGES: [
+    "zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "ru", "it",
+    "pt", "vi", "th", "ar", "id", "hi", "nl", "pl", "tr", "sv",
+    "uk", "cs", "da", "fi", "el", "he", "hu", "no", "ro", "sk",
+    "af", "ca", "bg", "hr", "ms", "fa", "ur", "bn", "ta", "sw",
+  ],
 };
 
 // 运行时覆盖 API 地址：localStorage.setItem('SUBTRANS_API_BASE_URL', 'http://...')
