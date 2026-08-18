@@ -335,7 +335,8 @@ def test_write_locks_leak_cleanup(client, monkeypatch):
     lock = _lock_for(task_id)
     assert task_id in _write_locks
 
-    # 2. 调用 DELETE 接口删除任务，验证锁已被移除
+    # 2. 调用 DELETE 接口删除任务，验证锁已被移除（需处于终态）
+    client._store.update(task_id, status="SUCCESS")
     r = client.delete(f"/api/tasks/{task_id}")
     assert r.status_code == 204
     assert task_id not in _write_locks

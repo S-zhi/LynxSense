@@ -300,7 +300,12 @@ def delete_probe_record(
 
 @router.delete("/{task_id}", status_code=204)
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
-    _require(store, task_id)
+    rec = _require(store, task_id)
+    if rec.status not in _TERMINAL:
+        raise HTTPException(
+            status_code=409,
+            detail="任务运行中，请先等待或调用取消接口",
+        )
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
     release_lock(task_id)

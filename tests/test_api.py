@@ -157,6 +157,7 @@ def test_get_missing_404(client):
 
 def test_delete_task(client):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS")
     # 造个产物目录，验证会被清理
     d = client._tmp / cid
     d.mkdir(parents=True, exist_ok=True)
@@ -165,6 +166,24 @@ def test_delete_task(client):
     assert client.delete(f"/api/tasks/{cid}").status_code == 204
     assert client.get(f"/api/tasks/{cid}").status_code == 404
     assert not d.exists()
+
+
+def test_delete_running_task_returns_409(client):
+    """运行中状态（非 SUCCESS/FAILED）的任务禁止删除，返回 409。"""
+    running_statuses = ["PENDING", "DOWNLOADING", "EXTRACTING", "TRANSCRIBING", "TRANSLATING", "BURNING"]
+    for status in running_statuses:
+        cid = client.post("/api/tasks", json=_payload()).json()["id"]
+        client._store.update(cid, status=status)
+        d = client._tmp / cid
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "source.mp4").write_bytes(b"SRC")
+
+        r = client.delete(f"/api/tasks/{cid}")
+        assert r.status_code == 409
+        assert "任务运行中" in r.json()["detail"]
+        # 验证 DB 记录与产物目录均保留
+        assert client.get(f"/api/tasks/{cid}").status_code == 200
+        assert d.exists()
 
 
 def test_delete_missing_404(client):
