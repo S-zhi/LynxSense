@@ -8,7 +8,9 @@ import { LANG_LABEL } from "./constants.js";
 
 const CFG = window.APP_CONFIG;
 const FALLBACK_LANGUAGES = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"];
-const FALLBACK_TARGET_LANGUAGES = ["zh-CN", "zh-TW", "en", "ja", "ko"];
+const FALLBACK_TARGET_LANGUAGES = Object.keys(LANG_LABEL).filter(
+  (k) => k !== "auto" && k !== "zh"
+);
 const FALLBACK_MODELS = [
   "tiny.en", "tiny", "base.en", "base", "small.en",
   "small", "medium.en", "medium", "large-v1", "large-v2",

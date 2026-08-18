@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import List, Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
@@ -26,6 +26,7 @@ from src.config import (
     task_dir,
 )
 from src.core.downloader import probe_video
+from src.core.ffmpeg_utils import probe_duration
 from src.handler.subtitle_editor import release_lock
 from src.handler.deps import get_probe_store, get_store, get_translation_engine_store
 from src.handler.schemas import (
@@ -162,6 +163,7 @@ def create_task(
 
 @router.post("/upload", response_model=TaskOut, status_code=201)
 def create_upload_task(
+    request: Request,
     file: UploadFile = File(..., description="本地视频文件"),
     sourceLang: str = Form("auto", min_length=1),
     targetLang: str = Form("zh-CN", min_length=1),
@@ -177,6 +179,18 @@ def create_upload_task(
 
     字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
     """
+    max_upload_bytes = settings.max_upload_mb * 1024 * 1024
+    content_length_hdr = request.headers.get("content-length")
+    if content_length_hdr:
+        try:
+            if int(content_length_hdr) > max_upload_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
+                )
+        except ValueError:
+            pass
+
     filename = (file.filename or "").strip()
     _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
@@ -203,9 +217,26 @@ def create_upload_task(
     d = task_dir(rec.id)
     d.mkdir(parents=True, exist_ok=True)
     dest = d / f"{SOURCE_VIDEO_STEM}{ext}"
+    written_bytes = 0
+    chunk_size = 1024 * 1024  # 1MB
     try:
         with dest.open("wb") as out:
-            shutil.copyfileobj(file.file, out)  # 流式写盘，避免整文件入内存
+            while True:
+                chunk = file.file.read(chunk_size)
+                if not chunk:
+                    break
+                written_bytes += len(chunk)
+                if written_bytes > max_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        store.delete(rec.id)
+        shutil.rmtree(d, ignore_errors=True)
+        release_lock(rec.id)
+        raise
     except Exception as e:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
@@ -219,6 +250,17 @@ def create_upload_task(
         shutil.rmtree(d, ignore_errors=True)
         release_lock(rec.id)
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
+
+    duration_sec = probe_duration(dest, settings.ffprobe_bin)
+    max_video_seconds = settings.max_video_minutes * 60
+    if duration_sec is not None and duration_sec > max_video_seconds:
+        store.delete(rec.id)
+        shutil.rmtree(d, ignore_errors=True)
+        release_lock(rec.id)
+        raise HTTPException(
+            status_code=400,
+            detail=f"视频时长 ({duration_sec / 60:.1f} 分钟) 超过最大限制 ({settings.max_video_minutes} 分钟)",
+        )
 
     enqueue_pipeline(rec.id)
     return to_out(store.get(rec.id) or rec)
@@ -300,7 +342,12 @@ def delete_probe_record(
 
 @router.delete("/{task_id}", status_code=204)
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
-    _require(store, task_id)
+    rec = _require(store, task_id)
+    if rec.status not in _TERMINAL:
+        raise HTTPException(
+            status_code=409,
+            detail="任务运行中，请先等待或调用取消接口",
+        )
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
     release_lock(task_id)
@@ -446,22 +493,43 @@ def _sse_payload(rec) -> str:
 
 @router.get("/{task_id}/stream")
 def stream_progress(task_id: str, store: TaskStore = Depends(get_store)):
-    """轮询库表并以 SSE 推送进度（方案 A 足够；将来可换事件驱动）。"""
+    """轮询库表并以 SSE 推送进度（含心跳保活、超时断流与终态事件）。"""
     _require(store, task_id)
 
     def gen():
         last = None
-        for _ in range(3600):  # 上限 ~1 小时
+        start_time = time.time()
+        last_sent = time.time()
+        timeout_sec = max(1, settings.stream_timeout_sec)
+
+        while True:
             rec = store.get(task_id)
             if rec is None:
                 yield 'data: {"error":"任务不存在"}\n\n'
                 return
+
             snapshot = (rec.status, rec.progress)
+            now = time.time()
+
             if snapshot != last:
+                if rec.status in _TERMINAL:
+                    yield f"event: end\n{_sse_payload(rec)}"
+                    return
                 yield _sse_payload(rec)
                 last = snapshot
-            if rec.status in _TERMINAL:
+                last_sent = now
+            else:
+                if rec.status in _TERMINAL:
+                    yield f"event: end\n{_sse_payload(rec)}"
+                    return
+                elif now - last_sent >= 15:
+                    yield ":keepalive\n\n"
+                    last_sent = now
+
+            if now - start_time >= timeout_sec:
+                yield 'event: timeout\ndata: {"error":"stream timeout"}\n\n'
                 return
+
             time.sleep(1)
 
     return StreamingResponse(gen(), media_type="text/event-stream")

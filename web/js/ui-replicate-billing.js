@@ -4,14 +4,15 @@ import { $, escapeHtml } from "./utils.js";
 import { Api } from "./api.js";
 import { state } from "./store.js";
 
-const STATUS_LABEL = {
+export const STATUS_LABEL = {
   available: ["available", "已获取"],
   unsupported: ["unknown", "官方未提供余额"],
   unconfigured: ["unconfigured", "未配置 Token"],
   unavailable: ["unavailable", "查询失败"],
+  error: ["unavailable", "Token 失效"],
 };
 
-function statusView(status) {
+export function statusView(status) {
   return STATUS_LABEL[status] || ["unknown", "待查询"];
 }
 
@@ -70,6 +71,7 @@ async function refresh(button) {
 }
 
 export function initReplicateBilling() {
+  if (typeof document === "undefined") return;
   const root = $("#replicateBilling");
   const button = $("#replicateBalanceRefresh");
   if (!root || !button) return;
@@ -80,4 +82,6 @@ export function initReplicateBilling() {
   if (state.view === "translation-settings") refresh(button);
 }
 
-initReplicateBilling();
+if (typeof document !== "undefined") {
+  initReplicateBilling();
+}
