@@ -223,6 +223,11 @@ PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
 
 任一步失败会进入 `FAILED`，并保存失败阶段与错误信息。任务产物默认位于 `data/{task_id}/`。
 
+## 🛣️ 路线图与后续规划
+
+- **API 路由分发与中转站接入**：支持多种 LLM/翻译 API 路由分发，方便接入第三方 API 中转站，优先消耗免费额度与优惠 Token。
+- **本地私有化 SRT 语音识别模型**：除云端 Replicate Whisper 外，规划支持本地私有化 Whisper / Faster-Whisper 模型部署，实现完全离线与零 API 消耗的字幕生成。
+
 ## ⚙️ 常用配置
 
 | 变量 | 默认值 | 说明 |

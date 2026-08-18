@@ -223,6 +223,11 @@ PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
 
 A failed step moves the job to `FAILED` and records the failing stage and error. Artifacts are stored in `data/{task_id}/` by default.
 
+## 🛣️ Roadmap & Future Plans
+
+- **API Routing & Proxy Station Support**: Multi-provider API routing and relay dispatch, allowing seamless connection to API relay stations to leverage free tier credits and promotional tokens.
+- **Local Private SRT Speech Recognition Models**: Beyond cloud Replicate Whisper, plan to support self-hosted local Whisper / Faster-Whisper inference engines for fully offline, zero-API-cost subtitle transcription.
+
 ## ⚙️ Common Configuration
 
 | Variable | Default | Description |
