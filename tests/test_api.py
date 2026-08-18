@@ -22,6 +22,7 @@ from src.store import ProbeStore, TaskStore, TaskRecord
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    import dataclasses
     db_path = tmp_path / "test.db"
     store = TaskStore(db_path)
     probe_store = ProbeStore(db_path)
@@ -33,6 +34,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
     # 不在 API 测试里真跑流水线（执行器单独测）
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda task_id: None)
+    # 默认 mock 提供 DeepSeek Key，确保其它 Task 创建测试不受影响
+    monkeypatch.setattr(
+        tasks_routes,
+        "settings",
+        dataclasses.replace(tasks_routes.settings, deepseek_api_key="sk-mock-key"),
+    )
     with TestClient(app) as c:
         c._store = store
         c._probe_store = probe_store
@@ -103,6 +110,52 @@ def test_create_rejects_empty_model_and_languages(client, monkeypatch):
     assert client.post("/api/tasks", json=_payload(sourceLang="")).status_code == 422
     assert client.post("/api/tasks", json=_payload(targetLang="")).status_code == 422
     assert enqueued == []
+
+
+def test_create_task_rejects_missing_deepseek_api_key(client, monkeypatch):
+    """DeepSeek 引擎在需要字幕且未配置 API Key 时应返回 422 拒绝。"""
+    import dataclasses
+    monkeypatch.setattr(
+        tasks_routes,
+        "settings",
+        dataclasses.replace(tasks_routes.settings, deepseek_api_key=None),
+    )
+
+    # 1. POST /api/tasks
+    r1 = client.post("/api/tasks", json=_payload(engine="deepseek", needSubtitle=True))
+    assert r1.status_code == 422
+    assert "缺少 DeepSeek API Key" in r1.json()["detail"]
+
+    # 2. POST /api/tasks/upload
+    r2 = _upload(client, _filename="clip.mp4", engine="deepseek", needSubtitle="true")
+    assert r2.status_code == 422
+    assert "缺少 DeepSeek API Key" in r2.json()["detail"]
+
+
+def test_create_task_allows_missing_deepseek_api_key_when_need_subtitle_false(client, monkeypatch):
+    """不需要字幕（needSubtitle=False）时，即使未配置 DeepSeek Key 也能创建任务。"""
+    import dataclasses
+    monkeypatch.setattr(
+        tasks_routes,
+        "settings",
+        dataclasses.replace(tasks_routes.settings, deepseek_api_key=None),
+    )
+
+    r = client.post("/api/tasks", json=_payload(engine="deepseek", needSubtitle=False))
+    assert r.status_code == 201
+
+
+def test_create_task_succeeds_when_deepseek_api_key_present(client, monkeypatch):
+    """已配置 DeepSeek Key 时，创建任务成功。"""
+    import dataclasses
+    monkeypatch.setattr(
+        tasks_routes,
+        "settings",
+        dataclasses.replace(tasks_routes.settings, deepseek_api_key="sk-valid-key"),
+    )
+
+    r = client.post("/api/tasks", json=_payload(engine="deepseek", needSubtitle=True))
+    assert r.status_code == 201
 
 
 def test_create_upload_task_persists_options_and_file(client, monkeypatch):
@@ -784,10 +837,10 @@ def test_upload_calls_enqueue_with_task_id(client, monkeypatch):
 
 def test_upload_content_length_exceeds_max_413(client, monkeypatch):
     """Content-Length 超过 max_upload_mb 限制时直接返回 413。"""
-    from src.config.config import Settings
+    import dataclasses
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
-    s = Settings(max_upload_mb=1)
+    s = dataclasses.replace(tasks_routes.settings, max_upload_mb=1)
     monkeypatch.setattr(tasks_routes, "settings", s)
 
     # 发送请求并带 Content-Length header 2MB (> 1MB)
@@ -808,10 +861,10 @@ def test_upload_content_length_exceeds_max_413(client, monkeypatch):
 
 def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch):
     """流式写入过程中累计大小超过 max_upload_mb 触发 413 并清理落盘文件及 DB 记录。"""
-    from src.config.config import Settings
+    import dataclasses
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
-    s = Settings(max_upload_mb=1)
+    s = dataclasses.replace(tasks_routes.settings, max_upload_mb=1)
     monkeypatch.setattr(tasks_routes, "settings", s)
 
     # 构造超过 1MB (1024 * 1024) 的内容 (1.5MB)
@@ -837,10 +890,10 @@ def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch)
 
 def test_upload_duration_exceeds_max_400_and_cleanup(client, monkeypatch):
     """视频时长超过 max_video_minutes 时返回 400 并清理已建记录与目录。"""
-    from src.config.config import Settings
+    import dataclasses
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
-    s = Settings(max_video_minutes=10)
+    s = dataclasses.replace(tasks_routes.settings, max_video_minutes=10)
     monkeypatch.setattr(tasks_routes, "settings", s)
     # mock probe_duration 返回 601 秒 (10.01 分钟 > 10 分钟)
     monkeypatch.setattr(tasks_routes, "probe_duration", lambda path, bin_path: 601.0)
