@@ -44,8 +44,9 @@ class FakeBusinessApi:
             },
         }
 
-    async def list_tasks(self):
-        return []
+    async def list_tasks(self, limit=50, offset=0, before_id=None, after_id=None):
+        self.list_params = {"limit": limit, "offset": offset, "before_id": before_id, "after_id": after_id}
+        return [{"id": "task_1", "status": "SUCCESS"}]
 
     async def retry_task(self, task_id):
         return {"id": task_id, "status": "PENDING"}
@@ -104,6 +105,30 @@ def test_artifacts_are_returned_as_absolute_urls():
             },
         ],
     }
+
+
+def test_list_tasks_accepts_limit_up_to_200_and_passes_pagination():
+    api = FakeBusinessApi()
+    tools = SubtitleMcpTools(api)
+
+    res = _run(tools.list_tasks(limit=200, offset=10, before_id="task_b", after_id="task_a"))
+    assert res["ok"] is True
+    assert res["count"] == 1
+    assert api.list_params == {
+        "limit": 200,
+        "offset": 10,
+        "before_id": "task_b",
+        "after_id": "task_a",
+    }
+
+    # limit > 200 或 offset < 0 返回 INVALID_ARGUMENT
+    err_limit = _run(tools.list_tasks(limit=201))
+    assert err_limit["ok"] is False
+    assert err_limit["error_code"] == "INVALID_ARGUMENT"
+
+    err_offset = _run(tools.list_tasks(offset=-1))
+    assert err_offset["ok"] is False
+    assert err_offset["error_code"] == "INVALID_ARGUMENT"
 
 
 def test_start_pipeline_reports_initialization_failure():

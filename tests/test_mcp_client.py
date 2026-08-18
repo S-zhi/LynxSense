@@ -32,6 +32,26 @@ def test_business_client_posts_task_payload():
     assert result == {"id": "task_1", "status": "PENDING"}
 
 
+def test_business_client_list_tasks_passes_pagination_query_params():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/tasks"
+        assert request.url.params["limit"] == "100"
+        assert request.url.params["offset"] == "20"
+        assert request.url.params["before_id"] == "task_before"
+        assert request.url.params["after_id"] == "task_after"
+        return httpx.Response(200, json=[{"id": "task_1", "status": "SUCCESS"}])
+
+    client = BusinessApiClient(
+        BusinessApiConfig(base_url="http://business.test"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = _run(client.list_tasks(limit=100, offset=20, before_id="task_before", after_id="task_after"))
+
+    assert result == [{"id": "task_1", "status": "SUCCESS"}]
+
+
 def test_business_client_maps_missing_task():
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "任务不存在"})
