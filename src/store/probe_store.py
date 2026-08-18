@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import time
 import uuid
@@ -33,6 +34,7 @@ class ProbeRecord:
     reason: Optional[str] = None
     detail: Optional[str] = None
     created_at: int = 0       # epoch 毫秒
+    url_hash: Optional[str] = None  # sha256(url)[:16]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -43,6 +45,10 @@ _COLUMNS = list(ProbeRecord.__dataclass_fields__.keys())
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _calc_url_hash(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
 
 
 class ProbeStore:
@@ -76,14 +82,27 @@ class ProbeStore:
                     webpage_url TEXT,
                     reason TEXT,
                     detail TEXT,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    url_hash TEXT
                 )
                 """
             )
+            # Schema 迁移：若已有旧表无 url_hash 列则补充
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(probe_records)").fetchall()]
+            if "url_hash" not in cols:
+                conn.execute("ALTER TABLE probe_records ADD COLUMN url_hash TEXT")
+                rows = conn.execute("SELECT id, url FROM probe_records WHERE url_hash IS NULL").fetchall()
+                for r in rows:
+                    conn.execute("UPDATE probe_records SET url_hash = ? WHERE id = ?", (_calc_url_hash(r["url"]), r["id"]))
+
             # 列表默认按时间倒序，建索引避免大表全表扫
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_probe_records_created_at "
                 "ON probe_records (created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_probe_records_url_hash "
+                "ON probe_records (url_hash, created_at DESC)"
             )
 
     # ---------- 增 ----------
@@ -100,11 +119,71 @@ class ProbeStore:
         reason: Optional[str] = None,
         detail: Optional[str] = None,
     ) -> ProbeRecord:
-        """写入一条测试记录。返回的 dataclass 含数据库自带的 id / created_at。"""
-        rec = ProbeRecord(
-            id="probe_" + uuid.uuid4().hex[:8],
+        """写入或更新一条测试记录。若同 URL 在当前小时桶已存在，则覆盖更新最新结果。"""
+        now = _now_ms()
+        url_hash = _calc_url_hash(url)
+        start_of_hour = (now // 3600000) * 3600000
+        ok_val = 1 if ok else 0
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM probe_records WHERE url_hash = ? AND created_at >= ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (url_hash, start_of_hour),
+            ).fetchone()
+
+            if row:
+                rec_id = row["id"]
+                conn.execute(
+                    """
+                    UPDATE probe_records
+                    SET url = ?, ok = ?, title = ?, extractor = ?, duration = ?,
+                        formats_count = ?, webpage_url = ?, reason = ?, detail = ?,
+                        created_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        url,
+                        ok_val,
+                        title,
+                        extractor,
+                        duration,
+                        formats_count,
+                        webpage_url,
+                        reason,
+                        detail,
+                        now,
+                        rec_id,
+                    ),
+                )
+            else:
+                rec_id = "probe_" + uuid.uuid4().hex[:8]
+                rec = ProbeRecord(
+                    id=rec_id,
+                    url=url,
+                    ok=ok_val,
+                    title=title,
+                    extractor=extractor,
+                    duration=duration,
+                    formats_count=formats_count,
+                    webpage_url=webpage_url,
+                    reason=reason,
+                    detail=detail,
+                    created_at=now,
+                    url_hash=url_hash,
+                )
+                values = [getattr(rec, c) for c in _COLUMNS]
+                placeholders = ", ".join(["?"] * len(_COLUMNS))
+                conn.execute(
+                    f"INSERT INTO probe_records ({', '.join(_COLUMNS)}) "
+                    f"VALUES ({placeholders})",
+                    values,
+                )
+
+        return ProbeRecord(
+            id=rec_id,
             url=url,
-            ok=1 if ok else 0,
+            ok=ok_val,
             title=title,
             extractor=extractor,
             duration=duration,
@@ -112,17 +191,9 @@ class ProbeStore:
             webpage_url=webpage_url,
             reason=reason,
             detail=detail,
-            created_at=_now_ms(),
+            created_at=now,
+            url_hash=url_hash,
         )
-        values = [getattr(rec, c) for c in _COLUMNS]
-        placeholders = ", ".join(["?"] * len(_COLUMNS))
-        with self._connect() as conn:
-            conn.execute(
-                f"INSERT INTO probe_records ({', '.join(_COLUMNS)}) "
-                f"VALUES ({placeholders})",
-                values,
-            )
-        return rec
 
     # ---------- 查 ----------
     def list(self, limit: int = 50) -> List[ProbeRecord]:
@@ -156,6 +227,15 @@ class ProbeStore:
         """清空所有 probe 记录，返回删除的行数。"""
         with self._connect() as conn:
             cur = conn.execute("DELETE FROM probe_records")
+            return cur.rowcount
+
+    def cleanup_older_than_days(self, days: int) -> int:
+        """清理早于 N 天前的测试记录，返回清理的行数。"""
+        if days < 0:
+            return 0
+        cutoff = _now_ms() - days * 86400 * 1000
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM probe_records WHERE created_at < ?", (cutoff,))
             return cur.rowcount
 
 
