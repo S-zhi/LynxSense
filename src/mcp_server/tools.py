@@ -214,12 +214,25 @@ class SubtitleMcpTools:
         ]
         return {"ok": True, "task_id": task_id, "artifacts": artifacts}
 
-    async def list_tasks(self, limit: int = 20) -> dict[str, Any]:
-        if limit < 1 or limit > 100:
-            return {"ok": False, "error_code": "INVALID_ARGUMENT", "message": "limit 必须在 1 到 100 之间"}
+    async def list_tasks(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        before_id: str | None = None,
+        after_id: str | None = None,
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 200:
+            return {"ok": False, "error_code": "INVALID_ARGUMENT", "message": "limit 必须在 1 到 200 之间"}
+        if offset < 0:
+            return {"ok": False, "error_code": "INVALID_ARGUMENT", "message": "offset 必须大于等于 0"}
         try:
-            data = await self.api.list_tasks()
-            tasks = [_normalize_task(self.api, item) for item in data[:limit]]
+            data = await self.api.list_tasks(
+                limit=limit,
+                offset=offset,
+                before_id=before_id,
+                after_id=after_id,
+            )
+            tasks = [_normalize_task(self.api, item) for item in data]
             return {"ok": True, "count": len(tasks), "tasks": tasks}
         except BusinessApiError as exc:
             return exc.to_result()
@@ -392,16 +405,33 @@ def register_tools(server: Any, api: BusinessApiClient | None = None) -> Subtitl
     @server.tool(
         name="list_tasks",
         title="列出字幕处理任务",
-        description="只读列出最近的字幕处理任务，适合用户要求查看历史任务或寻找 task_id 时使用。",
+        description="只读列出字幕处理任务，支持分页（limit/offset）与游标（before_id/after_id），适合查看历史任务或寻找 task_id。",
     )
     async def list_tasks(
         limit: Annotated[
             int,
-            Field(description="最多返回的任务数量，范围 1 到 100，默认 20。", ge=1, le=100),
+            Field(description="最多返回的任务数量，范围 1 到 200，默认 20。", ge=1, le=200),
         ] = 20,
+        offset: Annotated[
+            int,
+            Field(description="跳过前 N 条记录，默认 0。", ge=0),
+        ] = 0,
+        before_id: Annotated[
+            str | None,
+            Field(description="游标：仅返回 ID 早于（更早创建）该任务的记录。"),
+        ] = None,
+        after_id: Annotated[
+            str | None,
+            Field(description="游标：仅返回 ID 晚于（更晚创建）该任务的记录。"),
+        ] = None,
     ) -> dict[str, Any]:
-        """列出最近的字幕处理任务。"""
-        return await service.list_tasks(limit)
+        """列出字幕处理任务。"""
+        return await service.list_tasks(
+            limit=limit,
+            offset=offset,
+            before_id=before_id,
+            after_id=after_id,
+        )
 
     @server.tool(
         name="retry_task",
