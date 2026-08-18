@@ -1,6 +1,6 @@
 /* 数据层：真实接口（REST + SSE）与 mock，按 config 切换。契约与后端一致。 */
 
-import { TERMINAL } from "./constants.js";
+import { TERMINAL, LANG_LABEL } from "./constants.js";
 import { uid, clamp, shortUrl, statusForProgress } from "./utils.js";
 
 const CFG = window.APP_CONFIG;
@@ -284,18 +284,76 @@ const RealApi = {
     return res.json();
   },
 
-  // SSE 订阅单任务进度，返回取消函数
+  // SSE 订阅单任务进度（含自动重连、退避策略与超时断流捕获），返回取消函数
   subscribeProgress(id, onUpdate) {
-    const es = new EventSource(`${this.base}/api/tasks/${id}/stream`);
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        onUpdate(data);
-        if (TERMINAL.has(data.status)) es.close();
-      } catch (_) {}
+    let es = null;
+    let retryCount = 0;
+    let reconnectTimer = null;
+    let isClosed = false;
+
+    const connect = () => {
+      if (isClosed) return;
+      es = new EventSource(`${this.base}/api/tasks/${id}/stream`);
+
+      const handlePayload = (data) => {
+        if (!data) return;
+        if (data.status && TERMINAL.has(data.status)) {
+          isClosed = true;
+          if (es) es.close();
+        }
+        onUpdate({ ...data, _streamStatus: "connected" });
+      };
+
+      es.onmessage = (e) => {
+        retryCount = 0;
+        try {
+          const data = JSON.parse(e.data);
+          handlePayload(data);
+        } catch (_) {}
+      };
+
+      es.addEventListener("end", (e) => {
+        retryCount = 0;
+        isClosed = true;
+        if (es) es.close();
+        try {
+          if (e.data) {
+            const data = JSON.parse(e.data);
+            handlePayload(data);
+          }
+        } catch (_) {}
+      });
+
+      es.addEventListener("timeout", (e) => {
+        isClosed = true;
+        if (es) es.close();
+        try {
+          const data = JSON.parse(e.data);
+          onUpdate({ id, _streamStatus: "timeout", error: data?.error || "连接已超时" });
+        } catch (_) {
+          onUpdate({ id, _streamStatus: "timeout", error: "连接已超时" });
+        }
+      });
+
+      es.onerror = () => {
+        if (isClosed) return;
+        if (es) es.close();
+        retryCount++;
+        const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000);
+        onUpdate({ id, _streamStatus: "reconnecting", _retryCount: retryCount });
+        reconnectTimer = setTimeout(() => {
+          if (!isClosed) connect();
+        }, delay);
+      };
     };
-    es.onerror = () => es.close();
-    return () => es.close();
+
+    connect();
+
+    return () => {
+      isClosed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (es) es.close();
+    };
   },
 
   downloadUrl(id, kind) {
@@ -468,7 +526,13 @@ const MockApi = (() => {
     // 示例模式下返回常用源语言选项。
     async listVideoLanguages() { await delay(80); return ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"]; },
     // 示例模式下返回目标语言选项。
-    async listTargetLanguages() { await delay(80); return CFG.TARGET_LANGUAGES || ["zh-CN", "zh-TW", "en", "ja", "ko"]; },
+    async listTargetLanguages() {
+      await delay(80);
+      return (
+        CFG.TARGET_LANGUAGES ||
+        Object.keys(LANG_LABEL).filter((k) => k !== "auto" && k !== "zh")
+      );
+    },
     // 示例模式下返回 Replicate Whisper 模型权重选项。
     async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
     async getReplicateBalance() {
