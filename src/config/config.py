@@ -156,6 +156,10 @@ class Settings:
     # 下载失败重试次数
     download_retries: int = int(os.getenv("SUBTRANS_DL_RETRIES", "3"))
 
+    # 上传限制配置
+    max_upload_mb: int = int(os.getenv("SUBTRANS_MAX_UPLOAD_MB", "2048"))
+    max_video_minutes: int = int(os.getenv("SUBTRANS_MAX_VIDEO_MINUTES", "180"))
+
     # ffmpeg / ffprobe 可执行文件（默认走 PATH）
     ffmpeg_bin: str = os.getenv("SUBTRANS_FFMPEG", "ffmpeg")
     ffprobe_bin: str = os.getenv("SUBTRANS_FFPROBE", "ffprobe")

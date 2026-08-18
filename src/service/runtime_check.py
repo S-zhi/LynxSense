@@ -131,6 +131,10 @@ def build_readiness() -> dict[str, Any]:
             "hard_burn": hard_burn_ready,
             "soft_burn": full_pipeline_ready,
         },
+        "limits": {
+            "max_upload_mb": settings.max_upload_mb,
+            "max_video_minutes": settings.max_video_minutes,
+        },
         "missing": missing,
         "agent_action": agent_action,
         "restart_required": restart_required,
