@@ -138,6 +138,9 @@ class Settings:
     # 后台流水线并发数（方案 A：线程池）
     pipeline_workers: int = int(os.getenv("SUBTRANS_WORKERS", "2"))
 
+    # SSE 进度流连接超时上限（秒），默认 7200 秒（2 小时）
+    stream_timeout_sec: int = int(os.getenv("SUBTRANS_STREAM_TIMEOUT_SEC", "7200"))
+
     # 允许访问本地 API 的前端来源，逗号分隔覆盖
     cors_allow_origins: tuple[str, ...] = _env_list(
         "SUBTRANS_CORS_ORIGINS",
@@ -155,6 +158,10 @@ class Settings:
 
     # 下载失败重试次数
     download_retries: int = int(os.getenv("SUBTRANS_DL_RETRIES", "3"))
+
+    # 上传限制配置
+    max_upload_mb: int = int(os.getenv("SUBTRANS_MAX_UPLOAD_MB", "2048"))
+    max_video_minutes: int = int(os.getenv("SUBTRANS_MAX_VIDEO_MINUTES", "180"))
 
     # ffmpeg / ffprobe 可执行文件（默认走 PATH）
     ffmpeg_bin: str = os.getenv("SUBTRANS_FFMPEG", "ffmpeg")

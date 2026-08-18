@@ -117,8 +117,12 @@ function setHeader(row, t) {
   row.querySelector(".qrow__status i").className = "ph " + meta.icon;
   row.querySelector(".qrow__title").textContent = t.title || "处理中的视频";
   row.querySelector(".qrow__url").textContent = shortUrl(t.url);
+  let badgeLabel = meta.label;
+  if (t._streamStatus === "reconnecting") {
+    badgeLabel = "重连中";
+  }
   row.querySelector(".qrow__badge").innerHTML =
-    `<span class="badge badge--${meta.cls}"><i class="ph ${meta.icon}"></i>${meta.label}</span>`;
+    `<span class="badge badge--${meta.cls}"><i class="ph ${meta.icon}"></i>${badgeLabel}</span>`;
 }
 
 function categoryOf(status) {
@@ -165,7 +169,13 @@ function updateTrack(row, t) {
     s.classList.toggle("is-done", t.status !== "PENDING" && i < curIdx);
     s.classList.toggle("is-current", isActive && i === curIdx);
   });
-  row.querySelector(".progress-line__step").textContent = t.status === "PENDING" ? "排队中" : meta.label;
+  let stepText = t.status === "PENDING" ? "排队中" : meta.label;
+  if (t._streamStatus === "reconnecting") {
+    stepText += ` (重连中 ${t._retryCount || 1} 次...)`;
+  } else if (t._streamStatus === "timeout") {
+    stepText += " (进度流已超时)";
+  }
+  row.querySelector(".progress-line__step").textContent = stepText;
   row.querySelector(".progress-line__pct").textContent = Math.round(t.progress) + "%";
 }
 
