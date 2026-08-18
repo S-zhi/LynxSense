@@ -288,7 +288,8 @@ def register_tools(server: Any, api: BusinessApiClient | None = None) -> Subtitl
         name="probe_video",
         title="预检查视频地址",
         description=(
-            "只读预检查视频 URL 是否可解析和下载，不会下载媒体文件。"
+            "无副作用预检查视频 URL 是否可解析和下载，不会下载媒体文件。"
+            "数据库尝试探测记录会自动按小时窗口去重，重复调用不会产生沉余数据库行。"
             "调用前先确认 check_subtitle_setup 没有返回 BUSINESS_UNAVAILABLE 或 NOT_INITIALIZED，"
             "并且 capabilities.download=true；如果预检查失败，不要直接启动流水线，应把返回的错误信息告知用户并请求新的 URL。"
         ),
