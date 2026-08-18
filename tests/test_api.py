@@ -693,7 +693,7 @@ def test_upload_save_failure_500_and_cleanup(client, monkeypatch):
     def boom(*a, **kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(tasks_routes.shutil, "copyfileobj", boom)
+    monkeypatch.setattr("pathlib.Path.open", boom)
 
     before = _count_task_dirs(client._tmp)
     r = _upload(client, _filename="clip.mp4", _content=b"VIDEO")
@@ -761,6 +761,79 @@ def test_upload_calls_enqueue_with_task_id(client, monkeypatch):
     data = r.json()
     assert r.status_code == 201
     assert enqueued == [data["id"]]
+
+
+def test_upload_content_length_exceeds_max_413(client, monkeypatch):
+    """Content-Length 超过 max_upload_mb 限制时直接返回 413。"""
+    from src.config.config import Settings
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+    s = Settings(max_upload_mb=1)
+    monkeypatch.setattr(tasks_routes, "settings", s)
+
+    # 发送请求并带 Content-Length header 2MB (> 1MB)
+    r = client.post(
+        "/api/tasks/upload",
+        headers={"Content-Length": str(2 * 1024 * 1024)},
+        data={
+            "sourceLang": "en", "targetLang": "ja", "mode": "mono",
+            "burn": "hard", "model": "small", "engine": "deepseek",
+            "needSubtitle": "true",
+        },
+        files={"file": ("clip.mp4", b"VIDEO", "video/mp4")},
+    )
+    assert r.status_code == 413
+    assert "超过最大限制" in r.json()["detail"]
+    assert enqueued == []
+
+
+def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch):
+    """流式写入过程中累计大小超过 max_upload_mb 触发 413 并清理落盘文件及 DB 记录。"""
+    from src.config.config import Settings
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+    s = Settings(max_upload_mb=1)
+    monkeypatch.setattr(tasks_routes, "settings", s)
+
+    # 构造超过 1MB (1024 * 1024) 的内容 (1.5MB)
+    large_content = b"X" * (1500 * 1024)
+    before = _count_task_dirs(client._tmp)
+
+    # 不发 Content-Length，以强制走流式 copy 字节统计逻辑
+    r = client.post(
+        "/api/tasks/upload",
+        data={
+            "sourceLang": "en", "targetLang": "ja", "mode": "mono",
+            "burn": "hard", "model": "small", "engine": "deepseek",
+            "needSubtitle": "true",
+        },
+        files={"file": ("clip.mp4", large_content, "video/mp4")},
+    )
+    assert r.status_code == 413
+    assert "超过最大限制" in r.json()["detail"]
+    assert enqueued == []
+    assert client.get("/api/tasks").json() == []
+    assert _count_task_dirs(client._tmp) == before
+
+
+def test_upload_duration_exceeds_max_400_and_cleanup(client, monkeypatch):
+    """视频时长超过 max_video_minutes 时返回 400 并清理已建记录与目录。"""
+    from src.config.config import Settings
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+    s = Settings(max_video_minutes=10)
+    monkeypatch.setattr(tasks_routes, "settings", s)
+    # mock probe_duration 返回 601 秒 (10.01 分钟 > 10 分钟)
+    monkeypatch.setattr(tasks_routes, "probe_duration", lambda path, bin_path: 601.0)
+
+    before = _count_task_dirs(client._tmp)
+    r = _upload(client, _filename="clip.mp4", _content=b"VIDEO")
+    assert r.status_code == 400
+    assert "视频时长" in r.json()["detail"]
+    assert "超过最大限制" in r.json()["detail"]
+    assert enqueued == []
+    assert client.get("/api/tasks").json() == []
+    assert _count_task_dirs(client._tmp) == before
 
 
 # ---------- to_out() 链路新增字段透出 ----------
