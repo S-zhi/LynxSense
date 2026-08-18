@@ -22,8 +22,8 @@ from src.config import (
 from src.handler import storage as storage_routes
 from src.handler import tasks as tasks_routes
 from src.handler.app import app
-from src.handler.deps import get_store
-from src.store import TaskStore
+from src.handler.deps import get_probe_store, get_store
+from src.store import ProbeStore, TaskStore
 
 
 # ---------- 工具 ----------
@@ -31,8 +31,11 @@ from src.store import TaskStore
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """API 测试夹具：临时 DB + 临时产物根目录。"""
-    store = TaskStore(tmp_path / "test.db")
+    db_p = tmp_path / "test.db"
+    store = TaskStore(db_p)
+    probe_store = ProbeStore(db_p)
     app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_probe_store] = lambda: probe_store
 
     # 把 task_dir 重定向到 tmp_path（与现有 tasks 测试一致）
     def fake_dir(tid: str):
@@ -48,6 +51,7 @@ def client(tmp_path, monkeypatch):
 
     with TestClient(app) as c:
         c._store = store
+        c._probe_store = probe_store
         c._tmp = tmp_path
         yield c
     app.dependency_overrides.clear()
@@ -274,3 +278,36 @@ def test_cleanup_preview_older_than_days_filter(client):
     matched = {t["taskId"] for t in pre["targets"]}
     assert matched == {old_id}
     assert fresh_id not in matched
+
+
+def test_cleanup_probe_records_in_storage_api(client, monkeypatch):
+    probes = client._probe_store
+    now_ms = int(time.time() * 1000)
+
+    # 构造老 probe 记录 (10 天前) 与新 probe 记录 (当前)
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms - 10 * 86400 * 1000)
+    probes.record(url="https://example.com/old_probe", ok=True)
+
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms)
+    probes.record(url="https://example.com/new_probe", ok=True)
+
+    assert len(probes.list()) == 2
+
+    # 预览清理 5 天前的 probe 记录
+    pre = client.post(
+        "/api/storage/cleanup_preview",
+        json={"cleanupProbeRecordsOlderThanDays": 5},
+    ).json()
+    assert pre["deletedProbeRecords"] == 1
+
+    # 执行清理 5 天前的 probe 记录
+    res = client.post(
+        "/api/storage/cleanup",
+        json={"cleanupProbeRecordsOlderThanDays": 5},
+    ).json()
+    assert res["deletedProbeRecords"] == 1
+
+    # 验证只剩下 1 条新记录
+    remaining = probes.list()
+    assert len(remaining) == 1
+    assert remaining[0].url == "https://example.com/new_probe"
