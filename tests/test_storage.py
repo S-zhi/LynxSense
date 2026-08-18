@@ -224,6 +224,21 @@ def test_cleanup_respects_kind_filter_and_keeps_task(client):
     assert not d.exists()
 
 
+def test_cleanup_marks_downgrade_reason_user_cleaned(client):
+    """/api/storage/cleanup 清理产物时应显式标注 downgrade_reason=USER_CLEANED。"""
+    store = client._store
+    cid = _seed_task(
+        client, store, title="partial_clean",
+        status="SUCCESS", source_bytes=200, audio_bytes=300, srt_bytes=40, output_bytes=800,
+    )
+    res = _post_cleanup(client, taskIds=[cid], kinds=["audio"])
+    assert len(res["partial"]) == 1
+    rec = store.get(cid)
+    assert rec.resource_status == "MISSING"
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgraded_at is not None and rec.downgraded_at > 0
+
+
 def test_cleanup_re_validates_status_before_delete(client, monkeypatch):
     """预览与执行之间状态可能变化；执行时再校验一次 RUNNING。"""
     store = client._store

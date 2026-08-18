@@ -197,3 +197,75 @@ def test_resource_status_migration_adds_column(tmp_path):
     assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
     assert rec.status == "SUCCESS"  # 其它字段保持不变
 
+
+def test_downgrade_reason_round_trip(store):
+    """downgrade_reason 和 downgraded_at 写入后可读回。"""
+    rec = _create(store)
+    now = int(time.time() * 1000)
+    updated = store.update(
+        rec.id,
+        resource_status=RESOURCE_STATUS_MISSING,
+        error="资源已删除",
+        downgrade_reason="USER_CLEANED",
+        downgraded_at=now,
+    )
+    assert updated.resource_status == RESOURCE_STATUS_MISSING
+    assert updated.downgrade_reason == "USER_CLEANED"
+    assert updated.downgraded_at == now
+
+    s2 = TaskStore(store.db_path)
+    got = s2.get(rec.id)
+    assert got is not None
+    assert got.downgrade_reason == "USER_CLEANED"
+    assert got.downgraded_at == now
+
+
+def test_downgrade_reason_migration_adds_columns(tmp_path):
+    """旧库没有 downgrade_reason / downgraded_at 列时，初始化应补上。"""
+    import sqlite3
+
+    db_path = tmp_path / "legacy_downgrade.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            source_lang TEXT NOT NULL,
+            target_lang TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            burn TEXT NOT NULL,
+            model TEXT NOT NULL,
+            engine TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'url',
+            need_subtitle INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL,
+            current_step TEXT,
+            title TEXT,
+            error TEXT,
+            output_video TEXT,
+            output_subtitle TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO tasks (id, url, source_lang, target_lang, mode, burn, model, engine, "
+        "status, progress, created_at, updated_at, resource_status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "task_legacy2", "http://x/v", "auto", "zh-CN", "mono", "hard", "small", "deepseek",
+            "SUCCESS", 100, 0, 0, "AVAILABLE",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    s = TaskStore(db_path)
+    rec = s.get("task_legacy2")
+    assert rec is not None
+    assert rec.downgrade_reason is None
+    assert rec.downgraded_at is None

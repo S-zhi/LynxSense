@@ -340,6 +340,62 @@ def test_success_task_with_missing_video_hides_outputs(client):
     assert data["error"] == "资源已删除"
 
 
+def test_scan_missing_terminal_records_user_cleaned(client):
+    """data_dir 存在但某任务目录缺失，应标记 downgrade_reason=USER_CLEANED。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp)
+    assert marked == [cid]
+
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgraded_at is not None and rec.downgraded_at > 0
+
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["downgradeReason"] == "USER_CLEANED"
+    assert data["downgradedAt"] == rec.downgraded_at
+
+
+def test_scan_missing_terminal_records_volume_migrated(client, tmp_path):
+    """多任务存在且整个 data_dir 不存在或为空，应标记 downgrade_reason=VOLUME_MIGRATED。"""
+    cid1 = client.post("/api/tasks", json=_payload()).json()["id"]
+    cid2 = client.post("/api/tasks", json=_payload(url="https://example.com/v2")).json()["id"]
+    client._store.update(cid1, status="SUCCESS", progress=100)
+    client._store.update(cid2, status="SUCCESS", progress=100)
+
+    empty_dir = tmp_path / "empty_data_dir"
+
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=empty_dir)
+    assert set(marked) == {cid1, cid2}
+
+    rec1 = client._store.get(cid1)
+    rec2 = client._store.get(cid2)
+    assert rec1.downgrade_reason == "VOLUME_MIGRATED"
+    assert rec2.downgrade_reason == "VOLUME_MIGRATED"
+
+
+def test_scan_missing_terminal_records_disk_failure(client, tmp_path):
+    """文件存在但为 0 字节 (UNREADABLE)，应标记 downgrade_reason=DISK_FAILURE。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    # 0 字节导致 UNREADABLE
+    (d / "output.mp4").write_bytes(b"")
+    (d / "translated.srt").write_bytes(b"")
+
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp)
+    assert marked == [cid]
+
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.error == "资源不可读"
+
+
 def test_success_download_only_task_with_missing_source_hides_outputs(client):
     """needSubtitle=False 的"仅下载"任务丢失 source.* 也算资源已丢失。"""
     cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]

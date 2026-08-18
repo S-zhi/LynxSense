@@ -32,6 +32,18 @@ RESOURCE_STATUS_AVAILABLE = "AVAILABLE"
 RESOURCE_STATUS_MISSING = "MISSING"
 RESOURCE_STATUSES = (RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING)
 
+# 降级原因分类：描述 resource_status 降级为 MISSING 的来源
+DOWNGRADE_REASON_USER_CLEANED = "USER_CLEANED"
+DOWNGRADE_REASON_DISK_FAILURE = "DISK_FAILURE"
+DOWNGRADE_REASON_VOLUME_MIGRATED = "VOLUME_MIGRATED"
+DOWNGRADE_REASON_UNKNOWN = "UNKNOWN"
+DOWNGRADE_REASONS = (
+    DOWNGRADE_REASON_USER_CLEANED,
+    DOWNGRADE_REASON_DISK_FAILURE,
+    DOWNGRADE_REASON_VOLUME_MIGRATED,
+    DOWNGRADE_REASON_UNKNOWN,
+)
+
 
 @dataclass
 class TaskRecord:
@@ -55,6 +67,8 @@ class TaskRecord:
     created_at: int = 0   # epoch 毫秒
     updated_at: int = 0
     resource_status: str = RESOURCE_STATUS_AVAILABLE  # 产物文件是否在盘
+    downgrade_reason: Optional[str] = None  # USER_CLEANED | DISK_FAILURE | VOLUME_MIGRATED | UNKNOWN
+    downgraded_at: Optional[int] = None     # epoch 毫秒
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -106,7 +120,9 @@ class TaskStore:
                     output_subtitle TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
-                    resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'
+                    resource_status TEXT NOT NULL DEFAULT 'AVAILABLE',
+                    downgrade_reason TEXT,
+                    downgraded_at INTEGER
                 )
                 """
             )
@@ -120,6 +136,10 @@ class TaskStore:
                 conn.execute(
                     "ALTER TABLE tasks ADD COLUMN resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'"
                 )
+            if "downgrade_reason" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN downgrade_reason TEXT")
+            if "downgraded_at" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN downgraded_at INTEGER")
 
     # ---------- 增 ----------
     def create(

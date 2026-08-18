@@ -29,7 +29,12 @@ from src.config import (
 )
 from src.handler.deps import get_store
 from src.handler.subtitle_editor import release_lock
-from src.store import TaskStore, TaskRecord
+from src.store import (
+    DOWNGRADE_REASON_USER_CLEANED,
+    RESOURCE_STATUS_MISSING,
+    TaskRecord,
+    TaskStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -349,6 +354,15 @@ def cleanup(
             # 目录不存在，统计上记为 0；视为一个空任务被清理
             if not artifacts:
                 continue
+
+        now_ms = int(time.time() * 1000)
+        # 在执行清理前显式标记这些任务的 downgrade_reason=USER_CLEANED
+        store.update(
+            rec.id,
+            resource_status=RESOURCE_STATUS_MISSING,
+            downgrade_reason=DOWNGRADE_REASON_USER_CLEANED,
+            downgraded_at=now_ms,
+        )
 
         # 是否要求只删部分类别：kind 为空 = 整任务清理（删除目录 + 记录）
         full_task_cleanup = not body.kinds

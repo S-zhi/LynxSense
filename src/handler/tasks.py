@@ -42,6 +42,10 @@ from src.handler.schemas import (
 from src.service.runner import enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
+    DOWNGRADE_REASON_DISK_FAILURE,
+    DOWNGRADE_REASON_USER_CLEANED,
+    DOWNGRADE_REASON_VOLUME_MIGRATED,
+    DOWNGRADE_REASON_UNKNOWN,
     RESOURCE_STATUS_AVAILABLE,
     RESOURCE_STATUS_MISSING,
     ProbeStore,
@@ -72,15 +76,23 @@ def _require(store: TaskStore, task_id: str):
     return rec
 
 
-def _mark_resource_missing(store: TaskStore, task_id: str, reason: str) -> None:
+def _mark_resource_missing(
+    store: TaskStore,
+    task_id: str,
+    reason: str,
+    downgrade_reason: str = DOWNGRADE_REASON_DISK_FAILURE,
+) -> None:
     """把一个任务的 resource_status 幂等地置为 MISSING。"""
     rec = store.get(task_id)
     if rec is None or rec.resource_status == RESOURCE_STATUS_MISSING:
         return
+    now_ms = int(time.time() * 1000)
     store.update(
         task_id,
         resource_status=RESOURCE_STATUS_MISSING,
         error=reason,
+        downgrade_reason=downgrade_reason,
+        downgraded_at=now_ms,
     )
 
 
@@ -108,11 +120,24 @@ def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
     幂等：已为 MISSING 的不再处理；运行中任务（status != SUCCESS）忽略。
     返回被降级的 task_id 列表，便于启动日志 / 测试断言。
     """
-    data_dir = data_dir if data_dir is not None else settings.data_dir
+    data_path = Path(data_dir) if data_dir is not None else Path(settings.data_dir)
     downgraded: List[str] = []
-    for rec in store.list():
-        if rec.status != "SUCCESS":
-            continue
+
+    # 判断是否可能发生存储卷迁移/未挂载/更改了 SUBTRANS_DATA_DIR
+    data_dir_empty_or_missing = not data_path.exists()
+    if not data_dir_empty_or_missing:
+        try:
+            data_dir_empty_or_missing = len(list(data_path.iterdir())) == 0
+        except OSError:
+            data_dir_empty_or_missing = False
+
+    all_tasks = store.list()
+    success_tasks = [r for r in all_tasks if r.status == "SUCCESS"]
+    multiple_success = len(success_tasks) > 1
+
+    now_ms = int(time.time() * 1000)
+
+    for rec in success_tasks:
         if rec.resource_status == RESOURCE_STATUS_MISSING:
             continue
 
@@ -122,17 +147,29 @@ def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
             state_srt, _, _ = AssetResolver.resolve_translated_srt(rec.id)
             if state_out == ResourceState.AVAILABLE and state_srt == ResourceState.AVAILABLE:
                 continue
-            error_msg = "资源不可读" if (state_out == ResourceState.UNREADABLE or state_srt == ResourceState.UNREADABLE) else _DELETED_MESSAGE
+            is_unreadable = (state_out == ResourceState.UNREADABLE or state_srt == ResourceState.UNREADABLE)
         else:
             state_src, _, _ = AssetResolver.resolve_source(rec.id)
             if state_src == ResourceState.AVAILABLE:
                 continue
-            error_msg = "资源不可读" if state_src == ResourceState.UNREADABLE else _DELETED_MESSAGE
+            is_unreadable = (state_src == ResourceState.UNREADABLE)
+
+        if is_unreadable:
+            error_msg = "资源不可读"
+            downgrade_reason = DOWNGRADE_REASON_DISK_FAILURE
+        elif data_dir_empty_or_missing and multiple_success:
+            error_msg = _DELETED_MESSAGE
+            downgrade_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+        else:
+            error_msg = _DELETED_MESSAGE
+            downgrade_reason = DOWNGRADE_REASON_USER_CLEANED
 
         store.update(
             rec.id,
             resource_status=RESOURCE_STATUS_MISSING,
             error=error_msg,
+            downgrade_reason=downgrade_reason,
+            downgraded_at=now_ms,
         )
         downgraded.append(rec.id)
     return downgraded
@@ -406,13 +443,13 @@ def download_video(task_id: str, store: TaskStore = Depends(get_store)):
             return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
         elif state == ResourceState.UNREADABLE:
             if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
-                _mark_resource_missing(store, task_id, "资源不可读")
+                _mark_resource_missing(store, task_id, "资源不可读", downgrade_reason=DOWNGRADE_REASON_DISK_FAILURE)
             raise HTTPException(status_code=409, detail="资源不可读")
 
     # 兜底：成功任务的产物被清掉时，要把状态降级为 MISSING，
     # 避免下次列表 / 详情接口继续暴露已失效的下载链接。
     if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
-        _mark_resource_missing(store, task_id, _DELETED_MESSAGE)
+        _mark_resource_missing(store, task_id, _DELETED_MESSAGE, downgrade_reason=DOWNGRADE_REASON_DISK_FAILURE)
     raise HTTPException(
         status_code=409,
         detail=_DELETED_MESSAGE if rec.status == "SUCCESS" else "成品视频尚未生成",
@@ -439,11 +476,11 @@ def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
         return FileResponse(path, media_type="application/x-subrip", filename=f"{task_id}.srt")
     elif state == ResourceState.UNREADABLE:
         if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
-            _mark_resource_missing(store, task_id, "资源不可读")
+            _mark_resource_missing(store, task_id, "资源不可读", downgrade_reason=DOWNGRADE_REASON_DISK_FAILURE)
         raise HTTPException(status_code=409, detail="资源不可读")
 
     if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
-        _mark_resource_missing(store, task_id, _DELETED_MESSAGE)
+        _mark_resource_missing(store, task_id, _DELETED_MESSAGE, downgrade_reason=DOWNGRADE_REASON_DISK_FAILURE)
     raise HTTPException(
         status_code=409,
         detail=_DELETED_MESSAGE if rec.status == "SUCCESS" else "译文字幕尚未生成",
