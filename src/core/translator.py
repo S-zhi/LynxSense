@@ -113,14 +113,35 @@ def translate_texts(
 
 
 def _translate_with_fallback(
-    batch: List[str], source_lang: str, target_lang: str, api_key: str, *, engine_config=None
+    batch: List[str],
+    source_lang: str,
+    target_lang: str,
+    api_key: str,
+    *,
+    engine_config=None,
+    partial: Optional[dict[int, str]] = None,
+    indices: Optional[List[int]] = None,
 ) -> List[str]:
-    """翻译一个批次，数量不匹配时自动减半拆分重试。"""
+    """翻译一个批次，数量不匹配时自动减半拆分重试（对已成功部分做 dedup 去重）。"""
     size = len(batch)
+    if indices is None:
+        indices = list(range(size))
+    if partial is None:
+        partial = {}
+
+    missing_indices = [idx for idx in indices if idx not in partial]
+    if not missing_indices:
+        return [partial[idx] for idx in indices]
+
+    idx_to_item = dict(zip(indices, batch))
+    sub_batch = [idx_to_item[idx] for idx in missing_indices]
     try:
-        translated = _translate_batch(batch, source_lang, target_lang, api_key, engine_config=engine_config)
-        if len(translated) == size:
-            return translated
+        translated = _translate_batch(sub_batch, source_lang, target_lang, api_key, engine_config=engine_config)
+        if 0 < len(translated) <= len(missing_indices):
+            for idx, res in zip(missing_indices[:len(translated)], translated):
+                partial[idx] = res
+        if len(translated) == len(missing_indices):
+            return [partial[idx] for idx in indices]
     except Exception:
         pass
 
@@ -131,8 +152,14 @@ def _translate_with_fallback(
     # 减半拆分：递归处理两个子批
     half = max(1, size // 2)
     logger.warning("批量 %d 翻译结果不匹配，拆分为 %d + %d 重试", size, half, size - half)
-    left = _translate_with_fallback(batch[:half], source_lang, target_lang, api_key, engine_config=engine_config)
-    right = _translate_with_fallback(batch[half:], source_lang, target_lang, api_key, engine_config=engine_config)
+    left = _translate_with_fallback(
+        batch[:half], source_lang, target_lang, api_key,
+        engine_config=engine_config, partial=partial, indices=indices[:half]
+    )
+    right = _translate_with_fallback(
+        batch[half:], source_lang, target_lang, api_key,
+        engine_config=engine_config, partial=partial, indices=indices[half:]
+    )
     return left + right
 
 
@@ -180,6 +207,20 @@ def _parse_translation_response(content: str, expected: int) -> List[str]:
             return [str(x) for x in arr]
     except json.JSONDecodeError:
         pass
+
+    # 若 JSON 解析失败，但包含 '['，尝试从截断的 JSON 数组中提取已完整闭合的字符串
+    if "[" in text:
+        raw_strings = re.findall(r'"((?:[^"\\]|\\.)*)"', text)
+        if raw_strings:
+            recovered = []
+            for s in raw_strings:
+                try:
+                    decoded = json.loads(f'"{s}"', strict=False)
+                    recovered.append(str(decoded))
+                except Exception:
+                    recovered.append(s)
+            if recovered:
+                return recovered
 
     # 回退：按非空行拆，去掉行首 "1. " / "1) " 编号
     lines = [ln for ln in text.splitlines() if ln.strip()]
