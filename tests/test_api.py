@@ -892,3 +892,60 @@ def test_success_task_outputs_skip_subtitle_when_need_subtitle_false(client):
     data = client.get(f"/api/tasks/{cid}").json()
     assert data["outputs"] == {"video": f"/api/tasks/{cid}/download"}
     assert "subtitle" not in data["outputs"]
+
+
+# ---------- SSE 进度流端点与事件 ----------
+
+def test_sse_stream_terminal_emits_end_event(client):
+    """终态任务进 SSE 流应立即推送 event: end 并结束。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    with client.stream("GET", f"/api/tasks/{cid}/stream") as res:
+        lines = [line for line in res.iter_lines() if line]
+
+    assert res.status_code == 200
+    assert any(line == "event: end" for line in lines)
+    assert any("data: {" in line for line in lines)
+
+
+def test_sse_stream_timeout_emits_timeout_event(client, monkeypatch):
+    """到达 SUBTRANS_STREAM_TIMEOUT_SEC 超时时间后应推送 event: timeout 并断开。"""
+    import dataclasses
+    from src.config import settings
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+
+    # 替换超时配置为 0 秒（立即触发 timeout）
+    monkeypatch.setattr(tasks_routes, "settings", dataclasses.replace(settings, stream_timeout_sec=0))
+
+    with client.stream("GET", f"/api/tasks/{cid}/stream") as res:
+        lines = [line for line in res.iter_lines() if line]
+
+    assert res.status_code == 200
+    assert "event: timeout" in lines
+    assert 'data: {"error":"stream timeout"}' in lines
+
+
+def test_sse_stream_keepalive(client, monkeypatch):
+    """连续无状态变化时，应推送心跳保活行 :keepalive。"""
+    import time
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+
+    # 模拟 time.time，让第二次循环判定 15 秒已过，触发 keepalive
+    times = [100.0, 100.0, 100.0, 120.0, 120.0]
+    monkeypatch.setattr(time, "time", lambda: times.pop(0) if times else 120.0)
+
+    sleep_count = 0
+    def fake_sleep(sec):
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count >= 2:
+            client._store.update(cid, status="SUCCESS", progress=100)
+
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+
+    with client.stream("GET", f"/api/tasks/{cid}/stream") as res:
+        lines = [line for line in res.iter_lines() if line]
+
+    assert res.status_code == 200
+    assert ":keepalive" in lines
