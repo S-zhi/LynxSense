@@ -41,6 +41,24 @@ test("Api.openFolder: JSON response with detail", async () => {
   );
 });
 
+test("Api.cancelTask sends POST to /api/tasks/:id/cancel", async () => {
+  let requestedUrl = "";
+  let requestedMethod = "";
+  mockFetchHandler = async (url, options) => {
+    requestedUrl = url;
+    requestedMethod = options.method;
+    return {
+      ok: true,
+      json: async () => ({ id: "task_123", status: "CANCELLED", error: "用户取消" })
+    };
+  };
+
+  const res = await Api.cancelTask("task_123");
+  assert.equal(requestedUrl, "http://localhost:8000/api/tasks/task_123/cancel");
+  assert.equal(requestedMethod, "POST");
+  assert.equal(res.status, "CANCELLED");
+});
+
 test("Api.subscribeProgress: handles message, end, timeout, and reconnecting", async () => {
   const instances = [];
   class MockEventSource {

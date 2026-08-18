@@ -11,6 +11,8 @@ SSE 端点轮询库表即可拿到实时进度。
 from __future__ import annotations
 
 import logging
+import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from src.config import settings
@@ -26,8 +28,50 @@ _executor = ThreadPoolExecutor(
     thread_name_prefix="pipeline",
 )
 _store = TaskStore(settings.db_path)
-_RECOVERABLE_STATUSES = set(STATUSES) - {"SUCCESS", "FAILED"}
+_RECOVERABLE_STATUSES = set(STATUSES) - {"SUCCESS", "FAILED", "CANCELLED"}
 _engine_store = TranslationEngineStore(settings.db_path)
+
+_procs: dict[str, list[subprocess.Popen]] = {}
+_procs_lock = threading.Lock()
+
+
+def register_process(task_id: str, proc: subprocess.Popen) -> None:
+    """注册运行中的子进程（如 ffmpeg），以便任务取消时终止。"""
+    with _procs_lock:
+        _procs.setdefault(task_id, []).append(proc)
+
+
+def unregister_process(task_id: str, proc: subprocess.Popen) -> None:
+    """移除已退出的子进程。"""
+    with _procs_lock:
+        if task_id in _procs:
+            try:
+                _procs[task_id].remove(proc)
+            except ValueError:
+                pass
+            if not _procs[task_id]:
+                del _procs[task_id]
+
+
+def cancel_pipeline(task_id: str) -> bool:
+    """取消运行中的任务，终止其关联子进程并更新状态为 CANCELLED。"""
+    rec = _store.get(task_id)
+    if rec is None:
+        return False
+
+    _store.update(task_id, status="CANCELLED", error="用户取消")
+
+    with _procs_lock:
+        procs = _procs.pop(task_id, [])
+
+    for proc in procs:
+        try:
+            proc.terminate()
+        except Exception as e:
+            logger.warning("终止子进程失败: task=%s, err=%s", task_id, e)
+
+    logger.info("任务已取消: %s", task_id)
+    return True
 
 
 def enqueue_pipeline(task_id: str) -> None:
@@ -53,6 +97,9 @@ def _run(task_id: str) -> None:
     if rec is None:
         logger.warning("任务不存在，跳过执行: %s", task_id)
         return
+    if rec.status == "CANCELLED":
+        logger.info("任务已被取消，跳过执行: %s", task_id)
+        return
 
     params = PipelineParams(
         task_id=rec.id,
@@ -69,6 +116,9 @@ def _run(task_id: str) -> None:
     )
 
     def on_event(ev: PipelineEvent) -> None:
+        cur = _store.get(task_id)
+        if cur is not None and cur.status == "CANCELLED":
+            return
         fields: dict = {
             "status": ev.status,
             "progress": ev.progress,
@@ -98,13 +148,21 @@ def _run(task_id: str) -> None:
             pipeline_kwargs["engine_config"] = engine_config
         run_pipeline(params, on_event, **pipeline_kwargs)
     except ResourceError as e:
-        logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         cur = _store.get(task_id)
+        if cur is not None and cur.status == "CANCELLED":
+            logger.info("任务已被取消: %s", task_id)
+            return
+        logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         if cur is not None and cur.status != "FAILED":
             _store.update(task_id, status="FAILED", error=str(e))
     except Exception:
-        # run_pipeline 失败时已通过 on_event 写过 FAILED；这里兜底再确保一次
-        logger.exception("流水线执行失败: %s", task_id)
         cur = _store.get(task_id)
+        if cur is not None and cur.status == "CANCELLED":
+            logger.info("任务已被取消: %s", task_id)
+            return
+        logger.exception("流水线执行失败: %s", task_id)
         if cur is not None and cur.status != "FAILED":
             _store.update(task_id, status="FAILED", error="执行异常")
+    finally:
+        with _procs_lock:
+            _procs.pop(task_id, None)

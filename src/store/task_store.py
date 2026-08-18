@@ -23,6 +23,7 @@ STATUSES = (
     "BURNING",
     "SUCCESS",
     "FAILED",
+    "CANCELLED",
 )
 
 # 资源可用性：与流水线 status 解耦，专门描述"任务已经成功 / 失败，

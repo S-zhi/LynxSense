@@ -29,6 +29,10 @@ class PipelineError(RuntimeError):
     """流水线编排阶段的错误（如上传源缺失）。"""
 
 
+class PipelineCancelledError(RuntimeError):
+    """流水线已被用户取消。"""
+
+
 @dataclass
 class PipelineParams:
     task_id: str
@@ -72,6 +76,14 @@ def _scale(lo: int, hi: int, pct: Optional[float]) -> int:
     return int(lo + max(0.0, min(100.0, pct)) / 100.0 * (hi - lo))
 
 
+def _check_cancelled(task_id: str) -> None:
+    from src.store import TaskStore
+    from src.config import settings
+    rec = TaskStore(settings.db_path).get(task_id)
+    if rec is not None and rec.status == "CANCELLED":
+        raise PipelineCancelledError("任务已被用户取消")
+
+
 def run_pipeline(
     params: PipelineParams,
     on_event: EventHook,
@@ -84,6 +96,7 @@ def run_pipeline(
     state = {"progress": 0, "step": None}
 
     def emit(status: str, progress: int, **extra) -> None:
+        _check_cancelled(tid)
         state["progress"] = max(state["progress"], progress)
         state["step"] = status if status in _BANDS else None
         on_event(PipelineEvent(
@@ -92,6 +105,7 @@ def run_pipeline(
             current_step=state["step"],
             **extra,
         ))
+    _check_cancelled(tid)
 
     def step_cb(status: str):
         if status == "DOWNLOADING" and not params.need_subtitle:
@@ -208,6 +222,9 @@ def run_pipeline(
         logger.info("流水线完成: task=%s", tid)
         return final
 
+    except PipelineCancelledError as e:
+        logger.info("流水线已被用户取消: task=%s", tid)
+        raise
     except ResourceError as e:
         logger.error("流水线因资源异常中断: task=%s step=%s, msg=%s", tid, state["step"], str(e))
         on_event(PipelineEvent(

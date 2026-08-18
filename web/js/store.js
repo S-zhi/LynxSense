@@ -79,6 +79,16 @@ export async function deleteTask(id) {
   emit({ type: "deleted", id });
 }
 
+export async function cancelTask(id) {
+  const t = await Api.cancelTask(id);
+  const u = subs.get(id);
+  if (u) u();
+  subs.delete(id);
+  const i = state.tasks.findIndex((x) => x.id === id);
+  if (i >= 0) state.tasks[i] = { ...state.tasks[i], ...t };
+  emit({ type: "cancelled", id });
+}
+
 export async function retryTask(id) {
   const t = await Api.retryTask(id);
   const i = state.tasks.findIndex((x) => x.id === id);
@@ -130,7 +140,7 @@ export function visibleTasks() {
   return state.tasks.filter((t) => {
     if (f === "all") return true;
     if (f === "done") return t.status === "SUCCESS";
-    if (f === "failed") return t.status === "FAILED";
+    if (f === "failed") return t.status === "FAILED" || t.status === "CANCELLED";
     if (f === "active") return !TERMINAL.has(t.status);
     return true;
   });

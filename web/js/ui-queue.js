@@ -4,7 +4,7 @@ import { STEPS, STATUS_META, LANG_LABEL, TERMINAL } from "./constants.js";
 import { $, el, escapeHtml, shortUrl, progressToStepIndex } from "./utils.js";
 import {
   state, subscribe, visibleTasks,
-  retryTask, deleteTask, loadTasks, setView, setPreviewId,
+  cancelTask, retryTask, deleteTask, loadTasks, setView, setPreviewId,
 } from "./store.js";
 import { Api, USE_MOCK } from "./api.js";
 import { toast } from "./toast.js";
@@ -126,7 +126,7 @@ function setHeader(row, t) {
 }
 
 function categoryOf(status) {
-  if (status === "FAILED") return "failed";
+  if (status === "FAILED" || status === "CANCELLED") return "failed";
   if (status === "SUCCESS") return "success";
   return "progress"; // pending / active
 }
@@ -224,6 +224,7 @@ function buildActions(t, cat) {
   }
   return [
     iconBtn("ph-folder-open", "打开文件夹", "", () => openFolder(t)),
+    iconBtn("ph-stop-circle", "取消", "iconbtn--danger", () => cancel(t)),
     iconBtn("ph-trash", "删除", "iconbtn--danger", () => remove(t)),
   ];
 }
@@ -253,6 +254,15 @@ async function openFolder(t) {
     toast(USE_MOCK ? "示例模式：文件夹打开占位" : "已打开任务文件夹", "ph-folder-open");
   } catch (e) {
     toast(e.message || "打开文件夹失败", "ph-warning-circle");
+  }
+}
+
+async function cancel(t) {
+  try {
+    await cancelTask(t.id);
+    toast("已取消任务", "ph-stop-circle");
+  } catch (e) {
+    toast(e.message || "取消失败", "ph-warning-circle");
   }
 }
 
