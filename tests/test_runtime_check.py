@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import src.service.runtime_check as runtime_check
 
 
-def _settings(tmp_path, *, deepseek_api_key=None):
+def _settings(tmp_path, *, deepseek_api_key=None, api_token=None):
     return SimpleNamespace(
         backend_dir=tmp_path,
         data_dir=tmp_path / "data",
@@ -11,6 +11,7 @@ def _settings(tmp_path, *, deepseek_api_key=None):
         ffmpeg_bin="ffmpeg",
         ffprobe_bin="ffprobe",
         deepseek_api_key=deepseek_api_key,
+        api_token=api_token,
     )
 
 
@@ -28,6 +29,7 @@ def test_readiness_reports_fixed_config_location_and_missing_values(monkeypatch,
     assert result["ok"] is False
     assert result["initialized"] is False
     assert result["config_file"] == str(tmp_path / ".env")
+    assert result["checks"]["api_token_required"] is False
     assert "REPLICATE_API_TOKEN" in result["missing"]
     assert "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY" in result["missing"]
     assert result["capabilities"]["download"] is False
@@ -36,7 +38,7 @@ def test_readiness_reports_fixed_config_location_and_missing_values(monkeypatch,
 
 
 def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path, api_token="secret"))
     monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-secret")
     monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
     monkeypatch.setattr(
@@ -51,6 +53,7 @@ def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_p
 
     assert result["ok"] is True
     assert result["initialized"] is True
+    assert result["checks"]["api_token_required"] is True
     assert result["capabilities"] == {
         "download": True,
         "full_pipeline": True,

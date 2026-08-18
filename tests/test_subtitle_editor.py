@@ -330,8 +330,9 @@ def test_write_locks_leak_cleanup(client, monkeypatch):
         return client._tmp / tid
     monkeypatch.setattr(storage_routes, "task_dir", fake_dir)
 
-    # 1. 直接触发锁创建
+    # 1. 直接触发锁创建，并将任务状态更新为终态 SUCCESS
     task_id = client._tid
+    client._store.update(task_id, status="SUCCESS", progress=100)
     lock = _lock_for(task_id)
     assert task_id in _write_locks
 

@@ -27,7 +27,7 @@ from src.config import (
     settings,
     task_dir,
 )
-from src.handler.deps import get_store
+from src.handler.deps import get_store, rate_limit_cleanup, require_api_token
 from src.handler.subtitle_editor import release_lock
 from src.store import TaskStore, TaskRecord
 
@@ -314,7 +314,11 @@ def cleanup_preview(
     )
 
 
-@router.post("/cleanup", response_model=CleanupResponse)
+@router.post(
+    "/cleanup",
+    response_model=CleanupResponse,
+    dependencies=[Depends(require_api_token), Depends(rate_limit_cleanup)],
+)
 def cleanup(
     body: CleanupPreviewRequest, store: TaskStore = Depends(get_store),
 ) -> CleanupResponse:

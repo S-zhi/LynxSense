@@ -129,6 +129,9 @@ class Settings:
     # 后端根目录
     backend_dir: Path = _BACKEND_DIR
 
+    # API 鉴权 Token（可选，配置后请求需带 Authorization: Bearer <token> 或 X-API-Token）
+    api_token: Optional[str] = os.getenv("SUBTRANS_API_TOKEN") or None
+
     # 所有任务产物的根目录，按 data/{task_id}/ 组织
     data_dir: Path = _env_path("SUBTRANS_DATA_DIR", _BACKEND_DIR / "data")
 

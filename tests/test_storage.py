@@ -92,6 +92,39 @@ def _post_cleanup(client, **payload) -> dict:
     return client.post("/api/storage/cleanup", json=payload).json()
 
 
+def test_cleanup_requires_api_token_when_configured(client, monkeypatch):
+    import dataclasses
+    from src.handler import deps as deps_mod
+    monkeypatch.setattr(
+        deps_mod,
+        "settings",
+        dataclasses.replace(deps_mod.settings, api_token="secret123"),
+    )
+
+    r1 = client.post("/api/storage/cleanup", json={})
+    assert r1.status_code == 401
+
+    r2 = client.post("/api/storage/cleanup", json={}, headers={"X-API-Token": "secret123"})
+    assert r2.status_code == 200
+
+
+def test_cleanup_rate_limiting(client, monkeypatch):
+    from src.handler import deps as deps_mod
+    deps_mod._cleanup_limiter.reset()
+
+    # Trigger 10 requests -> success
+    for i in range(10):
+        r = client.post("/api/storage/cleanup", json={})
+        assert r.status_code == 200
+
+    # 11th request -> 429
+    r11 = client.post("/api/storage/cleanup", json={})
+    assert r11.status_code == 429
+    assert "请求过于频繁" in r11.json()["detail"]
+
+    deps_mod._cleanup_limiter.reset()
+
+
 # ---------- stats ----------
 
 def test_stats_aggregates_total_and_kinds(client):

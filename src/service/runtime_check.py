@@ -116,6 +116,7 @@ def build_readiness() -> dict[str, Any]:
             "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY",
         ],
         "checks": {
+            "api_token_required": bool(settings.api_token),
             "replicate_api_token": "available" if replicate_ready else "missing",
             "deepseek_api_key": "available" if deepseek_ready else "missing",
             "ffmpeg": ffmpeg_status,

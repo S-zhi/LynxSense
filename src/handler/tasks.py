@@ -26,8 +26,13 @@ from src.config import (
     task_dir,
 )
 from src.core.downloader import probe_video
+from src.handler.deps import (
+    get_probe_store,
+    get_store,
+    get_translation_engine_store,
+    require_api_token,
+)
 from src.handler.subtitle_editor import release_lock
-from src.handler.deps import get_probe_store, get_store, get_translation_engine_store
 from src.handler.schemas import (
     ProbeRecordOut,
     ProbeRecordsClearOut,
@@ -53,6 +58,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 _TERMINAL = {"SUCCESS", "FAILED"}
+
+_RUNNING_STATUSES = {
+    "PENDING",
+    "DOWNLOADING",
+    "EXTRACTING",
+    "TRANSCRIBING",
+    "TRANSLATING",
+    "BURNING",
+}
 
 # 资源已丢失时给用户的简短、稳定错误文案，避免把文件系统异常 / 堆栈漏到 UI
 _DELETED_MESSAGE = "资源已删除"
@@ -298,9 +312,11 @@ def delete_probe_record(
         raise HTTPException(status_code=404, detail="测试记录不存在")
 
 
-@router.delete("/{task_id}", status_code=204)
+@router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
-    _require(store, task_id)
+    rec = _require(store, task_id)
+    if rec.status in _RUNNING_STATUSES:
+        raise HTTPException(status_code=409, detail="运行中的任务无法删除")
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
     release_lock(task_id)

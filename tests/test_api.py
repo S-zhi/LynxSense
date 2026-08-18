@@ -157,6 +157,7 @@ def test_get_missing_404(client):
 
 def test_delete_task(client):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
     # 造个产物目录，验证会被清理
     d = client._tmp / cid
     d.mkdir(parents=True, exist_ok=True)
@@ -169,6 +170,40 @@ def test_delete_task(client):
 
 def test_delete_missing_404(client):
     assert client.delete("/api/tasks/nope").status_code == 404
+
+
+def test_delete_running_task_returns_409(client):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="DOWNLOADING", progress=10)
+
+    r = client.delete(f"/api/tasks/{cid}")
+    assert r.status_code == 409
+    assert "运行中的任务无法删除" in r.json()["detail"]
+
+
+def test_delete_task_requires_api_token_when_configured(client, monkeypatch):
+    import dataclasses
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    from src.handler import deps as deps_mod
+    monkeypatch.setattr(
+        deps_mod,
+        "settings",
+        dataclasses.replace(deps_mod.settings, api_token="secret123"),
+    )
+
+    # Missing token -> 401
+    r1 = client.delete(f"/api/tasks/{cid}")
+    assert r1.status_code == 401
+
+    # Wrong token -> 401
+    r2 = client.delete(f"/api/tasks/{cid}", headers={"Authorization": "Bearer wrong"})
+    assert r2.status_code == 401
+
+    # Correct Bearer token -> 204
+    r3 = client.delete(f"/api/tasks/{cid}", headers={"Authorization": "Bearer secret123"})
+    assert r3.status_code == 204
 
 
 # ---------- 重试 ----------
