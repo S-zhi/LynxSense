@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -267,8 +267,22 @@ def create_upload_task(
 
 
 @router.get("", response_model=List[TaskOut])
-def list_tasks(store: TaskStore = Depends(get_store)) -> List[TaskOut]:
-    return [to_out(r) for r in store.list()]
+def list_tasks(
+    offset: int = Query(0, ge=0, description="跳过前 N 条记录"),
+    limit: int = Query(50, ge=1, le=200, description="单页最大记录数，取值范围 1 到 200，默认 50"),
+    before_id: Optional[str] = Query(None, description="游标：仅返回 ID 早于该任务的记录"),
+    after_id: Optional[str] = Query(None, description="游标：仅返回 ID 晚于该任务的记录"),
+    store: TaskStore = Depends(get_store),
+) -> List[TaskOut]:
+    return [
+        to_out(r)
+        for r in store.list(
+            limit=limit,
+            offset=offset,
+            before_id=before_id,
+            after_id=after_id,
+        )
+    ]
 
 
 @router.get("/{task_id}", response_model=TaskOut)

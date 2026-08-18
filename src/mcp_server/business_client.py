@@ -92,6 +92,7 @@ class BusinessApiClient:
         path: str,
         *,
         payload: Mapping[str, Any] | None = None,
+        params: Mapping[str, Any] | None = None,
     ) -> Any:
         headers = {"Accept": "application/json"}
         if self.config.api_token:
@@ -100,6 +101,8 @@ class BusinessApiClient:
         request_kwargs: dict[str, Any] = {"headers": headers}
         if payload is not None:
             request_kwargs["json"] = dict(payload)
+        if params is not None:
+            request_kwargs["params"] = dict(params)
 
         try:
             async with httpx.AsyncClient(
@@ -153,8 +156,19 @@ class BusinessApiClient:
     async def create_task(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/api/tasks", payload=payload)
 
-    async def list_tasks(self) -> list[dict[str, Any]]:
-        data = await self._request("GET", "/api/tasks")
+    async def list_tasks(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        before_id: str | None = None,
+        after_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if before_id:
+            params["before_id"] = before_id
+        if after_id:
+            params["after_id"] = after_id
+        data = await self._request("GET", "/api/tasks", params=params)
         return data if isinstance(data, list) else []
 
     async def get_task(self, task_id: str) -> dict[str, Any]:
