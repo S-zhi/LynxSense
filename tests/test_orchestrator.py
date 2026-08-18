@@ -238,6 +238,54 @@ def test_pipeline_upload_missing_source_fails(monkeypatch, tmp_path):
     assert events[-1].status == "FAILED"
 
 
+def test_pipeline_upload_smooth_progress(monkeypatch, tmp_path):
+    """上传模式：生成平滑中间帧（如 0% -> 5% -> 10% -> 15% -> 20%）。"""
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"VID")
+    monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: src)
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_audio", lambda tid: Path("/d/audio.wav"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_original_srt", lambda tid: Path("/d/original.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_translated_srt", lambda tid: Path("/d/translated.srt"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_output_video", lambda tid: Path("/d/output.mp4"))
+
+    monkeypatch.setattr(orchestrator, "download_video", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "extract_audio", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "transcribe", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "translate_srt", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "burn_subtitles", lambda *a, **k: None)
+
+    params = PipelineParams(
+        task_id="t1", url="clip.mp4", source_lang="auto", target_lang="zh-CN",
+        source_type="upload", title="Clip",
+    )
+    events = []
+    run_pipeline(params, events.append)
+
+    dl_progs = [e.progress for e in events if e.status == "DOWNLOADING"]
+    assert dl_progs == [0, 5, 10, 15, 20]
+
+
+def test_pipeline_upload_download_only_smooth_progress(monkeypatch, tmp_path):
+    """仅下载模式+上传：平滑过渡至 100%。"""
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"VID")
+    monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)
+
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: src)
+
+    params = PipelineParams(
+        task_id="t1", url="clip.mp4", source_lang="auto", target_lang="zh-CN",
+        source_type="upload", need_subtitle=False, title="Clip",
+    )
+    events = []
+    run_pipeline(params, events.append)
+
+    dl_progs = [e.progress for e in events if e.status == "DOWNLOADING"]
+    assert dl_progs == [0, 25, 50, 75, 100]
+
+
 # ---------- need_subtitle=False：仅下载/仅载入，跳过识别/翻译/烧录 ----------
 
 def test_pipeline_url_only_download_skips_subtitle_steps(monkeypatch):
