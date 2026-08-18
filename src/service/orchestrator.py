@@ -94,13 +94,26 @@ def run_pipeline(
         ))
 
     def step_cb(status: str):
-        lo, hi = _BANDS[status]
+        if status == "DOWNLOADING" and not params.need_subtitle:
+            lo, hi = (0, 100)
+        else:
+            lo, hi = _BANDS[status]
 
         def cb(p) -> None:
             prog = _scale(lo, hi, getattr(p, "percent", None))
             emit(status, prog)
 
         return cb
+
+    def emit_smooth(status: str, target: int) -> None:
+        start = state["progress"]
+        if target > start:
+            step_size = max(1, (target - start) // 4)
+            curr = start + step_size
+            while curr < target:
+                emit(status, curr)
+                curr += step_size
+        emit(status, target)
 
     def artifact_available(resolver) -> bool:
         resource_state, path, _ = resolver(tid)
@@ -109,23 +122,23 @@ def run_pipeline(
     try:
         emit("DOWNLOADING", 0)
 
+        target_download_prog = 100 if not params.need_subtitle else 20
+
         # 第①步获取源视频：已有完整源文件时跳过下载；上传模式始终复用本地文件。
         if params.source_type == "upload":
             video_path = _locate_uploaded_source(tid)
             title = params.title or video_path.stem
-            emit("DOWNLOADING", 20)  # 本地视频已就位，"下载/载入"阶段直接完成
+            emit_smooth("DOWNLOADING", target_download_prog)  # 本地视频已就位，平滑过度进度
         elif artifact_available(AssetResolver.resolve_source):
             video_path = AssetResolver.require_source(tid)
             title = params.title
-            emit("DOWNLOADING", 20)  # 服务重启后复用已完成的下载
+            emit_smooth("DOWNLOADING", target_download_prog)  # 服务重启后复用已完成的下载
         elif not params.need_subtitle:
             # 仅下载模式：下载占满整条进度，跳过识别/翻译/烧录
-            dl = download_video(
-                params.url, tid,
-                on_progress=lambda p: emit("DOWNLOADING", _scale(0, 100, getattr(p, "percent", None))),
-            )
+            dl = download_video(params.url, tid, on_progress=step_cb("DOWNLOADING"))
             video_path = AssetResolver.require_source(tid)
             title = dl.title
+            emit("DOWNLOADING", 100)
         else:
             dl = download_video(params.url, tid, on_progress=step_cb("DOWNLOADING"))
             video_path = AssetResolver.require_source(tid)
