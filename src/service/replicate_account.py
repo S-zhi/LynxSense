@@ -100,7 +100,7 @@ def query_replicate_balance(
 
     if response.status_code in (401, 403):
         return {
-            "status": "unavailable",
+            "status": "error",
             "authenticated": False,
             "account": None,
             "balance": None,

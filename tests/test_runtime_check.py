@@ -48,6 +48,11 @@ def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_p
     )
     monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
     monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: True)
+    monkeypatch.setattr(
+        runtime_check,
+        "query_replicate_balance",
+        lambda: {"status": "unsupported", "authenticated": True},
+    )
 
     result = runtime_check.build_readiness()
 
@@ -80,6 +85,11 @@ def test_readiness_guides_agent_to_soft_burn_when_libass_is_missing(monkeypatch,
     )
     monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
     monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: False)
+    monkeypatch.setattr(
+        runtime_check,
+        "query_replicate_balance",
+        lambda: {"status": "unsupported", "authenticated": True},
+    )
 
     result = runtime_check.build_readiness()
 
@@ -88,3 +98,32 @@ def test_readiness_guides_agent_to_soft_burn_when_libass_is_missing(monkeypatch,
     assert result["agent_action"] == "use_soft_burn_or_install_libass"
     assert result["restart_required"] is False
     assert any("FFmpeg subtitles 滤镜" in item for item in result["missing"])
+
+
+def test_readiness_reports_invalid_replicate_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "invalid-token")
+    monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(
+        runtime_check.shutil,
+        "which",
+        lambda command: f"/usr/bin/{command}",
+    )
+    monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: True)
+    monkeypatch.setattr(
+        runtime_check,
+        "query_replicate_balance",
+        lambda: {
+            "status": "error",
+            "errorCode": "invalid_api_token",
+            "message": "Replicate API Token 无效、已过期或没有访问权限",
+        },
+    )
+
+    result = runtime_check.build_readiness()
+
+    assert result["ok"] is False
+    assert result["initialized"] is False
+    assert result["checks"]["replicate_api_token"] == "invalid"
+    assert "REPLICATE_API_TOKEN（Token 无效或已过期）" in result["missing"]

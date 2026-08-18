@@ -14,6 +14,7 @@ from typing import Any
 
 from src.config import settings
 from src.core.ffmpeg_utils import has_subtitles_filter
+from src.service.replicate_account import query_replicate_balance
 
 
 def _check_binary(command: str) -> str:
@@ -42,7 +43,18 @@ def build_readiness() -> dict[str, Any]:
     """
     env_file = settings.backend_dir / ".env"
 
-    replicate_ready = _has_value(os.getenv("REPLICATE_API_TOKEN"))
+    replicate_token_configured = _has_value(os.getenv("REPLICATE_API_TOKEN"))
+    replicate_token_invalid = False
+    replicate_ready = False
+
+    if replicate_token_configured:
+        account_info = query_replicate_balance()
+        if account_info.get("status") == "error" or account_info.get("errorCode") == "invalid_api_token":
+            replicate_token_invalid = True
+            replicate_ready = False
+        else:
+            replicate_ready = True
+
     deepseek_ready = _has_value(
         os.getenv("SUBTRANS_DEEPSEEK_API_KEY")
         or os.getenv("DEEPSEEK_API_KEY")
@@ -70,8 +82,10 @@ def build_readiness() -> dict[str, Any]:
     hard_pipeline_ready = full_pipeline_ready and hard_burn_ready
 
     missing: list[str] = []
-    if not replicate_ready:
+    if not replicate_token_configured:
         missing.append("REPLICATE_API_TOKEN")
+    elif replicate_token_invalid:
+        missing.append("REPLICATE_API_TOKEN（Token 无效或已过期）")
     if not deepseek_ready:
         missing.append("SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY")
     if ffmpeg_status != "available":
@@ -106,6 +120,13 @@ def build_readiness() -> dict[str, Any]:
         agent_action = "continue"
         restart_required = False
 
+    if replicate_token_invalid:
+        replicate_check_status = "invalid"
+    elif replicate_ready:
+        replicate_check_status = "available"
+    else:
+        replicate_check_status = "missing"
+
     return {
         "ok": hard_pipeline_ready,
         "initialized": full_pipeline_ready,
@@ -116,7 +137,7 @@ def build_readiness() -> dict[str, Any]:
             "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY",
         ],
         "checks": {
-            "replicate_api_token": "available" if replicate_ready else "missing",
+            "replicate_api_token": replicate_check_status,
             "deepseek_api_key": "available" if deepseek_ready else "missing",
             "ffmpeg": ffmpeg_status,
             "ffprobe": ffprobe_status,

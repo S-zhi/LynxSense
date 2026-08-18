@@ -71,7 +71,7 @@ def test_invalid_token_does_not_expose_token(monkeypatch):
 
     result = replicate_account.query_replicate_balance(api_token="r8_secret")
 
-    assert result["status"] == "unavailable"
+    assert result["status"] == "error"
     assert result["errorCode"] == "invalid_api_token"
     assert "r8_secret" not in str(result)
 
