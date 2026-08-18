@@ -446,22 +446,43 @@ def _sse_payload(rec) -> str:
 
 @router.get("/{task_id}/stream")
 def stream_progress(task_id: str, store: TaskStore = Depends(get_store)):
-    """轮询库表并以 SSE 推送进度（方案 A 足够；将来可换事件驱动）。"""
+    """轮询库表并以 SSE 推送进度（含心跳保活、超时断流与终态事件）。"""
     _require(store, task_id)
 
     def gen():
         last = None
-        for _ in range(3600):  # 上限 ~1 小时
+        start_time = time.time()
+        last_sent = time.time()
+        timeout_sec = max(1, settings.stream_timeout_sec)
+
+        while True:
             rec = store.get(task_id)
             if rec is None:
                 yield 'data: {"error":"任务不存在"}\n\n'
                 return
+
             snapshot = (rec.status, rec.progress)
+            now = time.time()
+
             if snapshot != last:
+                if rec.status in _TERMINAL:
+                    yield f"event: end\n{_sse_payload(rec)}"
+                    return
                 yield _sse_payload(rec)
                 last = snapshot
-            if rec.status in _TERMINAL:
+                last_sent = now
+            else:
+                if rec.status in _TERMINAL:
+                    yield f"event: end\n{_sse_payload(rec)}"
+                    return
+                elif now - last_sent >= 15:
+                    yield ":keepalive\n\n"
+                    last_sent = now
+
+            if now - start_time >= timeout_sec:
+                yield 'event: timeout\ndata: {"error":"stream timeout"}\n\n'
                 return
+
             time.sleep(1)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
