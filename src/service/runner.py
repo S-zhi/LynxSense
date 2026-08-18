@@ -102,9 +102,10 @@ def _run(task_id: str) -> None:
         cur = _store.get(task_id)
         if cur is not None and cur.status != "FAILED":
             _store.update(task_id, status="FAILED", error=str(e))
-    except Exception:
+    except Exception as e:
         # run_pipeline 失败时已通过 on_event 写过 FAILED；这里兜底再确保一次
         logger.exception("流水线执行失败: %s", task_id)
         cur = _store.get(task_id)
         if cur is not None and cur.status != "FAILED":
-            _store.update(task_id, status="FAILED", error="执行异常")
+            err_msg = str(e) or "执行异常"
+            _store.update(task_id, status="FAILED", error=err_msg)

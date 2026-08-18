@@ -30,6 +30,21 @@ logger = logging.getLogger(__name__)
 class TranscribeError(RuntimeError):
     """语音识别阶段失败。"""
 
+    def __init__(self, message: str, *, code: str = "transcribe_error"):
+        super().__init__(message)
+        self.code = code
+
+
+def _map_http_status_code(status: Optional[int]) -> str:
+    """根据 HTTP 状态码映射标准错误 code。"""
+    if status in (401, 403):
+        return "unauthorized"
+    if status == 429:
+        return "rate_limited"
+    if isinstance(status, int) and status >= 500:
+        return "upstream_error"
+    return "model_error"
+
 
 @dataclass
 class TranscribeProgress:
@@ -112,12 +127,23 @@ def _run_replicate_with_retry(
                 if on_progress is not None:
                     _safe_callback(on_progress, last_pct, "retrying")  # 保持上次进度，发送重试状态
                 time.sleep(backoff)
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else None
+            code = _map_http_status_code(status)
+            raise TranscribeError(f"Replicate 语音识别失败: {e}", code=code) from e
+        except replicate.exceptions.ReplicateError as e:
+            status = getattr(e, "status", None)
+            code = _map_http_status_code(status)
+            raise TranscribeError(f"Replicate 语音识别失败: {e}", code=code) from e
         except Exception as e:  # 模型报错 / 鉴权等非瞬时错误，不重试
-            raise TranscribeError(f"Replicate 语音识别失败: {e}") from e
+            status = getattr(e, "status_code", None) or getattr(e, "status", None)
+            code = _map_http_status_code(status) if status is not None else "model_error"
+            raise TranscribeError(f"Replicate 语音识别失败: {e}", code=code) from e
 
     raise TranscribeError(
         f"Replicate 语音识别多次超时失败（已重试 {retries} 次；"
-        f"冷启动可调大 SUBTRANS_REPLICATE_TIMEOUT）: {last_exc}"
+        f"冷启动可调大 SUBTRANS_REPLICATE_TIMEOUT）: {last_exc}",
+        code="network_error",
     )
 
 
@@ -144,7 +170,7 @@ def transcribe(
     # 进度提示：Replicate 简单 API 调用等待模型冷启动完成并返回结果；等待期间保持 starting/retrying 状态
     _load_env()
     if not os.getenv("REPLICATE_API_TOKEN"):
-        raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）")
+        raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）", code="missing_api_key")
 
     lang = None if language in (None, "", "auto") else language
     model = model_name or "small"

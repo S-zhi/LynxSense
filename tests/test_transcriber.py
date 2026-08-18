@@ -169,8 +169,61 @@ def test_transcribe_error_wrapped(monkeypatch, tmp_path):
 def test_transcribe_no_api_token(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
-    with pytest.raises(TranscribeError, match="REPLICATE_API_TOKEN"):
+    with pytest.raises(TranscribeError, match="REPLICATE_API_TOKEN") as exc_info:
         transcribe(audio, "t1")
+    assert exc_info.value.code == "missing_api_key"
+
+
+def test_transcribe_error_codes_http_status(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+
+    for status_code, expected_code in [
+        (401, "unauthorized"),
+        (403, "unauthorized"),
+        (429, "rate_limited"),
+        (500, "upstream_error"),
+        (503, "upstream_error"),
+        (400, "model_error"),
+        (422, "model_error"),
+    ]:
+        class FailClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self, ref, input):
+                resp = httpx.Response(status_code, request=httpx.Request("POST", "https://api.replicate.com"))
+                raise httpx.HTTPStatusError("HTTP error", request=resp.request, response=resp)
+
+        monkeypatch.setattr(transcriber.replicate, "Client", FailClient)
+        with pytest.raises(TranscribeError) as exc_info:
+            transcribe(audio, "t1")
+        assert exc_info.value.code == expected_code, f"Status {status_code} should map to {expected_code}"
+
+
+def test_transcribe_error_codes_replicate_error(monkeypatch, tmp_path):
+    import replicate.exceptions
+    audio = make_fake_audio(tmp_path)
+
+    for status_code, expected_code in [
+        (401, "unauthorized"),
+        (429, "rate_limited"),
+        (502, "upstream_error"),
+        (422, "model_error"),
+        (None, "model_error"),
+    ]:
+        class FailClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self, ref, input):
+                err = replicate.exceptions.ReplicateError("Replicate failure")
+                err.status = status_code
+                raise err
+
+        monkeypatch.setattr(transcriber.replicate, "Client", FailClient)
+        with pytest.raises(TranscribeError) as exc_info:
+            transcribe(audio, "t1")
+        assert exc_info.value.code == expected_code
 
 
 # ---------- 冷启动重试 ----------
@@ -239,8 +292,9 @@ def test_transcribe_retries_exhausted(monkeypatch, tmp_path):
     ))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)
 
-    with pytest.raises(TranscribeError, match="多次超时"):
+    with pytest.raises(TranscribeError, match="多次超时") as exc_info:
         transcribe(audio, "t1")
+    assert exc_info.value.code == "network_error"
     assert len(opened_files) == 2
     assert opened_files[0] is not opened_files[1]
     assert all(f.closed for f in opened_files)
