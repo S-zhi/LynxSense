@@ -31,6 +31,7 @@ from src.store import ProbeStore, TaskStore
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """API 测试夹具：临时 DB + 临时产物根目录。"""
+    storage_routes._cleanup_limiter.reset()
     db_p = tmp_path / "test.db"
     store = TaskStore(db_p)
     probe_store = ProbeStore(db_p)
@@ -328,6 +329,19 @@ def test_cleanup_preview_older_than_days_filter(client):
     matched = {t["taskId"] for t in pre["targets"]}
     assert matched == {old_id}
     assert fresh_id not in matched
+
+
+def test_cleanup_rate_limiting(client):
+    """POST /api/storage/cleanup 每分钟限制 10 次请求，超过返回 429。"""
+    # 连续发起 10 次成功请求
+    for _ in range(10):
+        r = client.post("/api/storage/cleanup", json={})
+        assert r.status_code == 200
+
+    # 第 11 次触发 429
+    r_limited = client.post("/api/storage/cleanup", json={})
+    assert r_limited.status_code == 429
+    assert "请求过于频繁" in r_limited.json()["detail"]
 
 
 def test_cleanup_probe_records_in_storage_api(client, monkeypatch):

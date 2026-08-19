@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.cors_allow_origins),
         allow_methods=["GET", "POST", "DELETE", "PUT", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Token"],
     )
 
     # 按业务挂载路由，后续新增业务在此 include 即可

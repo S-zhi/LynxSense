@@ -30,7 +30,7 @@ from src.config import (
 )
 from src.core.srt_utils import Subtitle, parse_srt, read_srt_content, write_srt
 from src.core.subtitle_burner import BurnError, burn_subtitles
-from src.handler.deps import get_store
+from src.handler.deps import get_store, require_api_token
 from src.store import TaskStore
 
 logger = logging.getLogger(__name__)
@@ -236,7 +236,7 @@ def get_subtitles(task_id: str, store: TaskStore = Depends(get_store)) -> Subtit
     )
 
 
-@router.put("/{task_id}/subtitles", response_model=SubtitleUpdateOut)
+@router.put("/{task_id}/subtitles", response_model=SubtitleUpdateOut, dependencies=[Depends(require_api_token)])
 def save_subtitles(
     task_id: str,
     body: SubtitleDocument,
@@ -296,7 +296,7 @@ def save_subtitles(
     )
 
 
-@router.post("/{task_id}/subtitles/burn", response_model=ReburnOut)
+@router.post("/{task_id}/subtitles/burn", response_model=ReburnOut, dependencies=[Depends(require_api_token)])
 def reburn_subtitles(
     task_id: str,
     body: Optional[dict] = None,

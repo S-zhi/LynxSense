@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 class TranscribeError(RuntimeError):
     """语音识别阶段失败。"""
+
+    def __init__(self, message: str, *, code: str = "transcribe_error"):
+        super().__init__(message)
+        self.code = code
 
 
 class TranscribeCancelledError(RuntimeError):
@@ -57,6 +62,10 @@ class TranscribeResult:
 
 ProgressHook = Callable[[TranscribeProgress], None]
 
+_PREDICTION_STATE_FILE = "replicate_prediction.json"
+_ACTIVE_PREDICTION_STATUSES = {"starting", "processing"}
+_TERMINAL_PREDICTION_STATUSES = {"succeeded", "failed", "canceled", "aborted"}
+
 
 def _load_env():
     """手动加载项目根 .env（不依赖 python-dotenv）。"""
@@ -80,68 +89,201 @@ def _safe_callback(hook: ProgressHook, pct: Optional[float], status: str) -> Non
         logger.exception("进度回调异常，已忽略")
 
 
+def _prediction_state_path(state_dir: Path) -> Path:
+    return state_dir / _PREDICTION_STATE_FILE
+
+
+def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
+    path = _prediction_state_path(state_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        logger.warning("Replicate prediction 状态文件不可读，忽略并重新创建: %s", path)
+        return None
+    prediction_id = payload.get("prediction_id")
+    if payload.get("model_ref") != model_ref or not isinstance(prediction_id, str):
+        logger.warning("Replicate prediction 状态与当前模型不匹配，忽略: %s", path)
+        return None
+    return prediction_id
+
+
+def _save_prediction_state(
+    state_dir: Path,
+    *,
+    prediction_id: str,
+    model_ref: str,
+    status: str,
+) -> None:
+    path = _prediction_state_path(state_dir)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    payload = {
+        "prediction_id": prediction_id,
+        "model_ref": model_ref,
+        "status": status,
+        "updated_at": int(time.time()),
+    }
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _clear_prediction_state(state_dir: Path) -> None:
+    path = _prediction_state_path(state_dir)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("清理 Replicate prediction 状态文件失败: %s", path, exc_info=True)
+
+
+def _sleep_with_cancel(seconds: float, cancel_check: Optional[Callable[[], None]]) -> None:
+    elapsed = 0.0
+    while elapsed < seconds:
+        _do_cancel_check(cancel_check)
+        sleep_time = min(0.5, seconds - elapsed)
+        time.sleep(sleep_time)
+        elapsed += sleep_time
+    _do_cancel_check(cancel_check)
+
+
+def _error_code_for_status(status: Optional[int]) -> str:
+    if status in (401, 403):
+        return "unauthorized"
+    if status == 429:
+        return "rate_limited"
+    if status and status >= 500:
+        return "upstream_error"
+    if status and 400 <= status < 500:
+        return "model_error"
+    return "upstream_error"
+
+
 def _run_replicate_with_retry(
     model_ref: str,
     build_input: Callable[[], dict],
     *,
     timeout: int,
     retries: int,
+    retry_interval: float,
+    poll_interval: float,
+    state_dir: Path,
     on_progress: Optional[ProgressHook] = None,
     last_pct: Optional[float] = 1.0,
     cancel_check: Optional[Callable[[], None]] = None,
 ):
-    """调用 Replicate，超时/网络错误时按退避重试（应对模型冷启动）。
+    """创建并轮询 Replicate prediction，网络失败时延迟重试同一任务。
 
-    - 用带长读超时的 Client，让冷启动的等待请求不至于过早 read-timeout。
-    - 仅对超时/网络类异常重试；模型报错 / 鉴权失败直接抛出，不浪费重试。
-    - build_input 每次调用返回全新 input（本地文件 handle 用过即废，必须重开）。
-    - 重试时保持 last_pct 与 RETRYING 状态，不硬重置进度为 1.0。
+    prediction ID 会持久化到任务目录。只要远端状态仍是 starting/processing，
+    就始终查询同一个 prediction，不会再次提交。仅在创建请求本身没有取得 ID
+    且发生网络错误时，才可能在 retry_interval 后重新创建。
     """
     _do_cancel_check(cancel_check)
     client = replicate.Client(
         api_token=os.getenv("REPLICATE_API_TOKEN"),
         timeout=httpx.Timeout(float(timeout), connect=30.0),
     )
+    prediction_id = _load_prediction_id(state_dir, model_ref)
+    network_failures = 0
     last_exc: Exception | None = None
-    for attempt in range(1, retries + 1):
+
+    while True:
         try:
             _do_cancel_check(cancel_check)
-            input_payload = build_input()
-            try:
-                res = client.run(model_ref, input=input_payload)
-                _do_cancel_check(cancel_check)
-                return res
-            finally:
-                audio_file = input_payload.get("audio_path")
-                close = getattr(audio_file, "close", None)
-                if callable(close):
-                    close()
+            if prediction_id is None:
+                input_payload = build_input()
+                try:
+                    prediction = client.predictions.create(
+                        version=model_ref,
+                        input=input_payload,
+                        wait=False,
+                    )
+                finally:
+                    audio_file = input_payload.get("audio_path")
+                    close = getattr(audio_file, "close", None)
+                    if callable(close):
+                        close()
+                prediction_id = prediction.id
+                logger.info("Replicate prediction 已创建: id=%s", prediction_id)
+            else:
+                prediction = client.predictions.get(prediction_id)
+
+            network_failures = 0
+            status = str(getattr(prediction, "status", "")).lower()
+            _save_prediction_state(
+                state_dir,
+                prediction_id=prediction_id,
+                model_ref=model_ref,
+                status=status,
+            )
+
+            if status in _ACTIVE_PREDICTION_STATUSES:
+                if on_progress is not None:
+                    _safe_callback(on_progress, last_pct, status)
+                logger.info("Replicate prediction 等待中: id=%s status=%s", prediction_id, status)
+                _sleep_with_cancel(poll_interval, cancel_check)
+                continue
+
+            if status == "succeeded":
+                if on_progress is not None:
+                    _safe_callback(on_progress, 100.0, "succeeded")
+                return prediction.output
+
+            if status in _TERMINAL_PREDICTION_STATUSES:
+                error = getattr(prediction, "error", None) or f"prediction 状态为 {status}"
+                _clear_prediction_state(state_dir)
+                raise TranscribeError(
+                    f"Replicate 语音识别失败: {error}",
+                    code="model_error",
+                )
+
+            raise TranscribeError(
+                f"Replicate 返回未知 prediction 状态: {status or 'empty'}",
+                code="upstream_error",
+            )
         except (httpx.TimeoutException, httpx.TransportError) as e:
             last_exc = e
+            network_failures += 1
             logger.warning(
-                "Replicate 第 %d/%d 次失败(超时/网络): %s", attempt, retries, e
+                "Replicate 第 %d/%d 次网络失败，%s 秒后重试%s: %s",
+                network_failures,
+                retries,
+                retry_interval,
+                "查询同一 prediction" if prediction_id else "创建",
+                e,
             )
-            if attempt < retries:
-                backoff = min(10 * 2 ** (attempt - 1), 60)  # 10s, 20s, 40s, 上限 60s
-                if on_progress is not None:
-                    _safe_callback(on_progress, last_pct, "retrying")  # 保持上次进度，发送重试状态
-                step = 0.5
-                elapsed = 0.0
-                while elapsed < backoff:
-                    _do_cancel_check(cancel_check)
-                    sleep_time = min(step, backoff - elapsed)
-                    time.sleep(sleep_time)
-                    elapsed += sleep_time
-                _do_cancel_check(cancel_check)
+            if network_failures >= retries:
+                break
+            if on_progress is not None:
+                _safe_callback(on_progress, last_pct, "retrying")
+            _sleep_with_cancel(retry_interval, cancel_check)
+        except (httpx.HTTPStatusError, replicate.exceptions.ReplicateError) as e:
+            status = getattr(e, "status", None) or getattr(getattr(e, "response", None), "status_code", None)
+            raise TranscribeError(
+                f"Replicate 语音识别失败: {e}",
+                code=_error_code_for_status(status),
+            ) from e
         except Exception as e:  # 模型报错 / 鉴权等非瞬时错误，不重试
             if isinstance(e, TranscribeCancelledError) or type(e).__name__ == "PipelineCancelledError":
+                if prediction_id is not None:
+                    try:
+                        client.predictions.cancel(prediction_id)
+                    except Exception:
+                        logger.warning(
+                            "取消 Replicate prediction 失败: id=%s",
+                            prediction_id,
+                            exc_info=True,
+                        )
+                    _clear_prediction_state(state_dir)
+                raise
+            if isinstance(e, TranscribeError):
                 raise
             raise TranscribeError(f"Replicate 语音识别失败: {e}") from e
 
     _do_cancel_check(cancel_check)
     raise TranscribeError(
-        f"Replicate 语音识别多次超时失败（已重试 {retries} 次；"
-        f"冷启动可调大 SUBTRANS_REPLICATE_TIMEOUT）: {last_exc}"
+        f"Replicate 语音识别多次网络失败（共尝试 {retries} 次；"
+        f"每次间隔 {retry_interval} 秒）: {last_exc}",
+        code="network_error",
     )
 
 
@@ -169,7 +311,7 @@ def transcribe(
     # 进度提示：Replicate 简单 API 调用等待模型冷启动完成并返回结果；等待期间保持 starting/retrying 状态
     _load_env()
     if not os.getenv("REPLICATE_API_TOKEN"):
-        raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）")
+        raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）", code="missing_api_key")
 
     lang = None if language in (None, "", "auto") else language
     model = model_name or "small"
@@ -205,6 +347,9 @@ def transcribe(
         build_input,
         timeout=settings.replicate_timeout,
         retries=settings.replicate_retries,
+        retry_interval=settings.replicate_retry_interval,
+        poll_interval=settings.replicate_poll_interval,
+        state_dir=out_dir,
         on_progress=on_progress,
         cancel_check=cancel_check,
     )
@@ -227,6 +372,7 @@ def transcribe(
             ))
 
     write_srt(subs, srt_path)
+    _clear_prediction_state(out_dir)
     if on_progress is not None:
         _safe_callback(on_progress, 100.0, "succeeded")
 
@@ -270,13 +416,20 @@ def _extract_segments(output) -> List[dict]:
 
 def _download_text(url: str) -> str:
     """下载远程文本（SRT）。"""
-    resp = httpx.get(url, timeout=30)
-    resp.raise_for_status()
-    raw = getattr(resp, "content", None)
-    if raw is None:
-        raw = getattr(resp, "text", "").encode("utf-8")
-    text, _ = decode_srt_bytes(raw)
-    return text
+    try:
+        resp = httpx.get(url, timeout=30)
+        resp.raise_for_status()
+        raw = getattr(resp, "content", None)
+        if raw is None:
+            raw = getattr(resp, "text", "").encode("utf-8")
+        text, _ = decode_srt_bytes(raw)
+        return text
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        code = "unauthorized" if status in (401, 403) else "rate_limited" if status == 429 else "upstream_error"
+        raise TranscribeError(f"下载 Replicate 字幕文件失败 HTTP {status}", code=code) from exc
+    except httpx.RequestError as exc:
+        raise TranscribeError("下载 Replicate 字幕文件超时或网络异常", code="network_error") from exc
 
 
 def _parse_srt_segments(srt_text: str) -> List[dict]:

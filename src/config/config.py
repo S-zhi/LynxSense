@@ -162,17 +162,50 @@ class Settings:
     # 后台流水线并发数覆盖（None 表示动态读取 SUBTRANS_WORKERS 或 .env）
     _pipeline_workers_override: Optional[int] = field(default=None, repr=False)
 
+    # 下载阶段并发数覆盖（None 表示动态读取 SUBTRANS_DOWNLOAD_WORKERS 或 .env）
+    _download_workers_override: Optional[int] = field(default=None, repr=False)
+
+    # API 鉴权 Token（动态读取 SUBTRANS_API_TOKEN 或编辑 .env）
+    @property
+    def api_token(self) -> Optional[str]:
+        _sync_env_file()
+        val = (os.getenv("SUBTRANS_API_TOKEN") or "").strip()
+        return val if val else None
+
     # 后台流水线并发数（方案 A：线程池，动态读取，支持运行期调整 SUBTRANS_WORKERS 或编辑 .env）
     @property
     def pipeline_workers(self) -> int:
         if self._pipeline_workers_override is not None:
             return max(1, self._pipeline_workers_override)
         _sync_env_file()
-        val = os.getenv("SUBTRANS_WORKERS", "2")
+        val = os.getenv("SUBTRANS_WORKERS", "8")
+        try:
+            return max(1, int(val))
+        except (ValueError, TypeError):
+            return 8
+
+    # 下载阶段并发数：只限制 yt-dlp 真正下载媒体的阶段。
+    # 流水线线程池可以大于这个值，使下载结束后的 SRT/烧录阶段不占下载名额。
+    @property
+    def download_workers(self) -> int:
+        if self._download_workers_override is not None:
+            return max(1, self._download_workers_override)
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_DOWNLOAD_WORKERS", "2")
         try:
             return max(1, int(val))
         except (ValueError, TypeError):
             return 2
+
+    # HLS/DASH 单个媒体任务的分片并发数；yt-dlp 默认值为 1。
+    @property
+    def download_concurrent_fragments(self) -> int:
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_DL_CONCURRENT_FRAGMENTS", "4")
+        try:
+            return max(1, int(val))
+        except (ValueError, TypeError):
+            return 4
 
     # SSE 进度流连接超时上限（秒），默认 7200 秒（2 小时）
     stream_timeout_sec: int = int(os.getenv("SUBTRANS_STREAM_TIMEOUT_SEC", "7200"))
@@ -219,10 +252,18 @@ class Settings:
         "SUBTRANS_WHISPER_MODEL",
         "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969",
     )
-    # Replicate 推理超时（含冷启动，最长可能几分钟）
+    # Replicate 单次 HTTP 请求超时；prediction 的排队/运行通过短轮询跟踪
     replicate_timeout: int = int(os.getenv("SUBTRANS_REPLICATE_TIMEOUT", "1800"))
-    # Replicate 超时/网络错误的重试次数（冷启动常见）
+    # Replicate 创建/状态查询发生网络错误时的总尝试次数
     replicate_retries: int = int(os.getenv("SUBTRANS_REPLICATE_RETRIES", "3"))
+    # 网络错误后再次请求的间隔；默认 1 小时，避免重复创建长时间排队的任务
+    replicate_retry_interval: float = float(
+        os.getenv("SUBTRANS_REPLICATE_RETRY_INTERVAL", "3600")
+    )
+    # 已取得 prediction ID 后的状态轮询间隔；轮询不会创建新任务
+    replicate_poll_interval: float = float(
+        os.getenv("SUBTRANS_REPLICATE_POLL_INTERVAL", "30")
+    )
 
     # --- ④ 翻译（旧版 DeepSeek 兼容配置；新配置位于 SQLite）---
     deepseek_api_key: Optional[str] = (

@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from yt_dlp.utils import DownloadError as YtDlpDownloadError
 
@@ -143,6 +147,99 @@ def test_download_passes_progress_hook(task_path, monkeypatch):
     download_video("http://x", "task1", on_progress=lambda p: None)
     assert "progress_hooks" in captured["opts"]
     assert len(captured["opts"]["progress_hooks"]) == 1
+    assert captured["opts"]["concurrent_fragment_downloads"] == (
+        downloader.settings.download_concurrent_fragments
+    )
+
+
+def test_download_limiter_releases_after_media_download(tmp_path, monkeypatch):
+    """下载完成后立即释放名额，后续任务不必等待前一个任务的流水线结束。"""
+    task_dirs = {}
+    for task_id in ("task1", "task2", "task3"):
+        task_dirs[task_id] = tmp_path / task_id
+        task_dirs[task_id].mkdir()
+    monkeypatch.setattr(downloader, "ensure_task_dir", lambda task_id: task_dirs[task_id])
+
+    limiter = downloader._DownloadConcurrencyLimiter(lambda: 2)
+    monkeypatch.setattr(downloader, "_download_limiter", limiter)
+
+    lock = threading.Lock()
+    first_two_started = threading.Event()
+    release_downloads = threading.Event()
+    active = 0
+    max_active = 0
+    started = []
+
+    def on_extract(url, download, opts):
+        nonlocal active, max_active
+        task_id = url.rsplit("/", 1)[-1]
+        output = task_dirs[task_id] / "source.mp4"
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+            started.append(task_id)
+            if len(started) == 2:
+                first_two_started.set()
+        try:
+            assert release_downloads.wait(timeout=2)
+            output.write_bytes(task_id.encode())
+            return {"requested_downloads": [{"filepath": str(output)}]}
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(download_video, f"http://example/{task_id}", task_id)
+            for task_id in ("task1", "task2", "task3")
+        ]
+        try:
+            assert first_two_started.wait(timeout=2)
+            time.sleep(0.05)
+            assert len(started) == 2
+        finally:
+            release_downloads.set()
+        assert [future.result().video_path.name for future in futures] == [
+            "source.mp4",
+            "source.mp4",
+            "source.mp4",
+        ]
+
+    assert max_active == 2
+    assert limiter.active == 0
+
+
+def test_download_limiter_releases_after_error(tmp_path, monkeypatch):
+    """yt-dlp 失败也必须释放下载名额，避免后续任务永久阻塞。"""
+    task_dirs = {"failed": tmp_path / "failed", "next": tmp_path / "next"}
+    for path in task_dirs.values():
+        path.mkdir()
+    monkeypatch.setattr(downloader, "ensure_task_dir", lambda task_id: task_dirs[task_id])
+    limiter = downloader._DownloadConcurrencyLimiter(lambda: 1)
+    monkeypatch.setattr(downloader, "_download_limiter", limiter)
+
+    calls = []
+
+    def on_extract(url, download, opts):
+        task_id = url.rsplit("/", 1)[-1]
+        calls.append(task_id)
+        if task_id == "failed":
+            raise ValueError("network failed")
+        output = task_dirs[task_id] / "source.mp4"
+        output.write_bytes(b"ok")
+        return {"requested_downloads": [{"filepath": str(output)}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+
+    with pytest.raises(DownloadError, match="出错"):
+        download_video("http://example/failed", "failed")
+
+    result = download_video("http://example/next", "next")
+    assert result.video_path.exists()
+    assert calls == ["failed", "next"]
+    assert limiter.active == 0
 
 
 # ---------- _resolve_output_path 回退逻辑 ----------

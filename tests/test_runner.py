@@ -221,6 +221,41 @@ def test_recover_interrupted_tasks_requeues_only_non_terminal(store, monkeypatch
     assert {args for _, args in submitted} == {(running,), (pending,)}
 
 
+def test_recover_interrupted_upload_task_fails_when_source_missing(store, tmp_path, monkeypatch):
+    """恢复中断的 upload 任务时，如果缺乏有效 source.* 文件（如仅有 .part），直接置为 FAILED 且不入队。"""
+    upload_rec = store.create(
+        url="clip.mp4", source_lang="en", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+        source_type="upload", title="clip",
+    )
+    store.update(upload_rec.id, status="PENDING")
+
+    # 模拟磁盘目录，只留一个半截 .part 文件，没有正式 source.mp4
+    tdir = tmp_path / upload_rec.id
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "source.mp4.part").write_bytes(b"half_upload_data")
+
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
+
+    submitted = []
+
+    class FakeExecutor:
+        def submit(self, fn, *args):
+            submitted.append((fn, args))
+
+    monkeypatch.setattr(runner, "_executor", FakeExecutor())
+
+    recovered = runner.recover_interrupted_tasks()
+
+    assert upload_rec.id not in recovered
+    assert submitted == []
+
+    updated = store.get(upload_rec.id)
+    assert updated.status == "FAILED"
+    assert updated.error == "上传源文件缺失或损坏"
+    assert updated.error_code == "resource_error"
+
+
 def test_get_executor_dynamic_worker_update(monkeypatch):
     runner.shutdown_executor(wait=True)
     monkeypatch.setenv("SUBTRANS_WORKERS", "3")

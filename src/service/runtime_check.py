@@ -148,6 +148,7 @@ def build_readiness() -> dict[str, Any]:
         "replicate_checked_at": replicate_checked_at,
         "replicate_cached": replicate_cached,
         "checks": {
+            "api_token_required": bool(settings.api_token),
             "replicate_api_token": replicate_check_status,
             "replicate_checked_at": replicate_checked_at,
             "replicate_cached": replicate_cached,
@@ -166,6 +167,11 @@ def build_readiness() -> dict[str, Any]:
             "hard_burn": hard_burn_ready,
             "soft_burn": full_pipeline_ready,
             "max_concurrent_tasks": settings.pipeline_workers,
+            "max_concurrent_downloads": getattr(
+                settings,
+                "download_workers",
+                settings.pipeline_workers,
+            ),
         },
         "limits": {
             "max_upload_mb": settings.max_upload_mb,

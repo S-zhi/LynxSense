@@ -81,6 +81,38 @@ def test_create_task(client):
     assert data["createdAt"] > 0
 
 
+# ---------- API Token 鉴权 ----------
+
+def test_api_token_auth_when_token_configured(client, monkeypatch):
+    """配置 SUBTRANS_API_TOKEN 时，变更接口必须校验 Authorization / X-API-Token。"""
+    monkeypatch.setenv("SUBTRANS_API_TOKEN", "secret-token-123")
+
+    # 未提供 Token -> 401
+    r_no_auth = client.post("/api/tasks", json=_payload())
+    assert r_no_auth.status_code == 401
+    assert "未提供有效的 API Token" in r_no_auth.json()["detail"]
+
+    # 错误 Token -> 401
+    r_bad_auth = client.post("/api/tasks", json=_payload(), headers={"Authorization": "Bearer wrong-token"})
+    assert r_bad_auth.status_code == 401
+
+    # Authorization: Bearer 正确 Token -> 201
+    r_bearer = client.post("/api/tasks", json=_payload(), headers={"Authorization": "Bearer secret-token-123"})
+    assert r_bearer.status_code == 201
+
+    # X-API-Token 正确 Token -> 201
+    r_header = client.post("/api/tasks", json=_payload(), headers={"X-API-Token": "secret-token-123"})
+    assert r_header.status_code == 201
+
+
+def test_api_token_auth_when_token_unset(client, monkeypatch):
+    """未配置 SUBTRANS_API_TOKEN 时，接口无须鉴权直接通过。"""
+    monkeypatch.delenv("SUBTRANS_API_TOKEN", raising=False)
+
+    r = client.post("/api/tasks", json=_payload())
+    assert r.status_code == 201
+
+
 def test_create_defaults_when_minimal(client):
     r = client.post("/api/tasks", json={"url": "https://x/y"})
     assert r.status_code == 201
@@ -993,6 +1025,21 @@ def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch)
     assert enqueued == []
     assert client.get("/api/tasks").json() == []
     assert _count_task_dirs(client._tmp) == before
+
+
+def test_upload_creates_atomic_source_file_and_no_part_remaining(client, monkeypatch):
+    """上传成功后，正式文件 source.mp4 存在，且不残留 .part 文件。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = _upload(client, _filename="clip.mp4", _content=b"ATOMIC_VIDEO")
+    assert r.status_code == 201
+    tid = r.json()["id"]
+    tdir = client._tmp / tid
+
+    assert (tdir / "source.mp4").exists()
+    assert (tdir / "source.mp4").read_bytes() == b"ATOMIC_VIDEO"
+    assert not (tdir / "source.mp4.part").exists()
 
 
 def test_upload_probe_duration_none_400_and_cleanup(client, monkeypatch):
