@@ -431,3 +431,21 @@ def test_pipeline_url_only_download_emits_only_downloading_events(monkeypatch):
     assert "BURNING" not in statuses
     # 结尾是 SUCCESS
     assert statuses[-1] == "SUCCESS"
+
+
+def test_in_memory_cancellation_signal():
+    tid = "test_cancel_sig"
+    orchestrator.unregister_cancellation_signal(tid)
+    assert not orchestrator.is_cancelled_signal(tid)
+
+    orchestrator.register_cancellation_signal(tid)
+    assert not orchestrator.is_cancelled_signal(tid)
+
+    orchestrator.set_cancelled_signal(tid)
+    assert orchestrator.is_cancelled_signal(tid)
+
+    with pytest.raises(orchestrator.PipelineCancelledError):
+        orchestrator._check_cancelled(tid)
+
+    orchestrator.unregister_cancellation_signal(tid)
+    assert not orchestrator.is_cancelled_signal(tid)
