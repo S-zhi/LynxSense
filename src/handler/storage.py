@@ -27,9 +27,9 @@ from src.config import (
     settings,
     task_dir,
 )
-from src.handler.deps import get_store
+from src.handler.deps import get_probe_store, get_store
 from src.handler.subtitle_editor import release_lock
-from src.store import TaskStore, TaskRecord
+from src.store import ProbeStore, TaskStore, TaskRecord
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,7 @@ class CleanupPreviewRequest(BaseModel):
     taskIds: Optional[List[str]] = None      # 指定任务 id 列表
     kinds: Optional[List[str]] = None         # 产物类别（source/audio/.../other）
     olderThanDays: Optional[int] = Field(default=None, ge=0)  # 任务创建超过 N 天
+    cleanupProbeRecordsOlderThanDays: Optional[int] = Field(default=None, ge=0)  # 清理 N 天前的 probe 记录
 
 
 class CleanupPreviewResponse(BaseModel):
@@ -103,6 +104,7 @@ class CleanupPreviewResponse(BaseModel):
     matchedBytes: int
     skippedTasks: List[TaskStorage]  # 因 RUNNING 状态被跳过的任务
     targets: List[TaskStorage]       # 将被处理的任务（产物可能按 kind 过滤）
+    deletedProbeRecords: int = 0     # 将被清理的 probe 记录数量
 
 
 class CleanupResponse(BaseModel):
@@ -112,6 +114,7 @@ class CleanupResponse(BaseModel):
     deletedBytes: int
     skippedTasks: List[TaskStorage]
     partial: List[TaskStorage]  # 仅删了部分产物但任务被保留
+    deletedProbeRecords: int = 0  # 实际删除的 probe 记录数量
 
 
 class RetentionIn(BaseModel):
@@ -290,7 +293,9 @@ def get_stats(store: TaskStore = Depends(get_store)) -> StorageStats:
 
 @router.post("/cleanup_preview", response_model=CleanupPreviewResponse)
 def cleanup_preview(
-    body: CleanupPreviewRequest, store: TaskStore = Depends(get_store),
+    body: CleanupPreviewRequest,
+    store: TaskStore = Depends(get_store),
+    probes: ProbeStore = Depends(get_probe_store),
 ) -> CleanupPreviewResponse:
     """预览将受影响的任务与产物。"""
     candidates, skipped, artifacts_by_task = _collect_targets(store, body)
@@ -306,17 +311,26 @@ def cleanup_preview(
         matched += 1
         matched_bytes += size
         targets.append(_build_task_storage(rec, artifacts))
+
+    probe_count = 0
+    if body.cleanupProbeRecordsOlderThanDays is not None:
+        cutoff = int(time.time() * 1000) - body.cleanupProbeRecordsOlderThanDays * 86400 * 1000
+        probe_count = len([r for r in probes.list(limit=0) if r.created_at < cutoff])
+
     return CleanupPreviewResponse(
         matchedTasks=matched,
         matchedBytes=matched_bytes,
         skippedTasks=[_build_task_storage(r, _scan_artifacts(r.id), skipped=True) for r in skipped],
         targets=targets,
+        deletedProbeRecords=probe_count,
     )
 
 
 @router.post("/cleanup", response_model=CleanupResponse)
 def cleanup(
-    body: CleanupPreviewRequest, store: TaskStore = Depends(get_store),
+    body: CleanupPreviewRequest,
+    store: TaskStore = Depends(get_store),
+    probes: ProbeStore = Depends(get_probe_store),
 ) -> CleanupResponse:
     """执行清理。复用 delete_task 风格的清理路径，但允许仅删指定类别产物。
 
@@ -378,11 +392,16 @@ def cleanup(
             partial.append(_build_task_storage(current, remaining))
             deleted_bytes += sum(a.size for a in removed)
 
+    deleted_probes = 0
+    if body.cleanupProbeRecordsOlderThanDays is not None:
+        deleted_probes = probes.cleanup_older_than_days(body.cleanupProbeRecordsOlderThanDays)
+
     return CleanupResponse(
         deletedTasks=deleted_tasks,
         deletedBytes=deleted_bytes,
         skippedTasks=skipped_storage,
         partial=partial,
+        deletedProbeRecords=deleted_probes,
     )
 
 

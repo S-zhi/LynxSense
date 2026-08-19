@@ -144,6 +144,39 @@ def test_list_tasks(client):
     assert len(r.json()) == 2
 
 
+def test_list_tasks_pagination_and_cursors(client):
+    c1 = client.post("/api/tasks", json=_payload(url="https://x/1")).json()["id"]
+    c2 = client.post("/api/tasks", json=_payload(url="https://x/2")).json()["id"]
+    c3 = client.post("/api/tasks", json=_payload(url="https://x/3")).json()["id"]
+
+    # 分页测试
+    r_limit = client.get("/api/tasks", params={"limit": 2})
+    assert r_limit.status_code == 200
+    res_limit = r_limit.json()
+    assert len(res_limit) == 2
+    assert [t["id"] for t in res_limit] == [c3, c2]
+
+    r_offset = client.get("/api/tasks", params={"limit": 2, "offset": 1})
+    assert r_offset.status_code == 200
+    res_offset = r_offset.json()
+    assert [t["id"] for t in res_offset] == [c2, c1]
+
+    # 游标测试 before_id (更早)
+    r_before = client.get("/api/tasks", params={"before_id": c2})
+    assert r_before.status_code == 200
+    assert [t["id"] for t in r_before.json()] == [c1]
+
+    # 游标测试 after_id (更晚)
+    r_after = client.get("/api/tasks", params={"after_id": c2})
+    assert r_after.status_code == 200
+    assert [t["id"] for t in r_after.json()] == [c3]
+
+    # limit 范围验证 (1~200)
+    assert client.get("/api/tasks", params={"limit": 0}).status_code == 422
+    assert client.get("/api/tasks", params={"limit": 201}).status_code == 422
+    assert client.get("/api/tasks", params={"offset": -1}).status_code == 422
+
+
 def test_get_task(client):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
     r = client.get(f"/api/tasks/{cid}")

@@ -39,7 +39,10 @@ def test_tool_schema_contains_parameter_descriptions_and_constraints():
     assert start_schema["properties"]["burn"]["enum"] == ["hard", "soft"]
     assert start_schema["properties"]["need_subtitle"]["description"]
     assert tools["list_tasks"].input_schema["properties"]["limit"]["minimum"] == 1
-    assert tools["list_tasks"].input_schema["properties"]["limit"]["maximum"] == 100
+    assert tools["list_tasks"].input_schema["properties"]["limit"]["maximum"] == 200
+    assert "offset" in tools["list_tasks"].input_schema["properties"]
+    assert "before_id" in tools["list_tasks"].input_schema["properties"]
+    assert "after_id" in tools["list_tasks"].input_schema["properties"]
 
 
 def test_agent_guide_is_discoverable_as_mcp_resource():
