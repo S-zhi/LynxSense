@@ -431,34 +431,38 @@ def check_download_video(task_id: str, store: TaskStore = Depends(get_store)):
 @router.get("/{task_id}/download")
 def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
+    if rec.status != "SUCCESS":
+        raise HTTPException(status_code=409, detail="成品视频尚未生成")
+
     path = _resolve_video(task_id)
     if path is not None:
         state = AssetResolver.check_file_state(path)
         if state == ResourceState.AVAILABLE:
             return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
         elif state == ResourceState.UNREADABLE:
-            if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
+            if rec.resource_status == RESOURCE_STATUS_AVAILABLE:
                 _mark_resource_missing(store, task_id, "资源不可读")
             raise HTTPException(status_code=409, detail="资源不可读")
 
     # 兜底：成功任务的产物被清掉时，要把状态降级为 MISSING，
     # 避免下次列表 / 详情接口继续暴露已失效的下载链接。
-    if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
+    if rec.resource_status == RESOURCE_STATUS_AVAILABLE:
         _mark_resource_missing(store, task_id, _DELETED_MESSAGE)
     raise HTTPException(
         status_code=409,
-        detail=_DELETED_MESSAGE if rec.status == "SUCCESS" else "成品视频尚未生成",
+        detail=_DELETED_MESSAGE,
     )
 
 
 def _resolve_video(task_id: str):
-    """定位可下载的视频：优先烧录成品 output.mp4，仅下载模式回退到 source.*。"""
+    """定位可下载的视频：优先烧录成品 output.mp4，仅下载模式回退到 source.*（排除 .part 临时文件）。"""
     d = task_dir(task_id)
     out = d / OUTPUT_VIDEO
     if out.exists():
         return out
-    for p in sorted(d.glob(f"{SOURCE_VIDEO_STEM}.*")):
-        return p
+    state, source_path, _ = AssetResolver.resolve_source(task_id)
+    if state == ResourceState.AVAILABLE and source_path is not None:
+        return source_path
     return None
 
 
