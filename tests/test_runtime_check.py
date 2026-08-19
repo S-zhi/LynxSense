@@ -67,6 +67,7 @@ def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_p
         "hard_burn": True,
         "soft_burn": True,
         "max_concurrent_tasks": 2,
+        "max_concurrent_downloads": 2,
     }
     assert result["limits"] == {
         "max_upload_mb": 2048,

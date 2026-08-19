@@ -162,6 +162,9 @@ class Settings:
     # 后台流水线并发数覆盖（None 表示动态读取 SUBTRANS_WORKERS 或 .env）
     _pipeline_workers_override: Optional[int] = field(default=None, repr=False)
 
+    # 下载阶段并发数覆盖（None 表示动态读取 SUBTRANS_DOWNLOAD_WORKERS 或 .env）
+    _download_workers_override: Optional[int] = field(default=None, repr=False)
+
     # API 鉴权 Token（动态读取 SUBTRANS_API_TOKEN 或编辑 .env）
     @property
     def api_token(self) -> Optional[str]:
@@ -175,11 +178,34 @@ class Settings:
         if self._pipeline_workers_override is not None:
             return max(1, self._pipeline_workers_override)
         _sync_env_file()
-        val = os.getenv("SUBTRANS_WORKERS", "2")
+        val = os.getenv("SUBTRANS_WORKERS", "8")
+        try:
+            return max(1, int(val))
+        except (ValueError, TypeError):
+            return 8
+
+    # 下载阶段并发数：只限制 yt-dlp 真正下载媒体的阶段。
+    # 流水线线程池可以大于这个值，使下载结束后的 SRT/烧录阶段不占下载名额。
+    @property
+    def download_workers(self) -> int:
+        if self._download_workers_override is not None:
+            return max(1, self._download_workers_override)
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_DOWNLOAD_WORKERS", "2")
         try:
             return max(1, int(val))
         except (ValueError, TypeError):
             return 2
+
+    # HLS/DASH 单个媒体任务的分片并发数；yt-dlp 默认值为 1。
+    @property
+    def download_concurrent_fragments(self) -> int:
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_DL_CONCURRENT_FRAGMENTS", "4")
+        try:
+            return max(1, int(val))
+        except (ValueError, TypeError):
+            return 4
 
     # SSE 进度流连接超时上限（秒），默认 7200 秒（2 小时）
     stream_timeout_sec: int = int(os.getenv("SUBTRANS_STREAM_TIMEOUT_SEC", "7200"))
