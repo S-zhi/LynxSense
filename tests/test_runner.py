@@ -119,6 +119,36 @@ def test_run_missing_task_skips(store, monkeypatch):
     assert not called  # 任务不存在时不应调用 run_pipeline
 
 
+def test_cancel_pipeline_terminates_procs_and_updates_status(store):
+    import subprocess
+    tid = _make_task(store)
+    proc = subprocess.Popen(["sleep", "10"])
+    runner.register_process(tid, proc)
+
+    ok = runner.cancel_pipeline(tid)
+    assert ok is True
+    rec = store.get(tid)
+    assert rec.status == "CANCELLED"
+    assert rec.error == "用户取消"
+    proc.wait(timeout=2)
+    assert proc.poll() is not None
+
+
+def test_run_does_not_overwrite_cancelled_status(store, monkeypatch):
+    tid = _make_task(store)
+    store.update(tid, status="CANCELLED", error="用户取消")
+
+    def boom(params, on_event, *, api_key=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(runner, "run_pipeline", boom)
+    runner._run(tid)
+
+    rec = store.get(tid)
+    assert rec.status == "CANCELLED"
+    assert rec.error == "用户取消"
+
+
 def test_recover_interrupted_tasks_requeues_only_non_terminal(store, monkeypatch):
     running = _make_task(store)
     pending = _make_task(store)

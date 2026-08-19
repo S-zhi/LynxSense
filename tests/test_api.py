@@ -28,6 +28,7 @@ def client(tmp_path, monkeypatch):
     # 覆盖 store 依赖 -> 临时库
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_probe_store] = lambda: probe_store
+    monkeypatch.setattr("src.service.runner._store", store)
     # 下载端点用 task_dir 定位文件 -> 指向临时目录
     monkeypatch.setattr(tasks_routes, "task_dir", lambda tid: tmp_path / tid)
     monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
@@ -223,7 +224,57 @@ def test_delete_missing_404(client):
     assert client.delete("/api/tasks/nope").status_code == 404
 
 
-# ---------- 重试 ----------
+# ---------- 取消与重试 ----------
+
+def test_cancel_running_task_succeeds(client):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="TRANSLATING", progress=70, current_step="TRANSLATING")
+
+    r = client.post(f"/api/tasks/{cid}/cancel")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "CANCELLED"
+    assert data["error"] == "用户取消"
+
+
+def test_cancel_terminal_task_returns_409(client):
+    for status in ["SUCCESS", "FAILED", "CANCELLED"]:
+        cid = client.post("/api/tasks", json=_payload()).json()["id"]
+        client._store.update(cid, status=status)
+        r = client.post(f"/api/tasks/{cid}/cancel")
+        assert r.status_code == 409
+        assert "任务非运行状态" in r.json()["detail"]
+
+
+def test_cancel_nonexistent_task_returns_404(client):
+    assert client.post("/api/tasks/nope/cancel").status_code == 404
+
+
+def test_delete_cancelled_task_succeeds(client):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="CANCELLED", error="用户取消")
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+
+    assert client.delete(f"/api/tasks/{cid}").status_code == 204
+    assert client.get(f"/api/tasks/{cid}").status_code == 404
+    assert not d.exists()
+
+
+def test_retry_cancelled_task_succeeds(client, monkeypatch):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="CANCELLED", error="用户取消")
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = client.post(f"/api/tasks/{cid}/retry")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "PENDING"
+    assert data["progress"] == 0
+    assert data["error"] is None
+    assert enqueued == [cid]
+
 
 def test_retry_resets_status(client, monkeypatch):
     """失败任务重试时应重置状态并重新入队。"""

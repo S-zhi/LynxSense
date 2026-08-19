@@ -200,6 +200,12 @@ const RealApi = {
     if (!res.ok) throw new Error(await readError(res, "删除失败"));
   },
 
+  async cancelTask(id) {
+    const res = await request(this.base, `/api/tasks/${id}/cancel`, { method: "POST" });
+    if (!res.ok) throw new Error(await readError(res, "取消失败"));
+    return res.json();
+  },
+
   async retryTask(id) {
     const res = await request(this.base, `/api/tasks/${id}/retry`, { method: "POST" });
     if (!res.ok) throw new Error(await readError(res, "重试失败"));
@@ -562,6 +568,11 @@ const MockApi = (() => {
     async validateTranslationEngine(id) { const list = await this.listTranslationEngines(); const item = list.find((e) => e.id === id); if (item) { item.availability = item.hasApiKey ? "AVAILABLE" : "UNCONFIGURED"; localStorage.setItem("subtrans_mock_engines_v1", JSON.stringify(list)); } return item || {}; },
     async deleteTranslationEngine(id) { const list = (await this.listTranslationEngines()).filter((e) => e.id !== id); localStorage.setItem("subtrans_mock_engines_v1", JSON.stringify(list)); },
     async deleteTask(id) { tasks = tasks.filter((t) => t.id !== id); persist(); await delay(80); },
+    async cancelTask(id) {
+      const t = find(id);
+      if (t) { t.status = "CANCELLED"; t.error = "用户取消"; t._sim = false; persist(); }
+      return { ...t };
+    },
     async retryTask(id) {
       const t = find(id);
       if (t) { t.status = "PENDING"; t.progress = 0; t.error = null; t._sim = true; persist(); }

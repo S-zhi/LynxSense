@@ -39,7 +39,7 @@ from src.handler.schemas import (
     _probe_record_to_out,
     to_out,
 )
-from src.service.runner import enqueue_pipeline
+from src.service.runner import cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     RESOURCE_STATUS_AVAILABLE,
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-_TERMINAL = {"SUCCESS", "FAILED"}
+_TERMINAL = {"SUCCESS", "FAILED", "CANCELLED"}
 
 # 资源已丢失时给用户的简短、稳定错误文案，避免把文件系统异常 / 堆栈漏到 UI
 _DELETED_MESSAGE = "资源已删除"
@@ -367,12 +367,23 @@ def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
     release_lock(task_id)
 
 
+@router.post("/{task_id}/cancel", response_model=TaskOut)
+def cancel_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
+    """取消正在运行的任务。"""
+    rec = _require(store, task_id)
+    if rec.status in _TERMINAL:
+        raise HTTPException(status_code=409, detail="任务非运行状态，无法取消")
+    cancel_pipeline(task_id)
+    updated = store.get(task_id) or rec
+    return to_out(updated)
+
+
 @router.post("/{task_id}/retry", response_model=TaskOut)
 def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
-    """仅允许失败任务重新入队，避免运行中任务重复执行。"""
+    """仅允许失败或已取消任务重新入队，避免运行中任务重复执行。"""
     rec = _require(store, task_id)
-    if rec.status != "FAILED":
-        raise HTTPException(status_code=409, detail="只有失败任务可以重试")
+    if rec.status not in ("FAILED", "CANCELLED"):
+        raise HTTPException(status_code=409, detail="只有失败或已取消任务可以重试")
     updated = store.update(
         task_id,
         status="PENDING",
