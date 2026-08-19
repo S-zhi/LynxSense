@@ -510,3 +510,32 @@ def test_probe_dataclass_defaults():
     assert r.webpage_url is None
     assert r.reason is None
     assert r.detail is None
+    assert r.language is None
+
+
+def test_sniff_language_from_direct_language():
+    from src.core.downloader import _sniff_language
+    assert _sniff_language({"language": "en-US"}) == "en"
+    assert _sniff_language({"language": "ja-JP"}) == "ja"
+    assert _sniff_language({"language": "zh-Hans"}) == "zh-CN"
+    assert _sniff_language({"language": "zh-Hant"}) == "zh-TW"
+
+
+def test_sniff_language_from_subtitles_and_auto_captions():
+    from src.core.downloader import _sniff_language
+    assert _sniff_language({"subtitles": {"ja": [{"ext": "vtt"}]}}) == "ja"
+    assert _sniff_language({"automatic_captions": {"es": [{"ext": "vtt"}]}}) == "es"
+
+
+def test_probe_extracts_sniffed_language(monkeypatch):
+    def on_extract(url, download, opts):
+        return {
+            "title": "Japanese Video",
+            "language": "ja-JP",
+            "url": "https://x/stream",
+        }
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    res = probe_video("https://x/v")
+    assert res.ok is True
+    assert res.language == "ja"

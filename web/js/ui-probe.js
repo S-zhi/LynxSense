@@ -9,12 +9,19 @@
 import { $, el, shortUrl } from "./utils.js";
 import { Api } from "./api.js";
 import { toast } from "./toast.js";
+import { LANG_LABEL } from "./constants.js";
 
 const URL_RE = /^https?:\/\/.+/i;
 
 function isValidUrl(url) {
   // 判断输入是否是后端探针可接受的 http(s) 页面地址。
   return URL_RE.test(url);
+}
+
+function formatLang(code) {
+  if (!code) return null;
+  const label = LANG_LABEL[code];
+  return label ? `${label} (${code})` : code;
 }
 
 function formatDuration(seconds) {
@@ -92,6 +99,7 @@ function renderResult(resultEl, result, url) {
   meta.append(metaItem("链接", shortUrl(webpage)));
   if (result.extractor) meta.append(metaItem("站点解析器", result.extractor));
   if (duration) meta.append(metaItem("时长", duration));
+  if (result.language) meta.append(metaItem("推测语言", formatLang(result.language)));
   if (result.ok) meta.append(metaItem("格式数量", String(result.formatsCount || 0)));
   if (!result.ok && result.detail && result.detail !== result.reason) {
     meta.append(metaItem("详情", result.detail));
@@ -159,6 +167,7 @@ function renderHistoryItem(rec, refs) {
     const parts = [];
     if (dur) parts.push(`时长 ${dur}`);
     if (rec.extractor) parts.push(rec.extractor);
+    if (rec.language) parts.push(`语言 ${LANG_LABEL[rec.language] || rec.language}`);
     if (rec.formatsCount) parts.push(`${rec.formatsCount} 种格式`);
     if (parts.length) summary.textContent = `${summary.textContent} · ${parts.join(" · ")}`;
   } else {

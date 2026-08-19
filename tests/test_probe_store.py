@@ -35,15 +35,58 @@ def test_record_roundtrip(store):
         ok=False,
         reason="login required",
         detail="Need cookies",
+        language="ja",
     )
     assert rec.id.startswith("probe_")
     assert rec.ok == 0
     assert rec.url == "https://x.com/abc"
     assert rec.reason == "login required"
     assert rec.detail == "Need cookies"
+    assert rec.language == "ja"
     assert rec.created_at > 0
     got = store.get(rec.id)
     assert got == rec
+
+
+def test_schema_migration_adds_language_column(tmp_path):
+    import sqlite3
+    db_file = tmp_path / "old.db"
+    # 创建没有 language 列的旧版 sqlite 表
+    with sqlite3.connect(db_file) as conn:
+        conn.execute(
+            """
+            CREATE TABLE probe_records (
+                id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                ok INTEGER NOT NULL,
+                title TEXT,
+                extractor TEXT,
+                duration REAL,
+                formats_count INTEGER NOT NULL DEFAULT 0,
+                webpage_url TEXT,
+                reason TEXT,
+                detail TEXT,
+                created_at INTEGER NOT NULL,
+                url_hash TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO probe_records (id, url, ok, created_at, url_hash) VALUES (?, ?, ?, ?, ?)",
+            ("probe_old", "https://old/v", 1, 1000, "hash1"),
+        )
+
+    # 初始化 ProbeStore 会触发 schema 迁移添加 language 列
+    store = ProbeStore(db_file)
+    rec = store.get("probe_old")
+    assert rec is not None
+    assert rec.language is None
+
+    # 新记录可以保存 language
+    new_rec = store.record(url="https://new/v", ok=True, language="en")
+    assert new_rec.language == "en"
+    got_new = store.get(new_rec.id)
+    assert got_new.language == "en"
 
 
 def test_list_orders_by_created_desc(store):

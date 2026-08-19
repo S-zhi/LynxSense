@@ -35,6 +35,7 @@ class ProbeRecord:
     detail: Optional[str] = None
     created_at: int = 0       # epoch 毫秒
     url_hash: Optional[str] = None  # sha256(url)[:16]
+    language: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -94,6 +95,8 @@ class ProbeStore:
                 rows = conn.execute("SELECT id, url FROM probe_records WHERE url_hash IS NULL").fetchall()
                 for r in rows:
                     conn.execute("UPDATE probe_records SET url_hash = ? WHERE id = ?", (_calc_url_hash(r["url"]), r["id"]))
+            if "language" not in cols:
+                conn.execute("ALTER TABLE probe_records ADD COLUMN language TEXT")
 
             # 列表默认按时间倒序，建索引避免大表全表扫
             conn.execute(
@@ -118,6 +121,7 @@ class ProbeStore:
         webpage_url: Optional[str] = None,
         reason: Optional[str] = None,
         detail: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> ProbeRecord:
         """写入或更新一条测试记录。若同 URL 在当前小时桶已存在，则覆盖更新最新结果。"""
         now = _now_ms()
@@ -139,7 +143,7 @@ class ProbeStore:
                     UPDATE probe_records
                     SET url = ?, ok = ?, title = ?, extractor = ?, duration = ?,
                         formats_count = ?, webpage_url = ?, reason = ?, detail = ?,
-                        created_at = ?
+                        created_at = ?, language = ?
                     WHERE id = ?
                     """,
                     (
@@ -153,6 +157,7 @@ class ProbeStore:
                         reason,
                         detail,
                         now,
+                        language,
                         rec_id,
                     ),
                 )
@@ -171,6 +176,7 @@ class ProbeStore:
                     detail=detail,
                     created_at=now,
                     url_hash=url_hash,
+                    language=language,
                 )
                 values = [getattr(rec, c) for c in _COLUMNS]
                 placeholders = ", ".join(["?"] * len(_COLUMNS))
@@ -193,6 +199,7 @@ class ProbeStore:
             detail=detail,
             created_at=now,
             url_hash=url_hash,
+            language=language,
         )
 
     # ---------- 查 ----------

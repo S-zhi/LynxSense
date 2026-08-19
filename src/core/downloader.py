@@ -67,6 +67,7 @@ class ProbeResult:
     webpage_url: Optional[str] = None
     reason: Optional[str] = None
     detail: Optional[str] = None
+    language: Optional[str] = None
 
 # 视频下载回调函数 回调函数逻辑 提供修改进度的展示函数 -> 放入执行流程中的hook内
 ProgressHook = Callable[[DownloadProgress], None]
@@ -228,6 +229,7 @@ def probe_video(
             detail=_clip_error(str(e)),
         )
 
+    language = _sniff_language(info)
     formats_count = _count_formats(info)
     if formats_count == 0 and not info.get("url"):
         return ProbeResult(
@@ -237,6 +239,7 @@ def probe_video(
             duration=info.get("duration"),
             webpage_url=info.get("webpage_url") or url,
             reason="未找到可下载的视频格式",
+            language=language,
         )
 
     return ProbeResult(
@@ -246,7 +249,51 @@ def probe_video(
         duration=info.get("duration"),
         formats_count=formats_count,
         webpage_url=info.get("webpage_url") or url,
+        language=language,
     )
+
+
+def _sniff_language(info: dict) -> Optional[str]:
+    """从 yt-dlp 元数据中嗅探视频语言线索（best-effort）。"""
+    lang = info.get("language")
+    if isinstance(lang, str) and lang.strip():
+        return _normalize_language_code(lang)
+
+    subtitles = info.get("subtitles")
+    if isinstance(subtitles, dict) and subtitles:
+        for code in subtitles.keys():
+            if isinstance(code, str) and code.strip():
+                return _normalize_language_code(code)
+
+    auto_caps = info.get("automatic_captions")
+    if isinstance(auto_caps, dict) and auto_caps:
+        for code in auto_caps.keys():
+            if isinstance(code, str) and code.strip():
+                return _normalize_language_code(code)
+
+    return None
+
+
+def _normalize_language_code(code: str) -> str:
+    """标准化语言代码为常见的 ISO 639-1 / Whisper 格式。"""
+    c = code.replace("_", "-").strip()
+    low = c.lower()
+    if low in ("zh-hans", "zh-cn", "zh-sg", "chs"):
+        return "zh-CN"
+    if low in ("zh-hant", "zh-tw", "zh-hk", "cht"):
+        return "zh-TW"
+    if low.startswith("zh"):
+        return "zh"
+    if "-" in c:
+        base = c.split("-")[0].lower()
+        if base in (
+            "en", "ja", "ko", "es", "fr", "de", "ru", "it", "pt", "vi", "th",
+            "ar", "id", "hi", "nl", "pl", "tr", "sv", "uk", "cs", "da", "fi",
+            "el", "he", "hu", "no", "ro", "sk", "af", "ca", "bg", "hr", "ms",
+            "fa", "ur", "bn", "ta", "sw",
+        ):
+            return base
+    return c.lower()
 
 
 def _resolve_output_path(info: dict, out_dir: Path) -> Optional[Path]:

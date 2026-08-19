@@ -644,6 +644,7 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
         duration=9.0,
         formats_count=2,
         webpage_url="https://x/v",
+        language="ja",
     )
     monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
 
@@ -656,6 +657,7 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert data["duration"] == 9.0
     assert data["formatsCount"] == 2
     assert data["webpageUrl"] == "https://x/v"
+    assert data["language"] == "ja"
     assert data["reason"] is None and data["detail"] is None
     # 落库：调用一次后历史记录里应能查到此条
     records = client._probe_store.list()
@@ -664,6 +666,7 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert bool(records[0].ok) is True
     assert records[0].title == "P"
     assert records[0].formats_count == 2
+    assert records[0].language == "ja"
 
 
 def test_probe_failure_response(client, monkeypatch):
@@ -699,7 +702,7 @@ def test_probe_rejects_missing_url_422(client):
 
 def test_list_probe_records_default_limit(client, monkeypatch):
     """GET /api/tasks/probe/records 默认 limit=50，按时间倒序。"""
-    fake = ProbeResult(ok=True, title="T", formats_count=1)
+    fake = ProbeResult(ok=True, title="T", formats_count=1, language="en")
     monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
     for i in range(3):
         r = client.post("/api/tasks/probe", json={"url": f"https://x/{i}"})
@@ -715,7 +718,7 @@ def test_list_probe_records_default_limit(client, monkeypatch):
     # 字段对齐前端契约
     assert set(data[0].keys()) == {
         "id", "url", "ok", "title", "extractor", "duration",
-        "formatsCount", "webpageUrl", "reason", "detail", "createdAt",
+        "formatsCount", "webpageUrl", "reason", "detail", "createdAt", "language",
     }
 
 

@@ -20,7 +20,7 @@ class FakeBusinessApi:
         }
 
     async def probe_video(self, url):
-        return {"ok": True, "title": "Demo", "webpageUrl": url}
+        return {"ok": True, "title": "Demo", "webpageUrl": url, "language": "ja"}
 
     async def create_task(self, payload):
         self.created_payload = payload
@@ -57,6 +57,15 @@ class FakeBusinessApi:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_probe_video_tool_returns_language():
+    api = FakeBusinessApi()
+    tools = SubtitleMcpTools(api)
+
+    res = _run(tools.probe_video("https://example.test/video"))
+    assert res["ok"] is True
+    assert res["probe"]["language"] == "ja"
 
 
 def test_start_pipeline_returns_task_id_and_uses_business_contract():
