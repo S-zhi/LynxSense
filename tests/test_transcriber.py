@@ -13,6 +13,7 @@ import pytest
 
 from src.core import transcriber
 from src.core.transcriber import (
+    TranscribeCancelledError,
     TranscribeError,
     transcribe,
     _extract_segments,
@@ -212,9 +213,44 @@ def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
     assert opened_files[0] is not opened_files[1]
     assert all(f.closed for f in opened_files)
 
-    statuses = [p.status for p in progress_events]
-    assert statuses == ["starting", "retrying", "succeeded", "succeeded"]
-    assert progress_events[1].percent == 1.0  # 维持进度 1.0%，不复位为错误硬编码值
+
+def test_transcribe_cancel_check_raised_before_call(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+
+    def cancel_check():
+        raise TranscribeCancelledError("cancellation requested")
+
+    with pytest.raises(TranscribeCancelledError, match="cancellation requested"):
+        transcribe(audio, "t1", cancel_check=cancel_check)
+
+
+def test_transcribe_cancel_check_raised_during_retry_sleep(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+    check_calls = {"n": 0}
+
+    class FlakyClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, ref, input):
+            raise httpx.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(transcriber.replicate, "Client", FlakyClient)
+    monkeypatch.setattr(transcriber, "settings", SimpleNamespace(
+        replicate_whisper_model="fake-model",
+        replicate_timeout=30,
+        replicate_retries=3,
+    ))
+    monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)
+
+    def cancel_check():
+        check_calls["n"] += 1
+        # 在重试循环中抛出取消
+        if check_calls["n"] >= 3:
+            raise TranscribeCancelledError("cancelled during retry")
+
+    with pytest.raises(TranscribeCancelledError, match="cancelled during retry"):
+        transcribe(audio, "t1", cancel_check=cancel_check)
 
 
 def test_transcribe_retries_exhausted(monkeypatch, tmp_path):

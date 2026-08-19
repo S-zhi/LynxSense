@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from src.service import orchestrator
-from src.service.orchestrator import PipelineParams, run_pipeline
+from src.core.transcriber import TranscribeCancelledError
+from src.service.orchestrator import PipelineCancelledError, PipelineParams, run_pipeline
 
 
 def _params():
@@ -433,6 +434,26 @@ def test_pipeline_url_only_download_emits_only_downloading_events(monkeypatch):
     assert statuses[-1] == "SUCCESS"
 
 
+def test_pipeline_transcribing_cancelled_raises_pipeline_cancelled(monkeypatch):
+    """TRANSCRIBING 阶段发生 TranscribeCancelledError 时应转换为 PipelineCancelledError 抛出。"""
+    monkeypatch.setattr(orchestrator, "download_video",
+                        lambda *a, **k: SimpleNamespace(video_path=Path("/d/source.mp4"), title="My Video"))
+    monkeypatch.setattr(orchestrator, "extract_audio",
+                        lambda *a, **k: SimpleNamespace(audio_path=Path("/d/audio.wav")))
+
+    def cancelling_transcribe(*args, **kwargs):
+        cancel_check = kwargs.get("cancel_check")
+        if cancel_check:
+            cancel_check()
+        raise TranscribeCancelledError("transcription cancelled")
+
+    monkeypatch.setattr(orchestrator, "transcribe", cancelling_transcribe)
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda tid: Path("/d/source.mp4"))
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_audio", lambda tid: Path("/d/audio.wav"))
+
+    events = []
+    with pytest.raises(PipelineCancelledError, match="任务已被用户取消"):
+        run_pipeline(_params(), events.append)
 def test_in_memory_cancellation_signal():
     tid = "test_cancel_sig"
     orchestrator.unregister_cancellation_signal(tid)
