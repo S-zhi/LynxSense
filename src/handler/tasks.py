@@ -232,11 +232,12 @@ def create_upload_task(
 
     d = task_dir(rec.id)
     d.mkdir(parents=True, exist_ok=True)
+    dest_part = d / f"{SOURCE_VIDEO_STEM}{ext}.part"
     dest = d / f"{SOURCE_VIDEO_STEM}{ext}"
     written_bytes = 0
     chunk_size = 1024 * 1024  # 1MB
     try:
-        with dest.open("wb") as out:
+        with dest_part.open("wb") as out:
             while True:
                 chunk = file.file.read(chunk_size)
                 if not chunk:
@@ -261,13 +262,13 @@ def create_upload_task(
     finally:
         file.file.close()
 
-    if not dest.exists() or dest.stat().st_size == 0:
+    if not dest_part.exists() or dest_part.stat().st_size == 0:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
         release_lock(rec.id)
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
 
-    duration_sec = probe_duration(dest, settings.ffprobe_bin)
+    duration_sec = probe_duration(dest_part, settings.ffprobe_bin)
     if duration_sec is None:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
@@ -286,6 +287,8 @@ def create_upload_task(
             status_code=400,
             detail=f"视频时长 ({duration_sec / 60:.1f} 分钟) 超过最大限制 ({settings.max_video_minutes} 分钟)",
         )
+
+    dest_part.replace(dest)
 
     enqueue_pipeline(rec.id)
     return to_out(store.get(rec.id) or rec)

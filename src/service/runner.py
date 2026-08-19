@@ -26,7 +26,7 @@ from src.service.orchestrator import (
     set_cancelled_signal,
     unregister_cancellation_signal,
 )
-from src.service.asset_resolver import AssetResolver, ResourceError
+from src.service.asset_resolver import AssetResolver, ResourceError, ResourceState
 from src.store import STATUSES, TaskStore, TranslationEngineStore
 
 logger = logging.getLogger(__name__)
@@ -200,11 +200,25 @@ def enqueue_pipeline(task_id: str) -> None:
 
 
 def recover_interrupted_tasks() -> list[str]:
-    """服务启动时重新提交未完成任务，避免任务永久停留在处理中。"""
+    """服务启动时重新提交未完成任务，避免任务永久停留在处理中。
+
+    对于 upload 模式且缺少有效源视频文件的任务，直接置为 FAILED 并跳过重投。
+    """
     recovered: list[str] = []
     for rec in _store.list():
         if rec.status not in _RECOVERABLE_STATUSES:
             continue
+        if rec.source_type == "upload":
+            state, _, msg = AssetResolver.resolve_source(rec.id)
+            if state != ResourceState.AVAILABLE:
+                _store.update(
+                    rec.id,
+                    status="FAILED",
+                    error="上传源文件缺失或损坏",
+                    error_code="resource_error",
+                )
+                logger.warning("恢复中断任务时发现上传源文件缺失或损坏，标记为 FAILED: task=%s, msg=%s", rec.id, msg)
+                continue
         enqueue_pipeline(rec.id)
         recovered.append(rec.id)
     return recovered
