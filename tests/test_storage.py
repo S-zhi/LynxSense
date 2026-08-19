@@ -228,6 +228,56 @@ def test_cleanup_respects_kind_filter_and_keeps_task(client):
     assert not d.exists()
 
 
+def test_cleanup_partial_downgrades_resource_status(client):
+    """部分清理删除成品 output 后，任务联动降级为 MISSING 且 outputs 置空。"""
+    store = client._store
+    cid = _seed_task(
+        client, store, title="degrade",
+        status="SUCCESS", source_bytes=200, audio_bytes=300, srt_bytes=40, output_bytes=800,
+    )
+
+    # 清理 output 类别
+    res = _post_cleanup(client, taskIds=[cid], kinds=["output"])
+    assert res["deletedTasks"] == 0
+    assert len(res["partial"]) == 1
+
+    # 验证 DB 记录已降级为 MISSING
+    rec = store.get(cid)
+    assert rec is not None
+    assert rec.resource_status == "MISSING"
+
+    # API 接口响应中 resourceStatus 为 MISSING，outputs 为 None
+    out = client.get(f"/api/tasks/{cid}").json()
+    assert out["resourceStatus"] == "MISSING"
+    assert out["outputs"] is None
+
+
+def test_cleanup_full_task_calls_mark_resource_missing(client, monkeypatch):
+    """整任务清理会在 store.delete 前先调用 _mark_resource_missing 标记资源丢失。"""
+    store = client._store
+    cid = _seed_task(
+        client, store, title="full_clean",
+        status="SUCCESS", source_bytes=200, audio_bytes=300, srt_bytes=40, output_bytes=800,
+    )
+
+    calls = []
+
+    def mock_mark(store_arg, task_id_arg, reason_arg):
+        calls.append((task_id_arg, reason_arg))
+        rec = store_arg.get(task_id_arg)
+        if rec:
+            store_arg.update(task_id_arg, resource_status="MISSING", error=reason_arg)
+
+    monkeypatch.setattr(storage_routes, "_mark_resource_missing", mock_mark)
+
+    res = _post_cleanup(client, taskIds=[cid])
+    assert res["deletedTasks"] == 1
+    assert len(calls) == 1
+    assert calls[0][0] == cid
+    assert calls[0][1] == "资源已删除"
+    assert store.get(cid) is None
+
+
 def test_cleanup_re_validates_status_before_delete(client, monkeypatch):
     """预览与执行之间状态可能变化；执行时再校验一次 RUNNING。"""
     store = client._store

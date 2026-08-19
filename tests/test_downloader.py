@@ -38,6 +38,14 @@ def make_fake_ydl(on_extract):
     return _FakeYDL
 
 
+@pytest.fixture(autouse=True)
+def _reset_probe_cache():
+    """每个单测运行前自动清空探针缓存，规避单测间因相同伪 URL 产生的跨测试缓存影响。"""
+    clear_probe_cache()
+    yield
+    clear_probe_cache()
+
+
 @pytest.fixture
 def task_path(tmp_path, monkeypatch):
     """隔离任务目录：patch downloader.ensure_task_dir 指向临时目录。"""
@@ -218,6 +226,7 @@ from src.core.downloader import (
     _count_formats,
     _is_probe_url,
     _probe_failure_reason,
+    clear_probe_cache,
     probe_video,
 )
 
@@ -510,3 +519,76 @@ def test_probe_dataclass_defaults():
     assert r.webpage_url is None
     assert r.reason is None
     assert r.detail is None
+    assert r.cached is False
+
+
+def test_probe_video_ttl_caching(monkeypatch):
+    """probe_video 针对相同 URL 支持 TTL 内缓存，再次调用返回 cached=True 且不重新调 YoutubeDL。"""
+    clear_probe_cache()
+    calls = []
+
+    def on_extract(url, download, opts):
+        calls.append(url)
+        return {"title": "Cached Title", "formats": [{}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+
+    url = "https://example.com/video1"
+    res1 = probe_video(url, ttl_sec=60)
+    assert res1.ok is True
+    assert res1.title == "Cached Title"
+    assert res1.cached is False
+    assert len(calls) == 1
+
+    # 再次探测同一 URL，命中缓存
+    res2 = probe_video(url, ttl_sec=60)
+    assert res2.ok is True
+    assert res2.title == "Cached Title"
+    assert res2.cached is True
+    assert len(calls) == 1  # 依然是 1，未调 extract_info
+
+    # 强制刷新 force_refresh=True 绕过缓存
+    res3 = probe_video(url, ttl_sec=60, force_refresh=True)
+    assert res3.ok is True
+    assert res3.cached is False
+    assert len(calls) == 2
+
+    # 清空缓存后再次调用
+    clear_probe_cache()
+    res4 = probe_video(url, ttl_sec=60)
+    assert res4.ok is True
+    assert res4.cached is False
+    assert len(calls) == 3
+
+
+def test_probe_video_ttl_expiry(monkeypatch):
+    """TTL 过期后，probe_video 重新调用 YoutubeDL。"""
+    import time
+    clear_probe_cache()
+    calls = []
+
+    def on_extract(url, download, opts):
+        calls.append(url)
+        return {"title": "Expiry Test", "formats": [{}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+
+    now = 1000.0
+    monkeypatch.setattr(time, "time", lambda: now)
+
+    url = "https://example.com/video2"
+    res1 = probe_video(url, ttl_sec=10)
+    assert res1.cached is False
+    assert len(calls) == 1
+
+    # 在 TTL 内 (now = 1005s)
+    now = 1005.0
+    res2 = probe_video(url, ttl_sec=10)
+    assert res2.cached is True
+    assert len(calls) == 1
+
+    # 超过 TTL (now = 1011s)
+    now = 1011.0
+    res3 = probe_video(url, ttl_sec=10)
+    assert res3.cached is False
+    assert len(calls) == 2

@@ -109,15 +109,24 @@ def _ensure_translation_engine(
         raise HTTPException(status_code=422, detail="翻译引擎尚未通过可用性检测")
 
 
-def scan_missing_terminal(store: TaskStore, *, data_dir=None) -> List[str]:
+def scan_missing_terminal(
+    store: TaskStore, *, task_id: Optional[str] = None, data_dir=None
+) -> List[str]:
     """扫描终态 SUCCESS 任务，把磁盘产物已丢失的降级为 MISSING。
 
     幂等：已为 MISSING 的不再处理；运行中任务（status != SUCCESS）忽略。
-    返回被降级的 task_id 列表，便于启动日志 / 测试断言。
+    若指定 task_id，则仅针对该任务执行单任务降级检测。
+    返回被降级的 task_id 列表，便于启动日志 / 测试断言 / 资源清理。
     """
     data_dir = data_dir if data_dir is not None else settings.data_dir
     downgraded: List[str] = []
-    for rec in store.list():
+    if task_id is not None:
+        target = store.get(task_id)
+        recs = [target] if target is not None else []
+    else:
+        recs = store.list()
+
+    for rec in recs:
         if rec.status != "SUCCESS":
             continue
         if rec.resource_status == RESOURCE_STATUS_MISSING:
@@ -330,6 +339,7 @@ def probe_task(
         webpageUrl=result.webpage_url,
         reason=result.reason,
         detail=result.detail,
+        cached=result.cached,
     )
 
 

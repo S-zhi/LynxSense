@@ -372,3 +372,59 @@ def test_write_locks_leak_cleanup(client, monkeypatch):
 
     # 验证锁字典已经被清除了该任务的锁，防止内存泄漏
     assert new_tid not in _write_locks
+
+
+def test_storage_partial_cleanup_releases_lock(client, monkeypatch):
+    """测试 storage/cleanup partial 模式清理时也会释放写锁。"""
+    from src.handler.subtitle_editor import _write_locks, _lock_for
+    from src.handler import storage as storage_routes
+
+    def fake_dir(tid: str):
+        return client._tmp / tid
+    monkeypatch.setattr(storage_routes, "task_dir", fake_dir)
+
+    task_id = client._tid
+    client._store.update(task_id, status="SUCCESS", progress=100)
+
+    # 确保任务目录下有 audio 文件供 partial 清理匹配
+    d = client._tmp / task_id
+    from src.config import AUDIO_FILENAME
+    (d / AUDIO_FILENAME).write_bytes(b"AUDIO")
+
+    _lock_for(task_id)
+    assert task_id in _write_locks
+
+    # 执行 partial 清理（例如只清理 audio）
+    r_cleanup = client.post("/api/storage/cleanup", json={"taskIds": [task_id], "kinds": ["audio"]})
+    assert r_cleanup.status_code == 200
+    assert r_cleanup.json()["deletedTasks"] == 0
+    assert task_id not in _write_locks
+
+
+def test_write_locks_capacity_pruning(monkeypatch):
+    """测试锁字典在达到容量上限时自动清理未占用的闲置锁（ref_count <= 0）。"""
+    from src.handler.subtitle_editor import _write_locks, _lock_for, release_lock, task_write_lock
+
+    # 设置小容量上限便于测试
+    monkeypatch.setattr("src.handler.subtitle_editor._MAX_WRITE_LOCKS", 3)
+
+    # 清理可能残留的锁
+    for k in list(_write_locks.keys()):
+        release_lock(k)
+
+    _lock_for("t1")
+    _lock_for("t2")
+    _lock_for("t3")
+    assert len(_write_locks) == 3
+
+    # 使用 task_write_lock 使 t2 具有活跃 ref_count
+    with task_write_lock("t2"):
+        # 再次获取新任务锁，触发容量清理，t1/t3（ref_count <= 0）应被清理，t2（活跃持有中）与 t4 应保留
+        _lock_for("t4")
+        assert "t1" not in _write_locks
+        assert "t3" not in _write_locks
+        assert "t2" in _write_locks
+        assert "t4" in _write_locks
+
+    for k in list(_write_locks.keys()):
+        release_lock(k)

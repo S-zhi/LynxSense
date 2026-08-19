@@ -31,6 +31,15 @@ class TranscribeError(RuntimeError):
     """语音识别阶段失败。"""
 
 
+class TranscribeCancelledError(RuntimeError):
+    """语音识别已被取消。"""
+
+
+def _do_cancel_check(cancel_check: Optional[Callable[[], None]]) -> None:
+    if cancel_check is not None:
+        cancel_check()
+
+
 @dataclass
 class TranscribeProgress:
     percent: Optional[float]
@@ -79,6 +88,7 @@ def _run_replicate_with_retry(
     retries: int,
     on_progress: Optional[ProgressHook] = None,
     last_pct: Optional[float] = 1.0,
+    cancel_check: Optional[Callable[[], None]] = None,
 ):
     """调用 Replicate，超时/网络错误时按退避重试（应对模型冷启动）。
 
@@ -87,6 +97,7 @@ def _run_replicate_with_retry(
     - build_input 每次调用返回全新 input（本地文件 handle 用过即废，必须重开）。
     - 重试时保持 last_pct 与 RETRYING 状态，不硬重置进度为 1.0。
     """
+    _do_cancel_check(cancel_check)
     client = replicate.Client(
         api_token=os.getenv("REPLICATE_API_TOKEN"),
         timeout=httpx.Timeout(float(timeout), connect=30.0),
@@ -94,9 +105,12 @@ def _run_replicate_with_retry(
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
+            _do_cancel_check(cancel_check)
             input_payload = build_input()
             try:
-                return client.run(model_ref, input=input_payload)
+                res = client.run(model_ref, input=input_payload)
+                _do_cancel_check(cancel_check)
+                return res
             finally:
                 audio_file = input_payload.get("audio_path")
                 close = getattr(audio_file, "close", None)
@@ -111,10 +125,20 @@ def _run_replicate_with_retry(
                 backoff = min(10 * 2 ** (attempt - 1), 60)  # 10s, 20s, 40s, 上限 60s
                 if on_progress is not None:
                     _safe_callback(on_progress, last_pct, "retrying")  # 保持上次进度，发送重试状态
-                time.sleep(backoff)
+                step = 0.5
+                elapsed = 0.0
+                while elapsed < backoff:
+                    _do_cancel_check(cancel_check)
+                    sleep_time = min(step, backoff - elapsed)
+                    time.sleep(sleep_time)
+                    elapsed += sleep_time
+                _do_cancel_check(cancel_check)
         except Exception as e:  # 模型报错 / 鉴权等非瞬时错误，不重试
+            if isinstance(e, TranscribeCancelledError) or type(e).__name__ == "PipelineCancelledError":
+                raise
             raise TranscribeError(f"Replicate 语音识别失败: {e}") from e
 
+    _do_cancel_check(cancel_check)
     raise TranscribeError(
         f"Replicate 语音识别多次超时失败（已重试 {retries} 次；"
         f"冷启动可调大 SUBTRANS_REPLICATE_TIMEOUT）: {last_exc}"
@@ -128,6 +152,7 @@ def transcribe(
     *,
     language: Optional[str] = None,
     model_name: Optional[str] = None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> TranscribeResult:
     """把音频识别为原文字幕 data/{task_id}/original.srt。
 
@@ -161,6 +186,7 @@ def transcribe(
             raise TranscribeError(f"输入音频不存在: {p}")
         audio_str = str(p)
 
+    _do_cancel_check(cancel_check)
     logger.info("开始识别(Replicate): task=%s model=%s lang=%s", task_id, model, lang)
 
     def build_input() -> dict:
@@ -180,7 +206,9 @@ def transcribe(
         timeout=settings.replicate_timeout,
         retries=settings.replicate_retries,
         on_progress=on_progress,
+        cancel_check=cancel_check,
     )
+    _do_cancel_check(cancel_check)
 
     if on_progress is not None:
         _safe_callback(on_progress, 95.0, "succeeded")
