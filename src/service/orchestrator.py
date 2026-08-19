@@ -10,6 +10,7 @@ Worker 层把 on_event 接到「写 SQLite + 发 SSE」即可。
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -18,11 +19,39 @@ from src.config import SOURCE_VIDEO_STEM, task_dir
 from src.core.audio_extractor import extract_audio
 from src.core.downloader import download_video
 from src.core.subtitle_burner import burn_subtitles
-from src.core.transcriber import transcribe
+from src.core.transcriber import TranscribeCancelledError, transcribe
 from src.core.translator import translate_srt
 from src.service.asset_resolver import AssetResolver, ResourceError, ResourceState
 
 logger = logging.getLogger(__name__)
+
+_cancel_events: dict[str, threading.Event] = {}
+_cancel_events_lock = threading.Lock()
+
+
+def register_cancellation_signal(task_id: str, is_cancelled: bool = False) -> threading.Event:
+    with _cancel_events_lock:
+        ev = _cancel_events.setdefault(task_id, threading.Event())
+        if is_cancelled:
+            ev.set()
+        return ev
+
+
+def unregister_cancellation_signal(task_id: str) -> None:
+    with _cancel_events_lock:
+        _cancel_events.pop(task_id, None)
+
+
+def set_cancelled_signal(task_id: str) -> None:
+    with _cancel_events_lock:
+        ev = _cancel_events.setdefault(task_id, threading.Event())
+        ev.set()
+
+
+def is_cancelled_signal(task_id: str) -> bool:
+    with _cancel_events_lock:
+        ev = _cancel_events.get(task_id)
+        return ev.is_set() if ev is not None else False
 
 
 class PipelineError(RuntimeError):
@@ -78,10 +107,7 @@ def _scale(lo: int, hi: int, pct: Optional[float]) -> int:
 
 
 def _check_cancelled(task_id: str) -> None:
-    from src.store import TaskStore
-    from src.config import settings
-    rec = TaskStore(settings.db_path).get(task_id)
-    if rec is not None and rec.status == "CANCELLED":
+    if is_cancelled_signal(task_id):
         raise PipelineCancelledError("任务已被用户取消")
 
 
@@ -181,12 +207,16 @@ def run_pipeline(
             original_srt_path = AssetResolver.require_original_srt(tid)
             emit("TRANSCRIBING", 65)  # 服务重启后复用已完成的识别结果
         else:
-            tr = transcribe(
-                audio_path, tid,
-                language=params.source_lang,
-                model_name=params.model,
-                on_progress=step_cb("TRANSCRIBING"),
-            )
+            try:
+                tr = transcribe(
+                    audio_path, tid,
+                    language=params.source_lang,
+                    model_name=params.model,
+                    on_progress=step_cb("TRANSCRIBING"),
+                    cancel_check=lambda: _check_cancelled(tid),
+                )
+            except TranscribeCancelledError as e:
+                raise PipelineCancelledError("任务已被用户取消") from e
             original_srt_path = AssetResolver.require_original_srt(tid)
 
         emit("TRANSLATING", 65)

@@ -196,3 +196,37 @@ def test_shutdown_executor_clears_state():
     runner.shutdown_executor(wait=True)
     assert runner._executor is None
     assert runner._current_max_workers == 0
+
+
+def test_on_event_db_write_throttling(store, monkeypatch):
+    tid = _make_task(store)
+
+    update_calls = []
+    orig_update = store.update
+
+    def tracked_update(*args, **kwargs):
+        update_calls.append((args, kwargs))
+        return orig_update(*args, **kwargs)
+
+    monkeypatch.setattr(store, "update", tracked_update)
+
+    def fake_pipeline(params, on_event, *, api_key=None):
+        # DOWNLOADING (status changed -> write 1)
+        on_event(PipelineEvent("DOWNLOADING", 1, "DOWNLOADING"))
+        # DOWNLOADING 2..9 (same decade, same status -> skipped)
+        for p in range(2, 10):
+            on_event(PipelineEvent("DOWNLOADING", p, "DOWNLOADING"))
+        # DOWNLOADING 10 (decade changed 0 -> 1 -> write 2)
+        on_event(PipelineEvent("DOWNLOADING", 10, "DOWNLOADING"))
+        # DOWNLOADING 11..19 (same decade 1 -> skipped)
+        for p in range(11, 20):
+            on_event(PipelineEvent("DOWNLOADING", p, "DOWNLOADING"))
+        # SUCCESS 100 (terminal & status changed -> write 3)
+        on_event(PipelineEvent("SUCCESS", 100, None, title="Done"))
+
+    monkeypatch.setattr(runner, "run_pipeline", fake_pipeline)
+    runner._run(tid)
+
+    # Exactly 3 DB updates triggered instead of 20+
+    assert len(update_calls) == 3
+    assert store.get(tid).status == "SUCCESS"
