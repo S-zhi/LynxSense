@@ -226,10 +226,18 @@ class Settings:
         "SUBTRANS_WHISPER_MODEL",
         "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969",
     )
-    # Replicate 推理超时（含冷启动，最长可能几分钟）
+    # Replicate 单次 HTTP 请求超时；prediction 的排队/运行通过短轮询跟踪
     replicate_timeout: int = int(os.getenv("SUBTRANS_REPLICATE_TIMEOUT", "1800"))
-    # Replicate 超时/网络错误的重试次数（冷启动常见）
+    # Replicate 创建/状态查询发生网络错误时的总尝试次数
     replicate_retries: int = int(os.getenv("SUBTRANS_REPLICATE_RETRIES", "3"))
+    # 网络错误后再次请求的间隔；默认 1 小时，避免重复创建长时间排队的任务
+    replicate_retry_interval: float = float(
+        os.getenv("SUBTRANS_REPLICATE_RETRY_INTERVAL", "3600")
+    )
+    # 已取得 prediction ID 后的状态轮询间隔；轮询不会创建新任务
+    replicate_poll_interval: float = float(
+        os.getenv("SUBTRANS_REPLICATE_POLL_INTERVAL", "30")
+    )
 
     # --- ④ 翻译（旧版 DeepSeek 兼容配置；新配置位于 SQLite）---
     deepseek_api_key: Optional[str] = (

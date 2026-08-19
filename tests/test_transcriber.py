@@ -1,6 +1,6 @@
 """③ 语音识别（Replicate）单测。
 
-mock replicate.run：验证 SRT 解析（标准/紧凑格式）、语言参数传递、错误包装、进度回调。
+mock prediction create/get：验证 SRT 解析、状态轮询、恢复、错误包装和进度回调。
 """
 
 from __future__ import annotations
@@ -28,20 +28,34 @@ def _setup(tmp_path, monkeypatch):
     monkeypatch.setenv("REPLICATE_API_TOKEN", "fake-token")
 
 
+def _prediction(*, status="succeeded", output=None, prediction_id="pred_1", error=None):
+    return SimpleNamespace(id=prediction_id, status=status, output=output, error=error)
+
+
 def _mock_replicate(monkeypatch, output):
-    """mock replicate.Client，使 Client(...).run(ref, input=...) 返回指定 output。
+    """mock replicate.Client，使 predictions.create 返回成功结果。
 
     返回一个 captured dict，captured["input"] 是最后一次传入的 input。
     """
-    captured: dict = {"input": None}
+    captured: dict = {"input": None, "create_calls": 0, "get_calls": []}
+
+    class FakePredictions:
+        def create(self, *, version, input, wait):
+            captured["input"] = input
+            captured["create_calls"] += 1
+            assert wait is False
+            return _prediction(output=output)
+
+        def get(self, prediction_id):
+            captured["get_calls"].append(prediction_id)
+            return _prediction(output=output, prediction_id=prediction_id)
+
+        def cancel(self, prediction_id):
+            captured["canceled"] = prediction_id
 
     class FakeClient:
         def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
-            captured["input"] = input
-            return output
+            self.predictions = FakePredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", FakeClient)
     return captured
@@ -155,12 +169,13 @@ def test_transcribe_progress_called(monkeypatch, tmp_path):
 def test_transcribe_error_wrapped(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
 
+    class FailPredictions:
+        def create(self, **kwargs):
+            raise RuntimeError("API down")
+
     class FailClient:
         def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
-            raise RuntimeError("API down")
+            self.predictions = FailPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", FailClient)
     with pytest.raises(TranscribeError, match="API down"):
@@ -187,14 +202,15 @@ def test_transcribe_no_api_token(monkeypatch, tmp_path):
 def test_transcribe_http_status_error_codes(monkeypatch, tmp_path, status_code, expected_code):
     audio = make_fake_audio(tmp_path)
 
-    class StatusErrorClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
+    class StatusErrorPredictions:
+        def create(self, **kwargs):
             request = httpx.Request("POST", "https://api.replicate.com/v1/predictions")
             response = httpx.Response(status_code, request=request)
             raise httpx.HTTPStatusError("HTTP error", request=request, response=response)
+
+    class StatusErrorClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = StatusErrorPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", StatusErrorClient)
     with pytest.raises(TranscribeError) as exc_info:
@@ -205,14 +221,15 @@ def test_transcribe_http_status_error_codes(monkeypatch, tmp_path, status_code, 
 def test_transcribe_replicate_error_code(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
 
-    class ReplicateErrorClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
+    class ReplicateErrorPredictions:
+        def create(self, **kwargs):
             raise transcriber.replicate.exceptions.ReplicateError(
                 title="Unauthorized", status=401, detail="Invalid token"
             )
+
+    class ReplicateErrorClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = ReplicateErrorPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", ReplicateErrorClient)
     with pytest.raises(TranscribeError) as exc_info:
@@ -223,13 +240,13 @@ def test_transcribe_replicate_error_code(monkeypatch, tmp_path):
 def test_transcribe_model_error_code(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
 
+    class ModelErrorPredictions:
+        def create(self, **kwargs):
+            return _prediction(status="failed", error="Model failed processing")
+
     class ModelErrorClient:
         def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
-            prediction = SimpleNamespace(error="Model failed processing")
-            raise transcriber.replicate.exceptions.ModelError(prediction)
+            self.predictions = ModelErrorPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", ModelErrorClient)
     with pytest.raises(TranscribeError) as exc_info:
@@ -240,30 +257,33 @@ def test_transcribe_model_error_code(monkeypatch, tmp_path):
 # ---------- 冷启动重试 ----------
 
 def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
-    """第一次读超时（冷启动），重试后成功，验证重试期间发送 retrying 状态。"""
+    """创建请求第一次超时，一小时策略等待后才再次创建。"""
     audio = make_fake_audio(tmp_path)
     fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
     calls = {"n": 0}
     opened_files = []
     progress_events = []
 
-    class FlakyClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
+    class FlakyPredictions:
+        def create(self, *, version, input, wait):
             opened_files.append(input["audio_path"])
             assert input["audio_path"].closed is False
             calls["n"] += 1
             if calls["n"] == 1:
                 raise httpx.ReadTimeout("read timed out")
-            return {"srt_file": "https://x/sub.srt"}
+            return _prediction(output={"srt_file": "https://x/sub.srt"})
+
+    class FlakyClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = FlakyPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", FlakyClient)
     monkeypatch.setattr(transcriber, "settings", SimpleNamespace(
         replicate_whisper_model="fake-model",
         replicate_timeout=30,
         replicate_retries=2,
+        replicate_retry_interval=3600,
+        replicate_poll_interval=30,
     ))
     monkeypatch.setattr(transcriber.httpx, "get", lambda url, timeout: SimpleNamespace(
         text=fake_srt, raise_for_status=lambda: None))
@@ -271,7 +291,8 @@ def test_transcribe_retries_on_timeout_then_succeeds(monkeypatch, tmp_path):
 
     res = transcribe(audio, "t1", on_progress=progress_events.append)
     assert res.segment_count == 1
-    assert calls["n"] == 2  # 第一次超时 + 第二次成功
+    assert calls["n"] == 2
+    assert any(event.status == "retrying" for event in progress_events)
     assert len(opened_files) == 2
     assert opened_files[0] is not opened_files[1]
     assert all(f.closed for f in opened_files)
@@ -291,18 +312,21 @@ def test_transcribe_cancel_check_raised_during_retry_sleep(monkeypatch, tmp_path
     audio = make_fake_audio(tmp_path)
     check_calls = {"n": 0}
 
+    class FlakyPredictions:
+        def create(self, **kwargs):
+            raise httpx.ReadTimeout("read timed out")
+
     class FlakyClient:
         def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
-            raise httpx.ReadTimeout("read timed out")
+            self.predictions = FlakyPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", FlakyClient)
     monkeypatch.setattr(transcriber, "settings", SimpleNamespace(
         replicate_whisper_model="fake-model",
         replicate_timeout=30,
         replicate_retries=3,
+        replicate_retry_interval=3600,
+        replicate_poll_interval=30,
     ))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)
 
@@ -321,26 +345,175 @@ def test_transcribe_retries_exhausted(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
     opened_files = []
 
-    class AlwaysTimeout:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, ref, input):
+    class AlwaysTimeoutPredictions:
+        def create(self, **kwargs):
+            input = kwargs["input"]
             opened_files.append(input["audio_path"])
             assert input["audio_path"].closed is False
             raise httpx.ReadTimeout("read timed out")
+
+    class AlwaysTimeout:
+        def __init__(self, *args, **kwargs):
+            self.predictions = AlwaysTimeoutPredictions()
 
     monkeypatch.setattr(transcriber.replicate, "Client", AlwaysTimeout)
     monkeypatch.setattr(transcriber, "settings", SimpleNamespace(
         replicate_whisper_model="fake-model",
         replicate_timeout=30,
         replicate_retries=2,
+        replicate_retry_interval=3600,
+        replicate_poll_interval=30,
     ))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)
 
-    with pytest.raises(TranscribeError, match="多次超时") as exc_info:
+    with pytest.raises(TranscribeError, match="多次网络失败") as exc_info:
         transcribe(audio, "t1")
     assert exc_info.value.code == "network_error"
     assert len(opened_files) == 2
     assert opened_files[0] is not opened_files[1]
     assert all(f.closed for f in opened_files)
+
+
+def test_transcribe_waiting_prediction_is_polled_without_recreate(monkeypatch, tmp_path):
+    """starting/processing 只轮询同一个 prediction，不提交第二个任务。"""
+    audio = make_fake_audio(tmp_path)
+    fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
+    create_calls = []
+    get_calls = []
+    queued = [
+        _prediction(status="starting", prediction_id="pred_waiting"),
+        _prediction(status="processing", prediction_id="pred_waiting"),
+        _prediction(
+            status="succeeded",
+            prediction_id="pred_waiting",
+            output={"srt_file": "https://x/sub.srt"},
+        ),
+    ]
+
+    class WaitingPredictions:
+        def create(self, **kwargs):
+            create_calls.append(kwargs)
+            return queued.pop(0)
+
+        def get(self, prediction_id):
+            get_calls.append(prediction_id)
+            return queued.pop(0)
+
+    class WaitingClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = WaitingPredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", WaitingClient)
+    monkeypatch.setattr(transcriber.httpx, "get", lambda url, timeout: SimpleNamespace(
+        text=fake_srt, raise_for_status=lambda: None))
+    monkeypatch.setattr(transcriber.time, "sleep", lambda seconds: None)
+
+    result = transcribe(audio, "t1")
+
+    assert result.segment_count == 1
+    assert len(create_calls) == 1
+    assert get_calls == ["pred_waiting", "pred_waiting"]
+    assert not (tmp_path / "replicate_prediction.json").exists()
+
+
+def test_transcribe_get_timeout_retries_same_prediction(monkeypatch, tmp_path):
+    """状态查询超时后只重查已有 ID，绝不能重新 create。"""
+    audio = make_fake_audio(tmp_path)
+    fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
+    calls = {"create": 0, "get": []}
+
+    class FlakyGetPredictions:
+        def create(self, **kwargs):
+            calls["create"] += 1
+            return _prediction(status="starting", prediction_id="pred_same")
+
+        def get(self, prediction_id):
+            calls["get"].append(prediction_id)
+            if len(calls["get"]) == 1:
+                raise httpx.ReadTimeout("get timed out")
+            return _prediction(
+                prediction_id=prediction_id,
+                output={"srt_file": "https://x/sub.srt"},
+            )
+
+    class FlakyGetClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = FlakyGetPredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", FlakyGetClient)
+    monkeypatch.setattr(transcriber.httpx, "get", lambda url, timeout: SimpleNamespace(
+        text=fake_srt, raise_for_status=lambda: None))
+    monkeypatch.setattr(transcriber.time, "sleep", lambda seconds: None)
+
+    result = transcribe(audio, "t1")
+
+    assert result.segment_count == 1
+    assert calls == {"create": 1, "get": ["pred_same", "pred_same"]}
+
+
+def test_transcribe_cancel_active_prediction(monkeypatch, tmp_path):
+    """本地取消时同步取消远端 prediction，并清理恢复状态。"""
+    audio = make_fake_audio(tmp_path)
+    canceled = []
+    checks = {"count": 0}
+
+    class ActivePredictions:
+        def create(self, **kwargs):
+            return _prediction(status="starting", prediction_id="pred_cancel")
+
+        def cancel(self, prediction_id):
+            canceled.append(prediction_id)
+
+    class ActiveClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = ActivePredictions()
+
+    def cancel_check():
+        checks["count"] += 1
+        if checks["count"] >= 4:
+            raise TranscribeCancelledError("cancel active")
+
+    monkeypatch.setattr(transcriber.replicate, "Client", ActiveClient)
+
+    with pytest.raises(TranscribeCancelledError, match="cancel active"):
+        transcribe(audio, "t1", cancel_check=cancel_check)
+
+    assert canceled == ["pred_cancel"]
+    assert not (tmp_path / "replicate_prediction.json").exists()
+
+
+def test_transcribe_resumes_persisted_prediction_after_restart(monkeypatch, tmp_path):
+    """任务恢复时读取已保存 ID，直接查询而不重新创建 prediction。"""
+    audio = make_fake_audio(tmp_path)
+    fake_srt = "1\n0:00:00.060 --> 0:00:01.000\nHello\n"
+    model_ref = transcriber.settings.replicate_whisper_model
+    (tmp_path / "replicate_prediction.json").write_text(
+        '{"prediction_id":"pred_saved","model_ref":"' + model_ref + '","status":"starting"}',
+        encoding="utf-8",
+    )
+    calls = {"create": 0, "get": []}
+
+    class ResumePredictions:
+        def create(self, **kwargs):
+            calls["create"] += 1
+            raise AssertionError("已有 prediction ID 时不应重新创建")
+
+        def get(self, prediction_id):
+            calls["get"].append(prediction_id)
+            return _prediction(
+                prediction_id=prediction_id,
+                output={"srt_file": "https://x/sub.srt"},
+            )
+
+    class ResumeClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = ResumePredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", ResumeClient)
+    monkeypatch.setattr(transcriber.httpx, "get", lambda url, timeout: SimpleNamespace(
+        text=fake_srt, raise_for_status=lambda: None))
+
+    result = transcribe(audio, "t1")
+
+    assert result.segment_count == 1
+    assert calls == {"create": 0, "get": ["pred_saved"]}
