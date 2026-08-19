@@ -172,3 +172,27 @@ def test_recover_interrupted_tasks_requeues_only_non_terminal(store, monkeypatch
 
     assert set(recovered) == {running, pending}
     assert {args for _, args in submitted} == {(running,), (pending,)}
+
+
+def test_get_executor_dynamic_worker_update(monkeypatch):
+    runner.shutdown_executor(wait=True)
+    monkeypatch.setenv("SUBTRANS_WORKERS", "3")
+    exec1 = runner.get_executor()
+    assert exec1._max_workers == 3
+
+    # 修改环境变量为 5，再次 get_executor 自动平滑重构
+    monkeypatch.setenv("SUBTRANS_WORKERS", "5")
+    exec2 = runner.get_executor()
+    assert exec2._max_workers == 5
+    assert exec2 is not exec1
+
+    runner.shutdown_executor(wait=True)
+    assert runner._executor is None
+
+
+def test_shutdown_executor_clears_state():
+    runner.get_executor()
+    assert runner._executor is not None
+    runner.shutdown_executor(wait=True)
+    assert runner._executor is None
+    assert runner._current_max_workers == 0

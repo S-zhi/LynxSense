@@ -21,7 +21,7 @@ from src.config import settings
 from src.handler import health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
 
 from src.handler.deps import get_store
-from src.service.runner import recover_interrupted_tasks
+from src.service.runner import recover_interrupted_tasks, shutdown_executor
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,11 @@ def create_app() -> FastAPI:
         recovered = recover_interrupted_tasks()
         if recovered:
             logger.warning("启动恢复：以下未完成任务已重新入队: %s", recovered)
+
+    @app.on_event("shutdown")
+    def _shutdown_runner() -> None:
+        """关闭应用时通知 runner 线程池退出。"""
+        shutdown_executor(wait=False)
 
     return app
 
