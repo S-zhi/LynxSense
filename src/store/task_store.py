@@ -56,6 +56,7 @@ class TaskRecord:
     created_at: int = 0   # epoch 毫秒
     updated_at: int = 0
     resource_status: str = RESOURCE_STATUS_AVAILABLE  # 产物文件是否在盘
+    error_code: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -107,7 +108,8 @@ class TaskStore:
                     output_subtitle TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
-                    resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'
+                    resource_status TEXT NOT NULL DEFAULT 'AVAILABLE',
+                    error_code TEXT
                 )
                 """
             )
@@ -121,6 +123,8 @@ class TaskStore:
                 conn.execute(
                     "ALTER TABLE tasks ADD COLUMN resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'"
                 )
+            if "error_code" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN error_code TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_created_at "
                 "ON tasks (created_at DESC, id DESC)"

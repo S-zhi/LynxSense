@@ -517,6 +517,7 @@ def _sse_payload(rec) -> str:
         "currentStep": rec.current_step,
         "title": rec.title,
         "error": rec.error,
+        "errorCode": rec.error_code,
         "resourceStatus": to_out(rec).resourceStatus,
         "outputs": to_out(rec).outputs,
     }
