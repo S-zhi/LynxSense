@@ -129,3 +129,64 @@ def test_readiness_reports_invalid_replicate_token(monkeypatch, tmp_path):
     assert result["initialized"] is False
     assert result["checks"]["replicate_api_token"] == "invalid"
     assert "REPLICATE_API_TOKEN（Token 无效或已过期）" in result["missing"]
+
+
+def test_readiness_reports_cached_replicate_check_metadata(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-secret")
+    monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(
+        runtime_check.shutil,
+        "which",
+        lambda command: f"/usr/bin/{command}",
+    )
+    monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: True)
+    monkeypatch.setattr(
+        runtime_check,
+        "query_replicate_balance",
+        lambda: {
+            "status": "unsupported",
+            "authenticated": True,
+            "checkedAt": 1700000000000,
+            "cached": True,
+        },
+    )
+
+    result = runtime_check.build_readiness()
+
+    assert result["ok"] is True
+    assert result["replicate_checked_at"] == 1700000000000
+    assert result["replicate_cached"] is True
+    assert result["checks"]["replicate_checked_at"] == 1700000000000
+    assert result["checks"]["replicate_cached"] is True
+
+
+def test_readiness_handles_unavailable_replicate_check_gracefully(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-secret")
+    monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(
+        runtime_check.shutil,
+        "which",
+        lambda command: f"/usr/bin/{command}",
+    )
+    monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: True)
+    monkeypatch.setattr(
+        runtime_check,
+        "query_replicate_balance",
+        lambda: {
+            "status": "unavailable",
+            "errorCode": "http_429",
+            "checkedAt": 1700000000000,
+            "cached": False,
+        },
+    )
+
+    result = runtime_check.build_readiness()
+
+    assert result["ok"] is True
+    assert result["initialized"] is True
+    assert result["checks"]["replicate_api_token"] == "unavailable"
+    assert result["agent_action"] == "continue"
