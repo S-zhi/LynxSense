@@ -18,7 +18,7 @@ from src.config import SOURCE_VIDEO_STEM, task_dir
 from src.core.audio_extractor import extract_audio
 from src.core.downloader import download_video
 from src.core.subtitle_burner import burn_subtitles
-from src.core.transcriber import transcribe
+from src.core.transcriber import TranscribeCancelledError, transcribe
 from src.core.translator import translate_srt
 from src.service.asset_resolver import AssetResolver, ResourceError, ResourceState
 
@@ -181,12 +181,16 @@ def run_pipeline(
             original_srt_path = AssetResolver.require_original_srt(tid)
             emit("TRANSCRIBING", 65)  # 服务重启后复用已完成的识别结果
         else:
-            tr = transcribe(
-                audio_path, tid,
-                language=params.source_lang,
-                model_name=params.model,
-                on_progress=step_cb("TRANSCRIBING"),
-            )
+            try:
+                tr = transcribe(
+                    audio_path, tid,
+                    language=params.source_lang,
+                    model_name=params.model,
+                    on_progress=step_cb("TRANSCRIBING"),
+                    cancel_check=lambda: _check_cancelled(tid),
+                )
+            except TranscribeCancelledError as e:
+                raise PipelineCancelledError("任务已被用户取消") from e
             original_srt_path = AssetResolver.require_original_srt(tid)
 
         emit("TRANSLATING", 65)
