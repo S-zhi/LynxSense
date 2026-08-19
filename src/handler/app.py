@@ -21,6 +21,7 @@ from src.config import settings
 from src.handler import health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
 
 from src.handler.deps import get_store
+from src.service.retention_scheduler import start_retention_scheduler
 from src.service.runner import recover_interrupted_tasks
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,8 @@ def create_app() -> FastAPI:
         recovered = recover_interrupted_tasks()
         if recovered:
             logger.warning("启动恢复：以下未完成任务已重新入队: %s", recovered)
+
+        start_retention_scheduler()
 
     return app
 
