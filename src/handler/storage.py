@@ -403,6 +403,7 @@ def execute_cleanup(
             remaining = _scan_artifacts(rec.id)
             partial.append(_build_task_storage(updated, remaining))
             deleted_bytes += sum(a.size for a in removed)
+            release_lock(rec.id)
 
     deleted_probes = 0
     if body.cleanupProbeRecordsOlderThanDays is not None:
