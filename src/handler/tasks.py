@@ -268,8 +268,17 @@ def create_upload_task(
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
 
     duration_sec = probe_duration(dest, settings.ffprobe_bin)
+    if duration_sec is None:
+        store.delete(rec.id)
+        shutil.rmtree(d, ignore_errors=True)
+        release_lock(rec.id)
+        raise HTTPException(
+            status_code=400,
+            detail="无法解析视频时长，请确认文件格式正确且 ffprobe 可用",
+        )
+
     max_video_seconds = settings.max_video_minutes * 60
-    if duration_sec is not None and duration_sec > max_video_seconds:
+    if duration_sec > max_video_seconds:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
         release_lock(rec.id)
