@@ -13,6 +13,7 @@ def _settings(tmp_path, *, deepseek_api_key=None):
         deepseek_api_key=deepseek_api_key,
         max_upload_mb=2048,
         max_video_minutes=180,
+        pipeline_workers=2,
     )
 
 
@@ -63,6 +64,7 @@ def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_p
         "full_pipeline": True,
         "hard_burn": True,
         "soft_burn": True,
+        "max_concurrent_tasks": 2,
     }
     assert result["limits"] == {
         "max_upload_mb": 2048,

@@ -22,12 +22,54 @@ from src.store import STATUSES, TaskStore, TranslationEngineStore
 
 logger = logging.getLogger(__name__)
 
-# 线程池 + 独立 store 实例（SQLite WAL 支持多连接并发；各操作短连接）
-_executor = ThreadPoolExecutor(
-    max_workers=settings.pipeline_workers,
-    thread_name_prefix="pipeline",
-)
+# 线程池状态（延迟/懒构造 + 动态扩缩容）
+_executor: ThreadPoolExecutor | None = None
+_current_max_workers: int = 0
+_executor_lock = threading.Lock()
+
 _store = TaskStore(settings.db_path)
+
+
+def get_executor() -> ThreadPoolExecutor:
+    """获取或平滑重构后台任务线程池。
+
+    当 settings.pipeline_workers 发生变化时，关闭旧线程池（等已有任务跑完），
+    并按新配置创建新线程池。
+    """
+    global _executor, _current_max_workers
+    target_workers = settings.pipeline_workers
+    with _executor_lock:
+        if _executor is None or (
+            hasattr(_executor, "_max_workers") and _current_max_workers != target_workers
+        ):
+            old_executor = _executor
+            _executor = ThreadPoolExecutor(
+                max_workers=target_workers,
+                thread_name_prefix="pipeline",
+            )
+            _current_max_workers = target_workers
+            if old_executor is not None and hasattr(old_executor, "shutdown"):
+                try:
+                    old_executor.shutdown(wait=False)
+                except Exception as e:
+                    logger.warning("关闭旧线程池失败: %s", e)
+            logger.info("流水线线程池就绪/已更新: max_workers=%d", target_workers)
+        return _executor
+
+
+def shutdown_executor(wait: bool = True) -> None:
+    """关闭当前线程池。"""
+    global _executor, _current_max_workers
+    with _executor_lock:
+        if _executor is not None:
+            if hasattr(_executor, "shutdown"):
+                try:
+                    _executor.shutdown(wait=wait)
+                except Exception as e:
+                    logger.warning("关闭线程池失败: %s", e)
+            _executor = None
+            _current_max_workers = 0
+            logger.info("流水线线程池已关闭")
 _RECOVERABLE_STATUSES = set(STATUSES) - {"SUCCESS", "FAILED", "CANCELLED"}
 _engine_store = TranslationEngineStore(settings.db_path)
 
@@ -76,7 +118,7 @@ def cancel_pipeline(task_id: str) -> bool:
 
 def enqueue_pipeline(task_id: str) -> None:
     """提交一个任务去后台执行（不阻塞调用方）。"""
-    _executor.submit(_run, task_id)
+    get_executor().submit(_run, task_id)
     logger.info("已入队: %s", task_id)
 
 
