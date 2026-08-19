@@ -162,6 +162,13 @@ class Settings:
     # 后台流水线并发数覆盖（None 表示动态读取 SUBTRANS_WORKERS 或 .env）
     _pipeline_workers_override: Optional[int] = field(default=None, repr=False)
 
+    # API 鉴权 Token（动态读取 SUBTRANS_API_TOKEN 或编辑 .env）
+    @property
+    def api_token(self) -> Optional[str]:
+        _sync_env_file()
+        val = (os.getenv("SUBTRANS_API_TOKEN") or "").strip()
+        return val if val else None
+
     # 后台流水线并发数（方案 A：线程池，动态读取，支持运行期调整 SUBTRANS_WORKERS 或编辑 .env）
     @property
     def pipeline_workers(self) -> int:

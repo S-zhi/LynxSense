@@ -148,6 +148,7 @@ def build_readiness() -> dict[str, Any]:
         "replicate_checked_at": replicate_checked_at,
         "replicate_cached": replicate_cached,
         "checks": {
+            "api_token_required": bool(settings.api_token),
             "replicate_api_token": replicate_check_status,
             "replicate_checked_at": replicate_checked_at,
             "replicate_cached": replicate_cached,

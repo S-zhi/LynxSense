@@ -11,11 +11,12 @@ import json
 import logging
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.config import (
@@ -27,7 +28,7 @@ from src.config import (
     settings,
     task_dir,
 )
-from src.handler.deps import get_probe_store, get_store
+from src.handler.deps import get_probe_store, get_store, require_api_token
 from src.handler.subtitle_editor import release_lock
 from src.handler.tasks import _DELETED_MESSAGE, _mark_resource_missing, scan_missing_terminal
 from src.store import ProbeStore, TaskStore, TaskRecord
@@ -35,6 +36,50 @@ from src.store import ProbeStore, TaskStore, TaskRecord
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/storage", tags=["storage"])
+
+
+class TokenBucketRateLimiter:
+    """按 Client IP 限流的内存 Token Bucket 实现。"""
+
+    def __init__(self, capacity: int = 10, fill_rate_per_sec: float = 10.0 / 60.0) -> None:
+        self.capacity = capacity
+        self.fill_rate = fill_rate_per_sec
+        self._buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, last_time)
+        self._lock = threading.Lock()
+
+    def check(self, ip: str) -> bool:
+        now = time.time()
+        with self._lock:
+            if len(self._buckets) > 1000:
+                self._buckets = {
+                    k: (t, ts) for k, (t, ts) in self._buckets.items() if now - ts < 120
+                }
+            tokens, last_time = self._buckets.get(ip, (float(self.capacity), now))
+            delta = now - last_time
+            tokens = min(float(self.capacity), tokens + delta * self.fill_rate)
+            if tokens >= 1.0:
+                tokens -= 1.0
+                self._buckets[ip] = (tokens, now)
+                return True
+            else:
+                self._buckets[ip] = (tokens, now)
+                return False
+
+    def reset(self) -> None:
+        with self._lock:
+            self._buckets.clear()
+
+
+_cleanup_limiter = TokenBucketRateLimiter(capacity=10, fill_rate_per_sec=10.0 / 60.0)
+
+
+def rate_limit_cleanup(request: Request) -> None:
+    ip = request.client.host if request.client else "127.0.0.1"
+    if not _cleanup_limiter.check(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="请求过于频繁，请稍后再试",
+        )
 
 # 运行中（流水线占用文件）的状态集合。治理时一律跳过，防止误删
 # pipeline 正在读写 / 重新入队需要的中间产物。
@@ -418,7 +463,11 @@ def execute_cleanup(
     )
 
 
-@router.post("/cleanup", response_model=CleanupResponse)
+@router.post(
+    "/cleanup",
+    response_model=CleanupResponse,
+    dependencies=[Depends(require_api_token), Depends(rate_limit_cleanup)],
+)
 def cleanup(
     body: CleanupPreviewRequest,
     store: TaskStore = Depends(get_store),
@@ -439,7 +488,11 @@ def get_retention() -> RetentionOut:
     return _load_retention()
 
 
-@router.put("/retention", response_model=RetentionOut)
+@router.put(
+    "/retention",
+    response_model=RetentionOut,
+    dependencies=[Depends(require_api_token)],
+)
 def put_retention(body: RetentionIn) -> RetentionOut:
     """写入保留策略。若配置了有效天数，异步触发一次清理。"""
     current = _load_retention()
