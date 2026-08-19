@@ -507,6 +507,25 @@ def test_scan_missing_terminal_is_idempotent(client):
     assert rec_after.resource_status == RESOURCE_STATUS_MISSING
 
 
+def test_scan_missing_terminal_single_task_id(client):
+    """传入 task_id 时仅扫描并降级指定任务，不影响其它任务。"""
+    cid1 = client.post("/api/tasks", json=_payload(url="https://x/1")).json()["id"]
+    cid2 = client.post("/api/tasks", json=_payload(url="https://x/2")).json()["id"]
+
+    client._store.update(cid1, status="SUCCESS", progress=100)
+    client._store.update(cid2, status="SUCCESS", progress=100)
+
+    # 仅针对 cid1 扫描
+    marked = tasks_routes.scan_missing_terminal(client._store, task_id=cid1, data_dir=client._tmp)
+    assert marked == [cid1]
+
+    # cid1 被降级，cid2 依然保持 AVAILABLE
+    rec1 = client._store.get(cid1)
+    rec2 = client._store.get(cid2)
+    assert rec1.resource_status == RESOURCE_STATUS_MISSING
+    assert rec2.resource_status == RESOURCE_STATUS_AVAILABLE
+
+
 def test_scan_missing_terminal_skips_non_success(client):
     """非 SUCCESS 终态（如 FAILED）即使文件不存在也不应被降级。"""
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
