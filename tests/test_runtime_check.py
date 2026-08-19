@@ -61,6 +61,7 @@ def test_readiness_reports_capabilities_without_exposing_keys(monkeypatch, tmp_p
     assert result["initialized"] is True
     assert result["capabilities"] == {
         "download": True,
+        "ffprobe_available": True,
         "full_pipeline": True,
         "hard_burn": True,
         "soft_burn": True,
