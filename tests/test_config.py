@@ -5,6 +5,13 @@ from __future__ import annotations
 from src.config import config
 
 
+def test_download_format_defaults_to_480p_cap():
+    assert (
+        config.Settings.__dataclass_fields__["download_format"].default
+        == "bv*[height<=480]+ba/b[height<=480]"
+    )
+
+
 def test_concurrency_defaults(monkeypatch):
     monkeypatch.delenv("SUBTRANS_WORKERS", raising=False)
     monkeypatch.delenv("SUBTRANS_DOWNLOAD_WORKERS", raising=False)

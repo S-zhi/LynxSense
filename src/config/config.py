@@ -222,8 +222,11 @@ class Settings:
         _DEFAULT_CORS_ORIGINS,
     )
 
-    # yt-dlp 格式选择：优先最佳视频+音频，回退到单一最佳流
-    download_format: str = os.getenv("SUBTRANS_DL_FORMAT", "bv*+ba/b")
+    # yt-dlp 格式选择：最高 480P，优先最佳视频+音频，回退到单一最佳流
+    download_format: str = os.getenv(
+        "SUBTRANS_DL_FORMAT",
+        "bv*[height<=480]+ba/b[height<=480]",
+    )
 
     # 合并后的容器格式
     merge_output_format: str = os.getenv("SUBTRANS_DL_CONTAINER", "mp4")
