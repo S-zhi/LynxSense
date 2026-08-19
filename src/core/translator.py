@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 class TranslateError(RuntimeError):
     """翻译阶段失败。"""
 
+    def __init__(self, message: str, *, code: str = "translate_error"):
+        super().__init__(message)
+        self.code = code
+
 
 @dataclass
 class TranslateProgress:
@@ -60,24 +64,33 @@ def _call_deepseek(messages: list, *, api_key: str, base_url: str, model: str, t
     import httpx
 
     url = base_url.rstrip("/") + "/chat/completions"
-    resp = httpx.post(
-        url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": messages,
-            "temperature": 0.3,
-            "stream": False,
-            "max_tokens": 4096,
-        },
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    try:
+        resp = httpx.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": 0.3,
+                "stream": False,
+                "max_tokens": 4096,
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        code = "unauthorized" if status in (401, 403) else "rate_limited" if status == 429 else "upstream_error"
+        raise TranslateError(f"翻译 API 返回 HTTP {status}", code=code) from exc
+    except httpx.RequestError as exc:
+        raise TranslateError("连接翻译 API 超时或网络异常", code="network_error") from exc
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise TranslateError("翻译 API 返回数据格式无法解析", code="invalid_response") from exc
 
 
 def translate_texts(
@@ -99,16 +112,23 @@ def translate_texts(
     if engine_config is not None:
         key = getattr(engine_config, "api_key", None) or (engine_config.get("api_key") if isinstance(engine_config, dict) else None)
     if not key:
-        raise TranslateError("缺少翻译引擎 API Key")
+        raise TranslateError("缺少翻译引擎 API Key", code="missing_api_key")
 
     batch_size = max(1, settings.translate_batch_size)
     out: List[str] = []
     for start in range(0, len(texts), batch_size):
         batch = texts[start:start + batch_size]
-        translated = _translate_with_fallback(batch, source_lang, target_lang, key, engine_config=engine_config)
+        translated = _translate_with_fallback(
+            batch,
+            source_lang,
+            target_lang,
+            key,
+            engine_config=engine_config,
+            on_batch=on_batch,
+            total_count=len(texts),
+            completed_offset=len(out),
+        )
         out.extend(translated)
-        if on_batch is not None:
-            on_batch(len(out), len(texts))
     return out
 
 
@@ -121,6 +141,10 @@ def _translate_with_fallback(
     engine_config=None,
     partial: Optional[dict[int, str]] = None,
     indices: Optional[List[int]] = None,
+    on_batch: Optional[BatchHook] = None,
+    total_count: int = 0,
+    completed_offset: int = 0,
+    last_error: Optional[Exception] = None,
 ) -> List[str]:
     """翻译一个批次，数量不匹配时自动减半拆分重试（对已成功部分做 dedup 去重）。"""
     size = len(batch)
@@ -135,30 +159,51 @@ def _translate_with_fallback(
 
     idx_to_item = dict(zip(indices, batch))
     sub_batch = [idx_to_item[idx] for idx in missing_indices]
+    current_error = last_error
     try:
         translated = _translate_batch(sub_batch, source_lang, target_lang, api_key, engine_config=engine_config)
         if 0 < len(translated) <= len(missing_indices):
+            new_added = False
             for idx, res in zip(missing_indices[:len(translated)], translated):
-                partial[idx] = res
+                if idx not in partial:
+                    partial[idx] = res
+                    new_added = True
+            if new_added and on_batch is not None and total_count > 0:
+                on_batch(completed_offset + len(partial), total_count)
         if len(translated) == len(missing_indices):
             return [partial[idx] for idx in indices]
-    except Exception:
-        pass
+    except Exception as exc:
+        if isinstance(exc, TranslateError) and exc.code in ("unauthorized", "missing_api_key"):
+            raise
+        current_error = exc
 
     if size <= 1:
+        line_num = completed_offset + indices[0] + 1
+        if current_error:
+            err_msg = str(current_error)
+            err_code = getattr(current_error, "code", "invalid_response")
+        else:
+            err_msg = "即使单条也无法获得匹配结果"
+            err_code = "invalid_response"
         raise TranslateError(
-            f"翻译失败：即使单条也无法获得匹配结果"
-        )
+            f"第 {line_num} 条字幕翻译失败：{err_msg}",
+            code=err_code,
+        ) from current_error
+
     # 减半拆分：递归处理两个子批
     half = max(1, size // 2)
     logger.warning("批量 %d 翻译结果不匹配，拆分为 %d + %d 重试", size, half, size - half)
     left = _translate_with_fallback(
         batch[:half], source_lang, target_lang, api_key,
-        engine_config=engine_config, partial=partial, indices=indices[:half]
+        engine_config=engine_config, partial=partial, indices=indices[:half],
+        on_batch=on_batch, total_count=total_count, completed_offset=completed_offset,
+        last_error=current_error,
     )
     right = _translate_with_fallback(
         batch[half:], source_lang, target_lang, api_key,
-        engine_config=engine_config, partial=partial, indices=indices[half:]
+        engine_config=engine_config, partial=partial, indices=indices[half:],
+        on_batch=on_batch, total_count=total_count, completed_offset=completed_offset,
+        last_error=current_error,
     )
     return left + right
 
@@ -189,7 +234,7 @@ def _translate_batch(batch: List[str], source_lang: str, target_lang: str, api_k
         try:
             content = make_engine_client(engine_config).complete(system, user)
         except TranslationEngineError as exc:
-            raise TranslateError(str(exc)) from exc
+            raise TranslateError(str(exc), code=exc.code) from exc
     return _parse_translation_response(content, len(batch))
 
 
@@ -248,7 +293,7 @@ def translate_srt(
     """
     srt_path = Path(srt_path)
     if not srt_path.exists():
-        raise TranslateError(f"输入字幕不存在: {srt_path}")
+        raise TranslateError(f"输入字幕不存在: {srt_path}", code="invalid_argument")
 
     bilingual = mode == "bilingual"
     out_dir = ensure_task_dir(task_id)

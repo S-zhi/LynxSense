@@ -87,7 +87,7 @@ def test_run_failure_persists_failed(store, monkeypatch):
 
     def boom(params, on_event, *, api_key=None):
         on_event(PipelineEvent("DOWNLOADING", 5, "DOWNLOADING"))
-        on_event(PipelineEvent("FAILED", 5, "DOWNLOADING", error="下载失败"))
+        on_event(PipelineEvent("FAILED", 5, "DOWNLOADING", error="下载失败", error_code="download_failed"))
         raise RuntimeError("下载失败")
 
     monkeypatch.setattr(runner, "run_pipeline", boom)
@@ -96,6 +96,7 @@ def test_run_failure_persists_failed(store, monkeypatch):
     rec = store.get(tid)
     assert rec.status == "FAILED"
     assert "下载失败" in rec.error
+    assert rec.error_code == "download_failed"
 
 
 def test_run_failure_fallback_when_no_event(store, monkeypatch):

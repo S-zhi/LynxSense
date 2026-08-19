@@ -170,6 +170,8 @@ def _run(task_id: str) -> None:
             fields["title"] = ev.title
         if ev.error is not None:
             fields["error"] = ev.error
+        if ev.error_code is not None:
+            fields["error_code"] = ev.error_code
         if ev.outputs:
             fields["output_video"] = ev.outputs.get("video")
             fields["output_subtitle"] = ev.outputs.get("subtitle")
@@ -179,7 +181,7 @@ def _run(task_id: str) -> None:
     if rec.engine != "deepseek":
         engine_config = _engine_store.get(rec.engine)
         if engine_config is None:
-            _store.update(task_id, status="FAILED", error="翻译引擎配置不存在")
+            _store.update(task_id, status="FAILED", error="翻译引擎配置不存在", error_code="engine_not_found")
             return
     try:
         pipeline_kwargs = {
@@ -196,15 +198,16 @@ def _run(task_id: str) -> None:
             return
         logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         if cur is not None and cur.status != "FAILED":
-            _store.update(task_id, status="FAILED", error=str(e))
-    except Exception:
+            _store.update(task_id, status="FAILED", error=str(e), error_code=getattr(e, "code", "resource_error"))
+    except Exception as exc:
         cur = _store.get(task_id)
         if cur is not None and cur.status == "CANCELLED":
             logger.info("任务已被取消: %s", task_id)
             return
         logger.exception("流水线执行失败: %s", task_id)
         if cur is not None and cur.status != "FAILED":
-            _store.update(task_id, status="FAILED", error="执行异常")
+            err_code = getattr(exc, "code", "execution_error")
+            _store.update(task_id, status="FAILED", error=str(exc) or "执行异常", error_code=err_code)
     finally:
         with _procs_lock:
             _procs.pop(task_id, None)
