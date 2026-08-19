@@ -371,6 +371,7 @@ def test_download_409_when_not_ready(client):
 
 def test_download_serves_file(client):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
     d = client._tmp / cid
     d.mkdir(parents=True, exist_ok=True)
     (d / "output.mp4").write_bytes(b"VIDEO")
@@ -1094,9 +1095,33 @@ def test_resolve_video_returns_none_when_missing(client, tmp_path):
     assert tasks_routes._resolve_video(cid) is None
 
 
+def test_resolve_video_ignores_part_file(client, tmp_path):
+    """yt-dlp 下载中的 source.<ext>.part 临时文件必须被过滤，不能作为成品/源视频返回。"""
+    cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4.part").write_bytes(b"PARTIAL_BYTES")
+
+    assert tasks_routes._resolve_video(cid) is None
+
+
+def test_download_video_returns_409_during_downloading_with_part_file(client, tmp_path):
+    """仅下载模式在 DOWNLOADING 期间存在 .part 临时文件时，调 /download 必须返回 409 拒绝。"""
+    cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
+    client._store.update(cid, status="DOWNLOADING", progress=30)
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4.part").write_bytes(b"PARTIAL_BYTES")
+
+    r = client.get(f"/api/tasks/{cid}/download")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "成品视频尚未生成"
+
+
 def test_download_409_when_only_source_no_output(client, tmp_path):
     """仅下载模式（无 output.mp4）下走 /download 不应 409：可回退到 source.*。"""
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
     d = client._tmp / cid
     d.mkdir(parents=True, exist_ok=True)
     (d / "source.mp4").write_bytes(b"SRC")

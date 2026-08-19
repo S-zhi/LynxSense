@@ -182,18 +182,27 @@ function updateTrack(row, t) {
 function fillError(dyn, t) {
   const box = dyn.querySelector(".qrow__error");
   if (!box) return;
-  const hint = errorHint(t.error);
+  const hint = errorHint(t.error, t.errorCode);
   box.innerHTML =
     `<b>${escapeHtml(t.error || "处理失败")}</b>` +
     (hint ? `<div class="qrow__hint">${hint}</div>` : "");
 }
 
-function errorHint(msg) {
+function errorHint(msg, code) {
+  if (code === "unauthorized" || code === "missing_api_key")
+    return `API Key 无效或未设置，请检查 .env 配置或翻译引擎设置`;
+  if (code === "rate_limited")
+    return `翻译 API 达到调用频率限制，请稍后重试或更换 API Key`;
+  if (code === "network_error")
+    return `连接翻译 API 超时或网络异常，请检查网络设置或代理`;
+  if (code === "invalid_response")
+    return `翻译 API 返回数据格式无法解析，请尝试更换模型或稍后重试`;
+
   const m = (msg || "").toLowerCase();
   if (m.includes("replicate") || m.includes("token"))
     return `检查 .env 中的 <code>REPLICATE_API_TOKEN</code>`;
   if (m.includes("deepseek") || m.includes("api key"))
-    return `检查 .env 中的 <code>SUBTRANS_DEEPSEEK_API_KEY</code>`;
+    return `检查 .env 中的 <code>SUBTRANS_DEEPSEEK_API_KEY</code> 或翻译引擎配置`;
   if (m.includes("libass") || m.includes("ffmpeg"))
     return `检查 ffmpeg 是否安装且带 <code>libass</code>`;
   if (m.includes("下载") || m.includes("download") || m.includes("404"))

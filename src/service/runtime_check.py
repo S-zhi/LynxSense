@@ -164,6 +164,7 @@ def build_readiness() -> dict[str, Any]:
             "full_pipeline": full_pipeline_ready,
             "hard_burn": hard_burn_ready,
             "soft_burn": full_pipeline_ready,
+            "max_concurrent_tasks": settings.pipeline_workers,
         },
         "limits": {
             "max_upload_mb": settings.max_upload_mb,
