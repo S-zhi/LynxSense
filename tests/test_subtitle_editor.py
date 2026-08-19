@@ -16,6 +16,8 @@ from src.store import TaskStore
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    from src.handler import storage as storage_routes
+    storage_routes._cleanup_limiter.reset()
     store = TaskStore(tmp_path / "test.db")
     app.dependency_overrides[get_store] = lambda: store
     # 把 task_dir 指向临时根，避免污染真实 data/

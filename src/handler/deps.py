@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import Depends
+from typing import Optional
+
+from fastapi import Depends, Header, HTTPException
 
 from src.config import settings
 from src.store import ProbeStore, TaskStore, TranslationEngineStore
@@ -45,3 +47,33 @@ def reset_singletons() -> None:
     _store = None
     _probe_store = None
     _translation_engine_store = None
+
+
+def require_api_token(
+    authorization: Optional[str] = Header(None),
+    x_api_token: Optional[str] = Header(None, alias="X-API-Token"),
+) -> None:
+    """校验 API Token（可选开启）。
+
+    配置 SUBTRANS_API_TOKEN 环境变量时生效；支持 Authorization: Bearer <token>
+    或 X-API-Token: <token> 头。如果未设置 SUBTRANS_API_TOKEN，则不作拦截。
+    """
+    expected = settings.api_token
+    if not expected:
+        return
+
+    provided: Optional[str] = None
+    if authorization:
+        if authorization.startswith("Bearer "):
+            provided = authorization[7:].strip()
+        else:
+            provided = authorization.strip()
+    elif x_api_token:
+        provided = x_api_token.strip()
+
+    if not provided or provided != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="未提供有效的 API Token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

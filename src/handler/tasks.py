@@ -28,7 +28,12 @@ from src.config import (
 from src.core.downloader import probe_video
 from src.core.ffmpeg_utils import probe_duration
 from src.handler.subtitle_editor import release_lock
-from src.handler.deps import get_probe_store, get_store, get_translation_engine_store
+from src.handler.deps import (
+    get_probe_store,
+    get_store,
+    get_translation_engine_store,
+    require_api_token,
+)
 from src.handler.schemas import (
     ProbeRecordOut,
     ProbeRecordsClearOut,
@@ -156,7 +161,7 @@ def scan_missing_terminal(
 
 # ---------- CRUD ----------
 
-@router.post("", response_model=TaskOut, status_code=201)
+@router.post("", response_model=TaskOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_task(
     body: TaskCreate,
     store: TaskStore = Depends(get_store),
@@ -177,7 +182,7 @@ def create_task(
     return to_out(rec)
 
 
-@router.post("/upload", response_model=TaskOut, status_code=201)
+@router.post("/upload", response_model=TaskOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_upload_task(
     request: Request,
     file: UploadFile = File(..., description="本地视频文件"),
@@ -315,7 +320,7 @@ def get_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     return to_out(_require(store, task_id))
 
 
-@router.post("/probe", response_model=TaskProbeOut)
+@router.post("/probe", response_model=TaskProbeOut, dependencies=[Depends(require_api_token)])
 def probe_task(
     body: TaskProbeIn,
     probes: ProbeStore = Depends(get_probe_store),
@@ -361,7 +366,7 @@ def list_probe_records(
     return [_probe_record_to_out(r) for r in probes.list(limit=limit)]
 
 
-@router.delete("/probe/records", response_model=ProbeRecordsClearOut)
+@router.delete("/probe/records", response_model=ProbeRecordsClearOut, dependencies=[Depends(require_api_token)])
 def clear_probe_records(
     probes: ProbeStore = Depends(get_probe_store),
 ) -> ProbeRecordsClearOut:
@@ -370,7 +375,7 @@ def clear_probe_records(
     return ProbeRecordsClearOut(deleted=deleted)
 
 
-@router.delete("/probe/records/{record_id}", status_code=204)
+@router.delete("/probe/records/{record_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_probe_record(
     record_id: str,
     probes: ProbeStore = Depends(get_probe_store),
@@ -380,7 +385,7 @@ def delete_probe_record(
         raise HTTPException(status_code=404, detail="测试记录不存在")
 
 
-@router.delete("/{task_id}", status_code=204)
+@router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
     rec = _require(store, task_id)
     if rec.status not in _TERMINAL:
@@ -393,7 +398,7 @@ def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
     release_lock(task_id)
 
 
-@router.post("/{task_id}/cancel", response_model=TaskOut)
+@router.post("/{task_id}/cancel", response_model=TaskOut, dependencies=[Depends(require_api_token)])
 def cancel_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     """取消正在运行的任务。"""
     rec = _require(store, task_id)
@@ -404,7 +409,7 @@ def cancel_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     return to_out(updated)
 
 
-@router.post("/{task_id}/retry", response_model=TaskOut)
+@router.post("/{task_id}/retry", response_model=TaskOut, dependencies=[Depends(require_api_token)])
 def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     """仅允许失败或已取消任务重新入队，避免运行中任务重复执行。"""
     rec = _require(store, task_id)
@@ -505,7 +510,7 @@ def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
     )
 
 
-@router.post("/{task_id}/folder", summary="打开任务文件夹")
+@router.post("/{task_id}/folder", summary="打开任务文件夹", dependencies=[Depends(require_api_token)])
 def open_task_folder(task_id: str, store: TaskStore = Depends(get_store)) -> dict:
     """用系统文件管理器打开任务产物目录。"""
     _require(store, task_id)

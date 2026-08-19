@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.core.translation_engines import TranslationEngineError, make_engine_client
-from src.handler.deps import get_translation_engine_store
+from src.handler.deps import get_translation_engine_store, require_api_token
 from src.store import AVAILABILITY, ENGINE_TYPES, TranslationEngine, TranslationEngineStore
 
 
@@ -75,7 +75,7 @@ def list_engines(store: TranslationEngineStore = Depends(get_translation_engine_
     return [_out(rec) for rec in store.list()]
 
 
-@router.post("", response_model=EngineOut, status_code=201)
+@router.post("", response_model=EngineOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_engine(body: EngineIn, store: TranslationEngineStore = Depends(get_translation_engine_store)) -> EngineOut:
     _validate_type(body.apiType)
     key = body.apiKey.strip() if body.apiKey and body.apiKey.strip() else None
@@ -85,7 +85,7 @@ def create_engine(body: EngineIn, store: TranslationEngineStore = Depends(get_tr
     ))
 
 
-@router.put("/{engine_id}", response_model=EngineOut)
+@router.put("/{engine_id}", response_model=EngineOut, dependencies=[Depends(require_api_token)])
 def update_engine(
     engine_id: str,
     body: EngineIn,
@@ -101,13 +101,13 @@ def update_engine(
     return _out(updated or rec)
 
 
-@router.delete("/{engine_id}", status_code=204)
+@router.delete("/{engine_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_engine(engine_id: str, store: TranslationEngineStore = Depends(get_translation_engine_store)) -> None:
     _require(store, engine_id)
     store.delete(engine_id)
 
 
-@router.post("/{engine_id}/validate", response_model=EngineCheckOut)
+@router.post("/{engine_id}/validate", response_model=EngineCheckOut, dependencies=[Depends(require_api_token)])
 def validate_engine(
     engine_id: str,
     store: TranslationEngineStore = Depends(get_translation_engine_store),

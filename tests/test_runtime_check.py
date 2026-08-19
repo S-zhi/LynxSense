@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import src.service.runtime_check as runtime_check
 
 
-def _settings(tmp_path, *, deepseek_api_key=None):
+def _settings(tmp_path, *, deepseek_api_key=None, api_token=None):
     return SimpleNamespace(
         backend_dir=tmp_path,
         data_dir=tmp_path / "data",
@@ -11,6 +11,7 @@ def _settings(tmp_path, *, deepseek_api_key=None):
         ffmpeg_bin="ffmpeg",
         ffprobe_bin="ffprobe",
         deepseek_api_key=deepseek_api_key,
+        api_token=api_token,
         max_upload_mb=2048,
         max_video_minutes=180,
         pipeline_workers=2,
@@ -161,6 +162,18 @@ def test_readiness_reports_cached_replicate_check_metadata(monkeypatch, tmp_path
     assert result["replicate_cached"] is True
     assert result["checks"]["replicate_checked_at"] == 1700000000000
     assert result["checks"]["replicate_cached"] is True
+
+
+def test_readiness_reports_api_token_required(monkeypatch, tmp_path):
+    s = _settings(tmp_path, api_token="secret-token")
+    monkeypatch.setattr(runtime_check, "settings", s)
+    result = runtime_check.build_readiness()
+    assert result["checks"]["api_token_required"] is True
+
+    s_empty = _settings(tmp_path, api_token=None)
+    monkeypatch.setattr(runtime_check, "settings", s_empty)
+    result_empty = runtime_check.build_readiness()
+    assert result_empty["checks"]["api_token_required"] is False
 
 
 def test_readiness_handles_unavailable_replicate_check_gracefully(monkeypatch, tmp_path):

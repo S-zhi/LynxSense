@@ -81,6 +81,38 @@ def test_create_task(client):
     assert data["createdAt"] > 0
 
 
+# ---------- API Token 鉴权 ----------
+
+def test_api_token_auth_when_token_configured(client, monkeypatch):
+    """配置 SUBTRANS_API_TOKEN 时，变更接口必须校验 Authorization / X-API-Token。"""
+    monkeypatch.setenv("SUBTRANS_API_TOKEN", "secret-token-123")
+
+    # 未提供 Token -> 401
+    r_no_auth = client.post("/api/tasks", json=_payload())
+    assert r_no_auth.status_code == 401
+    assert "未提供有效的 API Token" in r_no_auth.json()["detail"]
+
+    # 错误 Token -> 401
+    r_bad_auth = client.post("/api/tasks", json=_payload(), headers={"Authorization": "Bearer wrong-token"})
+    assert r_bad_auth.status_code == 401
+
+    # Authorization: Bearer 正确 Token -> 201
+    r_bearer = client.post("/api/tasks", json=_payload(), headers={"Authorization": "Bearer secret-token-123"})
+    assert r_bearer.status_code == 201
+
+    # X-API-Token 正确 Token -> 201
+    r_header = client.post("/api/tasks", json=_payload(), headers={"X-API-Token": "secret-token-123"})
+    assert r_header.status_code == 201
+
+
+def test_api_token_auth_when_token_unset(client, monkeypatch):
+    """未配置 SUBTRANS_API_TOKEN 时，接口无须鉴权直接通过。"""
+    monkeypatch.delenv("SUBTRANS_API_TOKEN", raising=False)
+
+    r = client.post("/api/tasks", json=_payload())
+    assert r.status_code == 201
+
+
 def test_create_defaults_when_minimal(client):
     r = client.post("/api/tasks", json={"url": "https://x/y"})
     assert r.status_code == 201
