@@ -48,6 +48,7 @@ class TranslationEngineStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+        self.reset_dangling_checking()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -76,6 +77,21 @@ class TranslationEngineStore:
                 )
                 """
             )
+
+    def reset_dangling_checking(self) -> int:
+        """重置所有因服务异常退出/崩溃残留的 CHECKING 状态。"""
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE translation_engines
+                SET availability = CASE
+                    WHEN api_key IS NOT NULL AND api_key != '' THEN 'UNKNOWN'
+                    ELSE 'UNCONFIGURED'
+                END
+                WHERE availability = 'CHECKING'
+                """
+            )
+            return cur.rowcount
 
     def list(self) -> List[TranslationEngine]:
         with self._connect() as conn:
