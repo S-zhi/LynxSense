@@ -161,6 +161,7 @@ def build_readiness() -> dict[str, Any]:
         },
         "capabilities": {
             "download": download_ready,
+            "ffprobe_available": ffprobe_status == "available",
             "full_pipeline": full_pipeline_ready,
             "hard_burn": hard_burn_ready,
             "soft_burn": full_pipeline_ready,

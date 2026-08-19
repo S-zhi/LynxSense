@@ -35,6 +35,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
     # 不在 API 测试里真跑流水线（执行器单独测）
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda task_id: None)
+    # 默认 mock probe_duration 返回 10 秒，避免单元测试依赖系统 ffprobe 命令
+    monkeypatch.setattr(tasks_routes, "probe_duration", lambda path, bin_path: 10.0)
     # 默认 mock 提供 DeepSeek Key，确保其它 Task 创建测试不受影响
     monkeypatch.setattr(
         tasks_routes,
@@ -988,6 +990,21 @@ def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch)
     )
     assert r.status_code == 413
     assert "超过最大限制" in r.json()["detail"]
+    assert enqueued == []
+    assert client.get("/api/tasks").json() == []
+    assert _count_task_dirs(client._tmp) == before
+
+
+def test_upload_probe_duration_none_400_and_cleanup(client, monkeypatch):
+    """probe_duration 返回 None 时（如 ffprobe 缺失或解析失败）返回 400 并清理记录与目录。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+    monkeypatch.setattr(tasks_routes, "probe_duration", lambda path, bin_path: None)
+
+    before = _count_task_dirs(client._tmp)
+    r = _upload(client, _filename="corrupted.mp4", _content=b"CORRUPTED_VIDEO_HEADER")
+    assert r.status_code == 400
+    assert "无法解析视频时长" in r.json()["detail"]
     assert enqueued == []
     assert client.get("/api/tasks").json() == []
     assert _count_task_dirs(client._tmp) == before
