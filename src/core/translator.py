@@ -173,7 +173,8 @@ def _translate_with_fallback(
         if len(translated) == len(missing_indices):
             return [partial[idx] for idx in indices]
     except Exception as exc:
-        if isinstance(exc, TranslateError) and exc.code in ("unauthorized", "missing_api_key"):
+        err_code = getattr(exc, "code", None)
+        if err_code in ("unauthorized", "missing_api_key", "rate_limited", "insufficient_quota"):
             raise
         current_error = exc
 

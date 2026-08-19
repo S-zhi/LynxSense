@@ -262,23 +262,59 @@ def test_call_deepseek_network_error(fake_settings, monkeypatch):
     assert exc_info.value.code == "network_error"
 
 
-def test_fast_fail_on_unauthorized(fake_settings, monkeypatch):
+@pytest.mark.parametrize("status_code,expected_code", [
+    (401, "unauthorized"),
+    (403, "unauthorized"),
+    (429, "rate_limited"),
+])
+def test_fast_fail_on_permanent_errors(fake_settings, monkeypatch, status_code, expected_code):
     import httpx
     called_count = 0
 
-    def mock_post_401(*a, **k):
+    def mock_post_err(*a, **k):
         nonlocal called_count
         called_count += 1
         request = httpx.Request("POST", "https://api.deepseek.com")
-        response = httpx.Response(401, request=request)
-        raise httpx.HTTPStatusError("Unauthorized", request=request, response=response)
+        response = httpx.Response(status_code, request=request)
+        raise httpx.HTTPStatusError(f"HTTP {status_code}", request=request, response=response)
 
-    monkeypatch.setattr(httpx, "post", mock_post_401)
+    monkeypatch.setattr(httpx, "post", mock_post_err)
     with pytest.raises(TranslateError) as exc_info:
         translate_texts(["a", "b", "c", "d"], "en", "zh-CN")
-    assert exc_info.value.code == "unauthorized"
+    assert exc_info.value.code == expected_code
     # 应立即抛出，不触发拆分重试 (只调用一次)
     assert called_count == 1
+
+
+def test_fast_fail_on_insufficient_quota_error(fake_settings, monkeypatch):
+    called_count = 0
+
+    def fake_call(*a, **k):
+        nonlocal called_count
+        called_count += 1
+        raise TranslateError("Quota exceeded", code="insufficient_quota")
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake_call)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["a", "b", "c", "d"], "en", "zh-CN")
+    assert exc_info.value.code == "insufficient_quota"
+    assert called_count == 1
+
+
+def test_transient_error_continues_to_halve(fake_settings, monkeypatch):
+    called_count = 0
+
+    def fake_call(*a, **k):
+        nonlocal called_count
+        called_count += 1
+        raise TranslateError("Transient upstream error", code="upstream_error")
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake_call)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["a", "b"], "en", "zh-CN")
+    assert exc_info.value.code == "upstream_error"
+    # batch size 2 -> 调用 1 次失败 -> 拆分成 size 1 -> 调用 2 次失败并抛错 (共 2 次调用)
+    assert called_count == 2
 
 
 def test_single_item_failure_line_index_message(fake_settings, monkeypatch):
