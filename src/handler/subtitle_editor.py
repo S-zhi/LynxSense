@@ -15,7 +15,8 @@ import re
 import threading
 import uuid
 from pathlib import Path
-from typing import List, Literal, Optional
+from contextlib import contextmanager
+from typing import Generator, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -37,23 +38,64 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["subtitle-editor"])
 
 # 编辑保存的并发写：每个 task_id 一把锁，避免边写边读竞态
-_write_locks: dict[str, threading.Lock] = {}
+class _LockEntry:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.ref_count = 0
+
+
+_write_locks: dict[str, _LockEntry] = {}
 _write_locks_guard = threading.Lock()
+_MAX_WRITE_LOCKS = 1000
+
+
+def _prune_unlocked_locks_locked() -> None:
+    """清理无活性绑定的锁条目（ref_count <= 0）。必须在持有 _write_locks_guard 时调用。"""
+    to_remove = [tid for tid, entry in _write_locks.items() if entry.ref_count <= 0]
+    for tid in to_remove:
+        _write_locks.pop(tid, None)
+
+
+@contextmanager
+def task_write_lock(task_id: str) -> Generator[None, None, None]:
+    """RAII 风格任务写锁上下文管理器，安全维护 ref_count 并在无活跃引用时自动清除。"""
+    with _write_locks_guard:
+        entry = _write_locks.get(task_id)
+        if entry is None:
+            if len(_write_locks) >= _MAX_WRITE_LOCKS:
+                _prune_unlocked_locks_locked()
+            entry = _LockEntry()
+            _write_locks[task_id] = entry
+        entry.ref_count += 1
+
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _write_locks_guard:
+            entry.ref_count -= 1
+            if entry.ref_count <= 0:
+                _write_locks.pop(task_id, None)
 
 
 def _lock_for(task_id: str) -> threading.Lock:
+    """为兼容性保留，获取或创建任务的底层 Lock 对象。"""
     with _write_locks_guard:
-        lk = _write_locks.get(task_id)
-        if lk is None:
-            lk = threading.Lock()
-            _write_locks[task_id] = lk
-        return lk
+        entry = _write_locks.get(task_id)
+        if entry is None:
+            if len(_write_locks) >= _MAX_WRITE_LOCKS:
+                _prune_unlocked_locks_locked()
+            entry = _LockEntry()
+            _write_locks[task_id] = entry
+        return entry.lock
 
 
 def release_lock(task_id: str) -> None:
-    """清理进程内锁字典 _write_locks 中的任务锁，防止内存泄漏。"""
+    """清理进程内锁字典 _write_locks 中的任务锁（若无活跃持有者），防止内存泄漏。"""
     with _write_locks_guard:
-        _write_locks.pop(task_id, None)
+        entry = _write_locks.get(task_id)
+        if entry is not None and entry.ref_count <= 0:
+            _write_locks.pop(task_id, None)
 
 
 def _require(store: TaskStore, task_id: str):
@@ -236,7 +278,7 @@ def save_subtitles(
         except Exception:
             pass
 
-    with _lock_for(task_id):
+    with task_write_lock(task_id):
         # 版本文件：若已存在则直接覆盖（用户主动保存即确认）；保留原始编码或默认 utf-8-sig
         write_srt(subs, target_path, encoding=encoding)
 
