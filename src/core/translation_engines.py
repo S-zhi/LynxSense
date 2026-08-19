@@ -86,6 +86,6 @@ def make_engine_client(config: Any, timeout: int | None = None) -> EngineClient:
     api_key = getattr(config, "api_key", None) or config.get("api_key")
     if timeout is None:
         timeout = getattr(config, "timeout", None) or (config.get("timeout") if isinstance(config, dict) else 60) or 60
-    if not api_key:
+    if not (api_key and str(api_key).strip()):
         raise TranslationEngineError("未配置 API Key", code="missing_api_key")
-    return EngineClient(api_type=api_type, base_url=base_url, model=model, api_key=api_key, timeout=int(timeout))
+    return EngineClient(api_type=api_type, base_url=base_url, model=model, api_key=str(api_key).strip(), timeout=int(timeout))

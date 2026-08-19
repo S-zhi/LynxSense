@@ -173,3 +173,115 @@ def test_validate_engine_uses_shorter_timeout(tmp_path, monkeypatch):
 
     app.dependency_overrides.clear()
     reset_singletons()
+
+
+def test_whitespace_api_key_store_handling(tmp_path):
+    db = tmp_path / "engines.db"
+    store = TranslationEngineStore(db)
+
+    # 1. 传入空白串创建配置 -> 规范化为 None，UNCONFIGURED
+    e1 = store.create(
+        name="Engine WhiteSpace", api_type="openai_compatible",
+        base_url="https://e1.test", model="m1", api_key="   ",
+    )
+    assert e1.api_key is None
+    assert e1.has_api_key is False
+    assert e1.availability == "UNCONFIGURED"
+
+    # 2. 传入首尾含空格的 key 创建配置 -> 自动 strip
+    e2 = store.create(
+        name="Engine Padded", api_type="openai_compatible",
+        base_url="https://e2.test", model="m2", api_key="  sk-padded-key  ",
+    )
+    assert e2.api_key == "sk-padded-key"
+    assert e2.has_api_key is True
+    assert e2.availability == "UNKNOWN"
+
+    # 3. 更新已有的有效 key 为空白串 -> 保留旧 Key
+    updated_e2 = store.update(e2.id, api_key="   ")
+    assert updated_e2.api_key == "sk-padded-key"
+
+    # 4. 更新无 key 的配置为空白串 -> 依然为 None，UNCONFIGURED
+    updated_e1 = store.update(e1.id, api_key="   ")
+    assert updated_e1.api_key is None
+    assert updated_e1.availability == "UNCONFIGURED"
+
+    # 5. reset_dangling_checking 将带有空白串的 CHECKING 状态恢复为 UNCONFIGURED
+    with store._connect() as conn:
+        conn.execute("UPDATE translation_engines SET availability = 'CHECKING', api_key = '   ' WHERE id = ?", (e1.id,))
+    assert store.reset_dangling_checking() == 1
+    assert store.get(e1.id).availability == "UNCONFIGURED"
+
+
+def test_whitespace_api_key_make_engine_client():
+    import pytest
+    from src.core.translation_engines import TranslationEngineError, make_engine_client
+
+    # 空白串报错 missing_api_key
+    with pytest.raises(TranslationEngineError) as exc_info:
+        make_engine_client({
+            "api_type": "openai_compatible",
+            "base_url": "https://example.test",
+            "model": "m",
+            "api_key": "   ",
+        })
+    assert exc_info.value.code == "missing_api_key"
+
+    # 首尾带空格的 key 被 strip
+    client = make_engine_client({
+        "api_type": "openai_compatible",
+        "base_url": "https://example.test",
+        "model": "m",
+        "api_key": "  sk-padded  ",
+    })
+    assert client.api_key == "sk-padded"
+
+
+def test_whitespace_api_key_endpoints(tmp_path):
+    from fastapi.testclient import TestClient
+    from src.handler.app import app
+    from src.handler.deps import get_store, get_translation_engine_store, reset_singletons
+    from src.store.task_store import TaskStore
+
+    db_path = tmp_path / "subtitles.db"
+    store = TaskStore(db_path)
+    engine_store = TranslationEngineStore(db_path)
+
+    reset_singletons()
+    app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_translation_engine_store] = lambda: engine_store
+
+    with TestClient(app) as client:
+        # 1. 创建包含空白串 apiKey 的引擎
+        r = client.post("/api/settings/translation-engines", json={
+            "name": "Blank Key Engine",
+            "apiType": "openai_compatible",
+            "baseUrl": "https://blank.test",
+            "model": "m1",
+            "apiKey": "   ",
+        })
+        assert r.status_code == 201
+        data = r.json()
+        engine_id = data["id"]
+        assert data["hasApiKey"] is False
+        assert data["availability"] == "UNCONFIGURED"
+
+        # 2. 校验空白 key 引擎 -> 拦截并返回 UNCONFIGURED / missing_api_key
+        r = client.post(f"/api/settings/translation-engines/{engine_id}/validate")
+        assert r.status_code == 200
+        vdata = r.json()
+        assert vdata["available"] is False
+        assert vdata["availability"] == "UNCONFIGURED"
+        assert vdata["errorCode"] == "missing_api_key"
+
+        # 3. 用该引擎建任务 -> 拦截并返回 422 提示未配置 API Key
+        r = client.post("/api/tasks", json={
+            "url": "https://example.com/video.mp4",
+            "engine": engine_id,
+            "needSubtitle": True,
+        })
+        assert r.status_code == 422
+        assert "翻译引擎尚未配置 API Key" in r.json()["detail"]
+
+    app.dependency_overrides.clear()
+    reset_singletons()
