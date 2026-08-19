@@ -55,6 +55,7 @@ class PipelineEvent:
     current_step: Optional[str]
     title: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
     outputs: Optional[dict] = None
 
 
@@ -227,20 +228,24 @@ def run_pipeline(
         raise
     except ResourceError as e:
         logger.error("流水线因资源异常中断: task=%s step=%s, msg=%s", tid, state["step"], str(e))
+        err_code = getattr(e, "code", "resource_error")
         on_event(PipelineEvent(
             status="FAILED",
             progress=state["progress"],
             current_step=state["step"],
             error=str(e),
+            error_code=err_code,
         ))
         raise
     except Exception as e:
         logger.exception("流水线失败: task=%s step=%s", tid, state["step"])
+        err_code = getattr(e, "code", None)
         on_event(PipelineEvent(
             status="FAILED",
             progress=state["progress"],
             current_step=state["step"],
             error=str(e),
+            error_code=err_code,
         ))
         raise
 

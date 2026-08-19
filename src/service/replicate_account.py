@@ -9,15 +9,26 @@ Replicate 的公开 HTTP API 目前没有余额 / credit balance endpoint。这�
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any, Optional
 
 import httpx
 
+from src.config import settings
 
 REPLICATE_ACCOUNT_URL = "https://api.replicate.com/v1/account"
 REPLICATE_BILLING_URL = "https://replicate.com/account/billing"
 REPLICATE_REQUEST_TIMEOUT = 10.0
+
+_cache_lock = threading.Lock()
+_account_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def clear_cache() -> None:
+    """清空 Replicate 账户状态缓存。"""
+    with _cache_lock:
+        _account_cache.clear()
 
 
 def _unconfigured() -> dict[str, Any]:
@@ -31,6 +42,7 @@ def _unconfigured() -> dict[str, Any]:
         "source": "official_account_api",
         "billingUrl": REPLICATE_BILLING_URL,
         "checkedAt": int(time.time() * 1000),
+        "cached": False,
         "errorCode": "missing_api_token",
         "message": "未设置 REPLICATE_API_TOKEN，暂时无法查询 Replicate 账户状态",
     }
@@ -62,25 +74,15 @@ def _account_summary(payload: dict[str, Any]) -> dict[str, Optional[str]]:
     }
 
 
-def query_replicate_balance(
-    *,
-    api_token: Optional[str] = None,
-    timeout: float = REPLICATE_REQUEST_TIMEOUT,
+def _fetch_replicate_balance(
+    token: str,
+    timeout: float,
 ) -> dict[str, Any]:
-    """查询 Replicate 账户状态，并在官方响应支持时返回余额。
-
-    当前官方 ``/v1/account`` 通常只返回账户身份信息，因此成功但没有余额
-    字段时返回 ``status=unsupported``，而不是伪造或估算一个金额。
-    """
-    token = api_token or os.getenv("REPLICATE_API_TOKEN")
-    if not token or not token.strip():
-        return _unconfigured()
-
     checked_at = int(time.time() * 1000)
     try:
         response = httpx.get(
             REPLICATE_ACCOUNT_URL,
-            headers={"Authorization": f"Bearer {token.strip()}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
         )
     except httpx.RequestError:
@@ -166,3 +168,45 @@ def query_replicate_balance(
             else "Token 有效，但 Replicate 官方公开 API 未返回余额字段；请打开账单页查看"
         ),
     }
+
+
+def query_replicate_balance(
+    *,
+    api_token: Optional[str] = None,
+    timeout: float = REPLICATE_REQUEST_TIMEOUT,
+    ttl_sec: Optional[float] = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """查询 Replicate 账户状态，并在官方响应支持时返回余额。
+
+    当前官方 ``/v1/account`` 通常只返回账户身份信息，因此成功但没有余额
+    字段时返回 ``status=unsupported``，而不是伪造或估算一个金额。
+    支持 TTL 缓存，在 ttl_sec 时间内重复查询同一 Token 会直接返回缓存，
+    避免高频调用造成上游 API 429 限流。
+    """
+    token = api_token or os.getenv("REPLICATE_API_TOKEN")
+    if not token or not token.strip():
+        res = _unconfigured()
+        return res
+
+    clean_token = token.strip()
+    effective_ttl = ttl_sec if ttl_sec is not None else float(settings.readiness_ttl_sec)
+    now = time.time()
+
+    if not force_refresh and effective_ttl > 0:
+        with _cache_lock:
+            if clean_token in _account_cache:
+                ts, cached_res = _account_cache[clean_token]
+                if now - ts < effective_ttl:
+                    res = dict(cached_res)
+                    res["cached"] = True
+                    return res
+
+    res = _fetch_replicate_balance(clean_token, timeout)
+    res["cached"] = False
+
+    if effective_ttl > 0:
+        with _cache_lock:
+            _account_cache[clean_token] = (now, res)
+
+    return res

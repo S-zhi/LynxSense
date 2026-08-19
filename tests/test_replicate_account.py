@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from src.handler import replicate as replicate_handler
 from src.handler.app import app
 from src.service import replicate_account
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    replicate_account.clear_cache()
+    yield
+    replicate_account.clear_cache()
 
 
 def _response(payload, status_code=200):
@@ -100,3 +108,53 @@ def test_balance_route_returns_safe_shape(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "unsupported"
     assert response.json()["account"]["username"] == "alice"
+
+
+def test_ttl_caching_and_force_refresh(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        replicate_account.httpx,
+        "get",
+        lambda url, **kwargs: (calls.append((url, kwargs)) or _response({
+            "type": "user", "username": "alice",
+        })),
+    )
+
+    res1 = replicate_account.query_replicate_balance(api_token="r8_cached", ttl_sec=60)
+    assert len(calls) == 1
+    assert res1["cached"] is False
+    assert res1["account"]["username"] == "alice"
+
+    res2 = replicate_account.query_replicate_balance(api_token="r8_cached", ttl_sec=60)
+    assert len(calls) == 1
+    assert res2["cached"] is True
+    assert res2["account"]["username"] == "alice"
+
+    res3 = replicate_account.query_replicate_balance(
+        api_token="r8_cached", ttl_sec=60, force_refresh=True
+    )
+    assert len(calls) == 2
+    assert res3["cached"] is False
+
+
+def test_rate_limit_and_server_error_caching(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        replicate_account.httpx,
+        "get",
+        lambda url, **kwargs: (calls.append((url, kwargs)) or _response(
+            {"detail": "rate limited"}, status_code=429
+        )),
+    )
+
+    res1 = replicate_account.query_replicate_balance(api_token="r8_ratelimited", ttl_sec=60)
+    assert len(calls) == 1
+    assert res1["status"] == "unavailable"
+    assert res1["errorCode"] == "http_429"
+    assert res1["cached"] is False
+
+    res2 = replicate_account.query_replicate_balance(api_token="r8_ratelimited", ttl_sec=60)
+    assert len(calls) == 1
+    assert res2["status"] == "unavailable"
+    assert res2["errorCode"] == "http_429"
+    assert res2["cached"] is True
