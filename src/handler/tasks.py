@@ -103,7 +103,7 @@ def _ensure_translation_engine(
         raise HTTPException(status_code=422, detail="翻译引擎配置不存在")
     if not rec.enabled:
         raise HTTPException(status_code=422, detail="翻译引擎已停用")
-    if not rec.api_key:
+    if not (rec.api_key and rec.api_key.strip()):
         raise HTTPException(status_code=422, detail="翻译引擎尚未配置 API Key")
     if rec.availability != "AVAILABLE":
         raise HTTPException(status_code=422, detail="翻译引擎尚未通过可用性检测")

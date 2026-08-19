@@ -36,7 +36,7 @@ class TranslationEngine:
 
     @property
     def has_api_key(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key and self.api_key.strip())
 
 
 def _now_ms() -> int:
@@ -85,7 +85,7 @@ class TranslationEngineStore:
                 """
                 UPDATE translation_engines
                 SET availability = CASE
-                    WHEN api_key IS NOT NULL AND api_key != '' THEN 'UNKNOWN'
+                    WHEN api_key IS NOT NULL AND trim(api_key) != '' THEN 'UNKNOWN'
                     ELSE 'UNCONFIGURED'
                 END
                 WHERE availability = 'CHECKING'
@@ -115,7 +115,7 @@ class TranslationEngineStore:
             return existing
 
         now = _now_ms()
-        normalized_key = api_key or None
+        normalized_key = api_key.strip() if api_key and api_key.strip() else None
         rec = TranslationEngine(
             id="deepseek",
             name="DeepSeek",
@@ -155,11 +155,12 @@ class TranslationEngineStore:
         enabled: bool = True,
     ) -> TranslationEngine:
         now = _now_ms()
+        normalized_key = api_key.strip() if api_key and api_key.strip() else None
         rec = TranslationEngine(
             id="engine_" + uuid.uuid4().hex[:10],
             name=name.strip(), api_type=api_type, base_url=base_url.strip().rstrip("/"),
-            model=model.strip(), api_key=api_key or None, enabled=int(enabled),
-            availability="UNKNOWN" if api_key else "UNCONFIGURED",
+            model=model.strip(), api_key=normalized_key, enabled=int(enabled),
+            availability="UNKNOWN" if normalized_key else "UNCONFIGURED",
             created_at=now, updated_at=now,
         )
         with self._connect() as conn:
@@ -183,12 +184,17 @@ class TranslationEngineStore:
         }}
         if "base_url" in allowed:
             allowed["base_url"] = str(allowed["base_url"]).strip().rstrip("/")
-        if "api_key" in allowed and allowed["api_key"] == "":
-            allowed["api_key"] = rec.api_key
-        if "api_key" in allowed and allowed["api_key"]:
-            allowed.setdefault("availability", "UNKNOWN")
-        elif "api_key" in allowed and not allowed["api_key"]:
-            allowed["availability"] = "UNCONFIGURED"
+        if "api_key" in allowed:
+            raw_key = allowed["api_key"].strip() if allowed["api_key"] else ""
+            if not raw_key:
+                allowed["api_key"] = rec.api_key.strip() if rec.api_key and rec.api_key.strip() else None
+            else:
+                allowed["api_key"] = raw_key
+
+            if allowed["api_key"]:
+                allowed.setdefault("availability", "UNKNOWN")
+            else:
+                allowed["availability"] = "UNCONFIGURED"
         if not allowed:
             return rec
         allowed["updated_at"] = _now_ms()

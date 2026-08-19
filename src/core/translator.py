@@ -111,7 +111,7 @@ def translate_texts(
     key = api_key or settings.deepseek_api_key
     if engine_config is not None:
         key = getattr(engine_config, "api_key", None) or (engine_config.get("api_key") if isinstance(engine_config, dict) else None)
-    if not key:
+    if not (key and str(key).strip()):
         raise TranslateError("缺少翻译引擎 API Key", code="missing_api_key")
 
     batch_size = max(1, settings.translate_batch_size)

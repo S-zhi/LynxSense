@@ -78,9 +78,10 @@ def list_engines(store: TranslationEngineStore = Depends(get_translation_engine_
 @router.post("", response_model=EngineOut, status_code=201)
 def create_engine(body: EngineIn, store: TranslationEngineStore = Depends(get_translation_engine_store)) -> EngineOut:
     _validate_type(body.apiType)
+    key = body.apiKey.strip() if body.apiKey and body.apiKey.strip() else None
     return _out(store.create(
         name=body.name, api_type=body.apiType, base_url=body.baseUrl,
-        model=body.model, api_key=body.apiKey, enabled=body.enabled,
+        model=body.model, api_key=key, enabled=body.enabled,
     ))
 
 
@@ -95,7 +96,7 @@ def update_engine(
     fields = dict(name=body.name, api_type=body.apiType, base_url=body.baseUrl, model=body.model, enabled=body.enabled)
     # 空值表示保持原密钥不变；创建配置时则自然表示未配置。
     if body.apiKey is not None:
-        fields["api_key"] = body.apiKey
+        fields["api_key"] = body.apiKey.strip() if body.apiKey.strip() else ""
     updated = store.update(engine_id, **fields)
     return _out(updated or rec)
 
@@ -113,7 +114,7 @@ def validate_engine(
 ) -> EngineCheckOut:
     rec = _require(store, engine_id)
     checked_at = int(time.time() * 1000)
-    if not rec.api_key:
+    if not (rec.api_key and rec.api_key.strip()):
         store.update(engine_id, availability="UNCONFIGURED", last_checked_at=checked_at, last_error="未配置 API Key")
         return EngineCheckOut(id=engine_id, availability="UNCONFIGURED", available=False, checkedAt=checked_at, errorCode="missing_api_key", message="未配置 API Key")
 
