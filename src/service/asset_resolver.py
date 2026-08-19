@@ -130,6 +130,54 @@ class AssetResolver:
         return path
 
     @classmethod
+    def cleanup_cancelled_artifacts(
+        cls, task_id: str, current_step: Optional[str] = None, source_type: Optional[str] = None
+    ) -> None:
+        """清理取消任务的半截/不完整产物，防止下次重试时复用损坏或残缺的文件。"""
+        d = task_dir(task_id)
+        if not d.exists():
+            return
+
+        step_artifacts_map = {
+            "BURNING": [OUTPUT_VIDEO],
+            "TRANSLATING": [TRANSLATED_SRT, OUTPUT_VIDEO],
+            "TRANSCRIBING": [ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
+            "EXTRACTING": [AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
+            "DOWNLOADING": [AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
+        }
+
+        to_remove_names = set(step_artifacts_map.get(current_step, [
+            AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO
+        ]))
+
+        to_remove_names.add("tmp_burn.srt")
+
+        for name in to_remove_names:
+            p = d / name
+            if p.exists():
+                try:
+                    p.unlink()
+                    logger.info("已清理取消任务的产物: task=%s, file=%s", task_id, name)
+                except OSError as e:
+                    logger.warning("清理取消任务产物失败: task=%s, file=%s, err=%s", task_id, name, e)
+
+        for p in d.glob("*.part"):
+            try:
+                p.unlink()
+                logger.info("已清理取消任务的 .part 文件: task=%s, file=%s", task_id, p.name)
+            except OSError as e:
+                logger.warning("清理 .part 文件失败: task=%s, file=%s, err=%s", task_id, p.name, e)
+
+        if (current_step in (None, "DOWNLOADING")) and source_type != "upload":
+            for p in d.glob(f"{SOURCE_VIDEO_STEM}.*"):
+                if not p.name.endswith(".part"):
+                    try:
+                        p.unlink()
+                        logger.info("已清理取消任务的 source 文件: task=%s, file=%s", task_id, p.name)
+                    except OSError as e:
+                        logger.warning("清理 source 文件失败: task=%s, file=%s, err=%s", task_id, p.name, e)
+
+    @classmethod
     def require_audio(cls, task_id: str) -> Path:
         state, path, msg = cls.resolve_audio(task_id)
         if state != ResourceState.AVAILABLE or path is None:

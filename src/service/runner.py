@@ -25,7 +25,7 @@ from src.service.orchestrator import (
     set_cancelled_signal,
     unregister_cancellation_signal,
 )
-from src.service.asset_resolver import ResourceError
+from src.service.asset_resolver import AssetResolver, ResourceError
 from src.store import STATUSES, TaskStore, TranslationEngineStore
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def unregister_process(task_id: str, proc: subprocess.Popen) -> None:
 
 
 def cancel_pipeline(task_id: str) -> bool:
-    """取消运行中的任务，终止其关联子进程并更新状态为 CANCELLED。"""
+    """取消运行中的任务，终止其关联子进程，清理半截产物并更新状态为 CANCELLED。"""
     set_cancelled_signal(task_id)
 
     rec = _store.get(task_id)
@@ -122,7 +122,23 @@ def cancel_pipeline(task_id: str) -> bool:
         except Exception as e:
             logger.warning("终止子进程失败: task=%s, err=%s", task_id, e)
 
-    logger.info("任务已取消: %s", task_id)
+    for proc in procs:
+        try:
+            proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=1.0)
+            except Exception as e:
+                logger.warning("强制杀死子进程失败: task=%s, err=%s", task_id, e)
+
+    AssetResolver.cleanup_cancelled_artifacts(
+        task_id,
+        current_step=rec.current_step,
+        source_type=rec.source_type,
+    )
+
+    logger.info("任务已取消并清理产物: %s", task_id)
     return True
 
 
@@ -229,6 +245,11 @@ def _run(task_id: str) -> None:
     except ResourceError as e:
         if is_cancelled_signal(task_id):
             logger.info("任务已被取消: %s", task_id)
+            AssetResolver.cleanup_cancelled_artifacts(
+                task_id,
+                current_step=rec.current_step if rec else None,
+                source_type=rec.source_type if rec else "url",
+            )
             return
         logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         if last_state["status"] != "FAILED":
@@ -237,6 +258,11 @@ def _run(task_id: str) -> None:
     except Exception as exc:
         if is_cancelled_signal(task_id):
             logger.info("任务已被取消: %s", task_id)
+            AssetResolver.cleanup_cancelled_artifacts(
+                task_id,
+                current_step=rec.current_step if rec else None,
+                source_type=rec.source_type if rec else "url",
+            )
             return
         logger.exception("流水线执行失败: %s", task_id)
         if last_state["status"] != "FAILED":

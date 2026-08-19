@@ -126,6 +126,70 @@ def test_pipeline_interruption_at_boundary(tmp_path, monkeypatch):
     assert "源视频已删除" in events[-1].error
 
 
+def test_cleanup_cancelled_artifacts_burning_step(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
+
+    (tmp_path / "source.mp4").write_bytes(b"video")
+    (tmp_path / "audio.wav").write_bytes(b"audio")
+    (tmp_path / "original.srt").write_bytes(b"original")
+    (tmp_path / "translated.srt").write_bytes(b"translated")
+    (tmp_path / "output.mp4").write_bytes(b"partial_output")
+    (tmp_path / "tmp_burn.srt").write_bytes(b"temp_srt")
+
+    AssetResolver.cleanup_cancelled_artifacts("t1", current_step="BURNING", source_type="url")
+
+    assert (tmp_path / "source.mp4").exists()
+    assert (tmp_path / "audio.wav").exists()
+    assert (tmp_path / "original.srt").exists()
+    assert (tmp_path / "translated.srt").exists()
+    assert not (tmp_path / "output.mp4").exists()
+    assert not (tmp_path / "tmp_burn.srt").exists()
+
+
+def test_cleanup_cancelled_artifacts_translating_step(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
+
+    (tmp_path / "source.mp4").write_bytes(b"video")
+    (tmp_path / "audio.wav").write_bytes(b"audio")
+    (tmp_path / "original.srt").write_bytes(b"original")
+    (tmp_path / "translated.srt").write_bytes(b"partial_translated")
+    (tmp_path / "output.mp4").write_bytes(b"partial_output")
+
+    AssetResolver.cleanup_cancelled_artifacts("t1", current_step="TRANSLATING", source_type="url")
+
+    assert (tmp_path / "source.mp4").exists()
+    assert (tmp_path / "audio.wav").exists()
+    assert (tmp_path / "original.srt").exists()
+    assert not (tmp_path / "translated.srt").exists()
+    assert not (tmp_path / "output.mp4").exists()
+
+
+def test_cleanup_cancelled_artifacts_downloading_url(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
+
+    (tmp_path / "source.mp4").write_bytes(b"partial_source")
+    (tmp_path / "source.mp4.part").write_bytes(b"part_source")
+    (tmp_path / "audio.wav").write_bytes(b"audio")
+
+    AssetResolver.cleanup_cancelled_artifacts("t1", current_step="DOWNLOADING", source_type="url")
+
+    assert not (tmp_path / "source.mp4").exists()
+    assert not (tmp_path / "source.mp4.part").exists()
+    assert not (tmp_path / "audio.wav").exists()
+
+
+def test_cleanup_cancelled_artifacts_downloading_upload(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
+
+    (tmp_path / "source.mp4").write_bytes(b"user_uploaded_video")
+    (tmp_path / "audio.wav").write_bytes(b"partial_audio")
+
+    AssetResolver.cleanup_cancelled_artifacts("t1", current_step="DOWNLOADING", source_type="upload")
+
+    assert (tmp_path / "source.mp4").exists()
+    assert not (tmp_path / "audio.wav").exists()
+
+
 def test_pipeline_resumes_from_existing_artifacts(monkeypatch, tmp_path):
     """重启后从已有的最近阶段产物继续，而不是从头执行。"""
     monkeypatch.setattr(orchestrator, "task_dir", lambda tid: tmp_path)

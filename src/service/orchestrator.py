@@ -34,6 +34,8 @@ def register_cancellation_signal(task_id: str, is_cancelled: bool = False) -> th
         ev = _cancel_events.setdefault(task_id, threading.Event())
         if is_cancelled:
             ev.set()
+        else:
+            ev.clear()
         return ev
 
 
@@ -255,8 +257,21 @@ def run_pipeline(
 
     except PipelineCancelledError as e:
         logger.info("流水线已被用户取消: task=%s", tid)
+        AssetResolver.cleanup_cancelled_artifacts(
+            tid,
+            current_step=state["step"],
+            source_type=params.source_type,
+        )
         raise
     except ResourceError as e:
+        if is_cancelled_signal(tid):
+            logger.info("流水线已被用户取消: task=%s", tid)
+            AssetResolver.cleanup_cancelled_artifacts(
+                tid,
+                current_step=state["step"],
+                source_type=params.source_type,
+            )
+            raise PipelineCancelledError("任务已被用户取消") from e
         logger.error("流水线因资源异常中断: task=%s step=%s, msg=%s", tid, state["step"], str(e))
         err_code = getattr(e, "code", "resource_error")
         on_event(PipelineEvent(
@@ -268,6 +283,14 @@ def run_pipeline(
         ))
         raise
     except Exception as e:
+        if is_cancelled_signal(tid):
+            logger.info("流水线已被用户取消: task=%s", tid)
+            AssetResolver.cleanup_cancelled_artifacts(
+                tid,
+                current_step=state["step"],
+                source_type=params.source_type,
+            )
+            raise PipelineCancelledError("任务已被用户取消") from e
         logger.exception("流水线失败: task=%s step=%s", tid, state["step"])
         err_code = getattr(e, "code", None)
         on_event(PipelineEvent(

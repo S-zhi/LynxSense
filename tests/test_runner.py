@@ -135,6 +135,53 @@ def test_cancel_pipeline_terminates_procs_and_updates_status(store):
     assert proc.poll() is not None
 
 
+def test_cancel_pipeline_cleans_up_partial_artifacts(store, tmp_path, monkeypatch):
+    tid = _make_task(store)
+    store.update(tid, status="BURNING", current_step="BURNING")
+
+    task_dir_path = tmp_path / tid
+    task_dir_path.mkdir(parents=True, exist_ok=True)
+    (task_dir_path / "source.mp4").write_bytes(b"source_video")
+    (task_dir_path / "audio.wav").write_bytes(b"audio_data")
+    (task_dir_path / "original.srt").write_bytes(b"original_srt")
+    (task_dir_path / "translated.srt").write_bytes(b"translated_srt")
+    (task_dir_path / "output.mp4").write_bytes(b"partial_ffmpeg_output")
+
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda t: task_dir_path)
+
+    ok = runner.cancel_pipeline(tid)
+    assert ok is True
+
+    # Check that output.mp4 is deleted, while previous completed step files are retained
+    assert (task_dir_path / "source.mp4").exists()
+    assert (task_dir_path / "audio.wav").exists()
+    assert (task_dir_path / "original.srt").exists()
+    assert (task_dir_path / "translated.srt").exists()
+    assert not (task_dir_path / "output.mp4").exists()
+
+
+def test_retry_cancelled_task_clears_signal_and_resumes(store, monkeypatch):
+    tid = _make_task(store)
+    store.update(tid, status="CANCELLED", error="用户取消")
+
+    seen_cancellation_state = []
+
+    def fake_pipeline(params, on_event, *, api_key=None):
+        from src.service.orchestrator import is_cancelled_signal
+        seen_cancellation_state.append(is_cancelled_signal(params.task_id))
+        on_event(PipelineEvent("SUCCESS", 100, None, title="Retry Done"))
+
+    monkeypatch.setattr(runner, "run_pipeline", fake_pipeline)
+
+    # Simulate retry resetting status to PENDING and enqueuing
+    store.update(tid, status="PENDING", progress=0, error=None)
+    runner._run(tid)
+
+    rec = store.get(tid)
+    assert rec.status == "SUCCESS"
+    assert seen_cancellation_state == [False]
+
+
 def test_run_does_not_overwrite_cancelled_status(store, monkeypatch):
     tid = _make_task(store)
     store.update(tid, status="CANCELLED", error="用户取消")
