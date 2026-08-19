@@ -16,7 +16,15 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from src.config import settings
-from src.service.orchestrator import PipelineEvent, PipelineParams, run_pipeline
+from src.service.orchestrator import (
+    PipelineEvent,
+    PipelineParams,
+    is_cancelled_signal,
+    register_cancellation_signal,
+    run_pipeline,
+    set_cancelled_signal,
+    unregister_cancellation_signal,
+)
 from src.service.asset_resolver import ResourceError
 from src.store import STATUSES, TaskStore, TranslationEngineStore
 
@@ -97,6 +105,8 @@ def unregister_process(task_id: str, proc: subprocess.Popen) -> None:
 
 def cancel_pipeline(task_id: str) -> bool:
     """取消运行中的任务，终止其关联子进程并更新状态为 CANCELLED。"""
+    set_cancelled_signal(task_id)
+
     rec = _store.get(task_id)
     if rec is None:
         return False
@@ -139,8 +149,11 @@ def _run(task_id: str) -> None:
     if rec is None:
         logger.warning("任务不存在，跳过执行: %s", task_id)
         return
+
+    register_cancellation_signal(task_id, is_cancelled=(rec.status == "CANCELLED"))
     if rec.status == "CANCELLED":
         logger.info("任务已被取消，跳过执行: %s", task_id)
+        unregister_cancellation_signal(task_id)
         return
 
     params = PipelineParams(
@@ -157,10 +170,27 @@ def _run(task_id: str) -> None:
         title=rec.title,
     )
 
+    last_state = {
+        "status": rec.status,
+        "progress": rec.progress,
+        "title": rec.title,
+    }
+
     def on_event(ev: PipelineEvent) -> None:
-        cur = _store.get(task_id)
-        if cur is not None and cur.status == "CANCELLED":
+        if is_cancelled_signal(task_id):
             return
+
+        status_changed = ev.status != last_state["status"]
+        progress_decade_changed = (ev.progress // 10) != (last_state["progress"] // 10)
+        progress_reached_100 = ev.progress == 100
+        is_terminal = ev.status in {"SUCCESS", "FAILED", "CANCELLED"}
+        has_extra = (
+            ev.title is not None and ev.title != last_state["title"]
+        ) or ev.error is not None or ev.error_code is not None or bool(ev.outputs)
+
+        if not (status_changed or progress_decade_changed or progress_reached_100 or is_terminal or has_extra):
+            return
+
         fields: dict = {
             "status": ev.status,
             "progress": ev.progress,
@@ -168,6 +198,7 @@ def _run(task_id: str) -> None:
         }
         if ev.title is not None:
             fields["title"] = ev.title
+            last_state["title"] = ev.title
         if ev.error is not None:
             fields["error"] = ev.error
         if ev.error_code is not None:
@@ -175,13 +206,17 @@ def _run(task_id: str) -> None:
         if ev.outputs:
             fields["output_video"] = ev.outputs.get("video")
             fields["output_subtitle"] = ev.outputs.get("subtitle")
+
         _store.update(task_id, **fields)
+        last_state["status"] = ev.status
+        last_state["progress"] = ev.progress
 
     engine_config = None
     if rec.engine != "deepseek":
         engine_config = _engine_store.get(rec.engine)
         if engine_config is None:
             _store.update(task_id, status="FAILED", error="翻译引擎配置不存在", error_code="engine_not_found")
+            unregister_cancellation_signal(task_id)
             return
     try:
         pipeline_kwargs = {
@@ -192,22 +227,23 @@ def _run(task_id: str) -> None:
             pipeline_kwargs["engine_config"] = engine_config
         run_pipeline(params, on_event, **pipeline_kwargs)
     except ResourceError as e:
-        cur = _store.get(task_id)
-        if cur is not None and cur.status == "CANCELLED":
+        if is_cancelled_signal(task_id):
             logger.info("任务已被取消: %s", task_id)
             return
         logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
-        if cur is not None and cur.status != "FAILED":
+        if last_state["status"] != "FAILED":
             _store.update(task_id, status="FAILED", error=str(e), error_code=getattr(e, "code", "resource_error"))
+            last_state["status"] = "FAILED"
     except Exception as exc:
-        cur = _store.get(task_id)
-        if cur is not None and cur.status == "CANCELLED":
+        if is_cancelled_signal(task_id):
             logger.info("任务已被取消: %s", task_id)
             return
         logger.exception("流水线执行失败: %s", task_id)
-        if cur is not None and cur.status != "FAILED":
+        if last_state["status"] != "FAILED":
             err_code = getattr(exc, "code", "execution_error")
             _store.update(task_id, status="FAILED", error=str(exc) or "执行异常", error_code=err_code)
+            last_state["status"] = "FAILED"
     finally:
         with _procs_lock:
             _procs.pop(task_id, None)
+        unregister_cancellation_signal(task_id)
