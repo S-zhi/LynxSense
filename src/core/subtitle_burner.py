@@ -150,6 +150,7 @@ def burn_subtitles(
             error_cls=BurnError,
             not_found_msg=f"找不到 ffmpeg（{settings.ffmpeg_bin}）。请安装 ffmpeg 或设置 SUBTRANS_FFMPEG。",
             cwd=cwd,
+            task_id=task_id,
         )
     finally:
         if tmp_burn_path.exists():

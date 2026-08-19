@@ -23,6 +23,7 @@ STATUSES = (
     "BURNING",
     "SUCCESS",
     "FAILED",
+    "CANCELLED",
 )
 
 # 资源可用性：与流水线 status 解耦，专门描述"任务已经成功 / 失败，
@@ -120,6 +121,10 @@ class TaskStore:
                 conn.execute(
                     "ALTER TABLE tasks ADD COLUMN resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'"
                 )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_created_at "
+                "ON tasks (created_at DESC, id DESC)"
+            )
 
     # ---------- 增 ----------
     def create(
@@ -169,10 +174,56 @@ class TaskStore:
             row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return _row_to_record(row) if row else None
 
-    def list(self) -> List[TaskRecord]:
+    def list(
+        self,
+        limit: int = 0,
+        offset: int = 0,
+        before_id: Optional[str] = None,
+        after_id: Optional[str] = None,
+    ) -> List[TaskRecord]:
+        where_clauses = []
+        params = []
+
+        if before_id:
+            before_rec = self.get(before_id)
+            if before_rec is None:
+                return []
+            where_clauses.append("(created_at < ? OR (created_at = ? AND id < ?))")
+            params.extend([before_rec.created_at, before_rec.created_at, before_rec.id])
+
+        if after_id:
+            after_rec = self.get(after_id)
+            if after_rec is None:
+                return []
+            where_clauses.append("(created_at > ? OR (created_at = ? AND id > ?))")
+            params.extend([after_rec.created_at, after_rec.created_at, after_rec.id])
+
+        sql = "SELECT * FROM tasks"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+
+        if after_id and not before_id:
+            sql += " ORDER BY created_at ASC, id ASC"
+        else:
+            sql += " ORDER BY created_at DESC, id DESC"
+
+        if limit and limit > 0:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+            if offset and offset > 0:
+                sql += " OFFSET ?"
+                params.append(int(offset))
+        elif offset and offset > 0:
+            sql += " LIMIT -1 OFFSET ?"
+            params.append(int(offset))
+
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()
-        return [_row_to_record(r) for r in rows]
+            rows = conn.execute(sql, params).fetchall()
+
+        records = [_row_to_record(r) for r in rows]
+        if after_id and not before_id:
+            records.reverse()
+        return records
 
     # ---------- 改 ----------
     def update(self, task_id: str, **fields) -> Optional[TaskRecord]:

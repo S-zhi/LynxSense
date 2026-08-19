@@ -49,6 +49,11 @@ def test_parse_code_fenced_json():
     assert _parse_translation_response(content, 2) == ["x", "y"]
 
 
+def test_parse_truncated_json_array():
+    content = '["hello", "world", "partial'
+    assert _parse_translation_response(content, 3) == ["hello", "world"]
+
+
 def test_parse_numbered_fallback():
     content = "1. first\n2. second"
     assert _parse_translation_response(content, 2) == ["first", "second"]
@@ -103,8 +108,37 @@ def test_translate_texts_retry_succeeds_after_halving(fake_settings, monkeypatch
 
     monkeypatch.setattr(translator, "_call_deepseek", fake)
     result = translate_texts(["a", "b"], "auto", "zh-CN")
-    assert result == ["ok", "ok"]
-    assert called_batches == [2, 1, 1]  # 失败后拆成两个单条
+    # 第一一次调用 (batch size 2) 返回了 ["only-one"]，对齐到了 index 0 ("a")，
+    # 拆分后 right 子批 ("b") 仅调用 1 次，left 子批 ("a") 命中了 partial 缓存无需再次调用 LLM！
+    assert result == ["only-one", "ok"]
+    assert called_batches == [2, 1]
+
+
+def test_translate_texts_dedup_partial_hit(fake_settings, monkeypatch):
+    """测试部分命中 partial 缓存时，已成功项不再调用 LLM。"""
+    called_items = []
+
+    def fake(messages, **kw):
+        user = messages[1]["content"]
+        items = re.findall(r"^\d+\.\s*(.*)$", user, re.M)
+        called_items.append(items)
+        if len(items) == 4:
+            # 4 条 batch 仅返回前 2 条
+            return json.dumps(["T-1", "T-2"])
+        return json.dumps([f"T-{x}" for x in items])
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake)
+    # batch_size 为 4
+    monkeypatch.setattr(translator.settings, "translate_batch_size", 4)
+    result = translate_texts(["item1", "item2", "item3", "item4"], "auto", "zh-CN")
+
+    assert result == ["T-1", "T-2", "T-item3", "T-item4"]
+    # 第一次 4 条 -> 只命中前 2 条 (T-1, T-2)
+    # 拆分: left 子批 ([0, 1]) 两个都命中 -> 0 次 LLM
+    # right 子批 ([2, 3]) 缺 2 条 -> 1 次 LLM (调用 2 条)
+    assert len(called_items) == 2
+    assert len(called_items[0]) == 4
+    assert len(called_items[1]) == 2
 
 
 # ---------- translate_srt ----------

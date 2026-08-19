@@ -60,6 +60,7 @@ def run_ffmpeg(
     error_cls: type[Exception] = RuntimeError,
     not_found_msg: Optional[str] = None,
     cwd: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> None:
     """执行 ffmpeg 命令，解析 -progress 输出并回调 on_tick(已处理秒数)。
 
@@ -78,19 +79,34 @@ def run_ffmpeg(
     except FileNotFoundError as e:
         raise error_cls(not_found_msg or f"找不到可执行文件: {cmd[0]}") from e
 
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        line = line.strip()
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        if key == "out_time_us" and on_tick is not None:
-            try:
-                on_tick(int(value) / 1_000_000)
-            except (ValueError, TypeError):
-                pass
+    if task_id:
+        try:
+            from src.service.runner import register_process
+            register_process(task_id, proc)
+        except Exception:
+            pass
 
-    proc.wait()
-    if proc.returncode != 0:
-        stderr = proc.stderr.read() if proc.stderr else ""
-        raise error_cls(f"ffmpeg 执行失败（退出码 {proc.returncode}）: {stderr.strip()}")
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key == "out_time_us" and on_tick is not None:
+                try:
+                    on_tick(int(value) / 1_000_000)
+                except (ValueError, TypeError):
+                    pass
+
+        proc.wait()
+        if proc.returncode != 0:
+            stderr = proc.stderr.read() if proc.stderr else ""
+            raise error_cls(f"ffmpeg 执行失败（退出码 {proc.returncode}）: {stderr.strip()}")
+    finally:
+        if task_id:
+            try:
+                from src.service.runner import unregister_process
+                unregister_process(task_id, proc)
+            except Exception:
+                pass

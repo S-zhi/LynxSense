@@ -83,6 +83,63 @@ def test_clear_returns_count(store):
     assert store.clear() == 0
 
 
+def test_record_deduplication_within_same_hour(store, monkeypatch):
+    """同一 URL 在同一小时内连续探测会覆盖更新现有记录，而不增加总行数。"""
+    url = "https://example.com/same_video"
+    rec1 = store.record(url=url, ok=False, reason="error 1")
+    assert len(store.list()) == 1
+    assert rec1.reason == "error 1"
+
+    rec2 = store.record(url=url, ok=True, title="Fixed Video Title", formats_count=5)
+    records = store.list()
+    assert len(records) == 1
+    assert records[0].id == rec1.id
+    assert records[0].ok == 1
+    assert records[0].title == "Fixed Video Title"
+    assert records[0].formats_count == 5
+
+
+def test_record_inserts_new_row_across_different_hours(store, monkeypatch):
+    """同一 URL 在不同小时调用，会新增记录。"""
+    url = "https://example.com/diff_hour_video"
+    now_ms = 1700000000000
+
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms)
+    rec1 = store.record(url=url, ok=True, title="Hour 1")
+
+    # 1.5 小时后 (5400000 ms)
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms + 5400000)
+    rec2 = store.record(url=url, ok=True, title="Hour 2")
+
+    records = store.list()
+    assert len(records) == 2
+    assert rec1.id != rec2.id
+
+
+def test_cleanup_older_than_days(store, monkeypatch):
+    url = "https://example.com/old"
+    now_ms = int(time.time() * 1000)
+
+    # 10 天前
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms - 10 * 86400 * 1000)
+    r1 = store.record(url=url + "/1", ok=True)
+
+    # 2 天前
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms - 2 * 86400 * 1000)
+    r2 = store.record(url=url + "/2", ok=True)
+
+    # 当前
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms)
+
+    # 清理 5 天前的记录，应清掉 10 天前的 r1
+    deleted = store.cleanup_older_than_days(5)
+    assert deleted == 1
+
+    remaining = store.list()
+    assert len(remaining) == 1
+    assert remaining[0].id == r2.id
+
+
 def test_coexists_with_task_store(tmp_path):
     """probe_records 与 tasks 共用 db 文件：两个 store 同时存在不应互相影响。"""
     p = tmp_path / "shared.db"

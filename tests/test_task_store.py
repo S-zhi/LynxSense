@@ -73,6 +73,47 @@ def test_list_newest_first(store):
     assert ids[0] == b.id and ids[1] == a.id
 
 
+def test_list_pagination_limit_and_offset(store):
+    recs = []
+    for _ in range(5):
+        recs.append(_create(store))
+        time.sleep(0.001)
+
+    # 全部正序的倒排列表 (最新到最老): recs[4], recs[3], recs[2], recs[1], recs[0]
+    expected_ids = [r.id for r in reversed(recs)]
+
+    p1 = store.list(limit=2, offset=0)
+    assert [r.id for r in p1] == expected_ids[:2]
+
+    p2 = store.list(limit=2, offset=2)
+    assert [r.id for r in p2] == expected_ids[2:4]
+
+    p3 = store.list(limit=2, offset=4)
+    assert [r.id for r in p3] == expected_ids[4:]
+
+
+def test_list_cursor_before_and_after(store):
+    recs = []
+    for _ in range(5):
+        recs.append(_create(store))
+        time.sleep(0.002)
+
+    # recs: [r0, r1, r2, r3, r4], store.list() 返回 [r4, r3, r2, r1, r0]
+    mid = recs[2]
+
+    # before_id: 早于 r2 (更早创建) -> [r1, r0]
+    older = store.list(before_id=mid.id)
+    assert [r.id for r in older] == [recs[1].id, recs[0].id]
+
+    # after_id: 晚于 r2 (更晚创建) -> [r4, r3]
+    newer = store.list(after_id=mid.id)
+    assert [r.id for r in newer] == [recs[4].id, recs[3].id]
+
+    # 不存在的 id 游标返回空
+    assert store.list(before_id="task_nonexistent") == []
+    assert store.list(after_id="task_nonexistent") == []
+
+
 def test_update_partial(store):
     rec = _create(store)
     before = rec.updated_at

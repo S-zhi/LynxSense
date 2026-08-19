@@ -18,6 +18,7 @@ export const STATUS_META = {
   BURNING: { label: "烧录字幕", cls: "active", icon: "ph-spinner" },
   SUCCESS: { label: "已完成", cls: "success", icon: "ph-check" },
   FAILED: { label: "失败", cls: "failed", icon: "ph-warning" },
+  CANCELLED: { label: "已取消", cls: "failed", icon: "ph-stop-circle" },
 };
 
 export const LANG_LABEL = {
@@ -65,4 +66,4 @@ export const LANG_LABEL = {
   sw: "斯瓦希里语",
 };
 
-export const TERMINAL = new Set(["SUCCESS", "FAILED"]);
+export const TERMINAL = new Set(["SUCCESS", "FAILED", "CANCELLED"]);

@@ -111,7 +111,7 @@ def extract_audio(
     ]
 
     logger.info("开始提取音频: task=%s -> %s", task_id, audio_path.name)
-    _run_ffmpeg(cmd, total, on_progress)
+    _run_ffmpeg(cmd, total, on_progress, task_id=task_id)
 
     if not audio_path.exists() or audio_path.stat().st_size == 0:
         raise AudioExtractError("ffmpeg 执行完成但未生成有效音频文件")
@@ -137,6 +137,7 @@ def _run_ffmpeg(
     cmd: list[str],
     total_seconds: Optional[float],
     on_progress: Optional[ProgressHook],
+    task_id: Optional[str] = None,
 ) -> None:
     """执行 ffmpeg 并解析 -progress 输出，逐步回调进度。"""
     try:
@@ -152,40 +153,55 @@ def _run_ffmpeg(
             f"找不到 ffmpeg（{cmd[0]}）。请安装 ffmpeg-full 或设置 SUBTRANS_FFMPEG。 MAC用户请使用  brew install ffmpeg-full,请注意不要下载 ffmpeg，ffmpeg-full 是 ffmpeg 的完整版本，仅下载ffmpeg可能会导致字幕无法烧录到视频"
         ) from e
 
-    assert proc.stdout is not None
-    last_pct = -1.0
-    for line in proc.stdout:
-        line = line.strip()
-        if not line or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        if key == "out_time_us" and on_progress is not None:
-            processed = _parse_us(value)
-            if processed is None:
-                continue
-            pct = None
-            if total_seconds and total_seconds > 0:
-                pct = max(0.0, min(100.0, processed / total_seconds * 100.0))
-            # 去抖：百分比无变化时不重复回调
-            if pct is None or round(pct, 1) != last_pct:
-                last_pct = round(pct, 1) if pct is not None else last_pct
-                _safe_call(on_progress, AudioProgress(
-                    percent=round(pct, 1) if pct is not None else None,
-                    processed_seconds=processed,
-                    total_seconds=total_seconds,
-                ))
-        elif key == "progress" and value == "end":
-            if on_progress is not None:
-                _safe_call(on_progress, AudioProgress(
-                    percent=100.0 if total_seconds else None,
-                    processed_seconds=total_seconds or 0.0,
-                    total_seconds=total_seconds,
-                ))
+    if task_id:
+        try:
+            from src.service.runner import register_process
+            register_process(task_id, proc)
+        except Exception:
+            pass
 
-    proc.wait()
-    if proc.returncode != 0:
-        stderr = proc.stderr.read() if proc.stderr else ""
-        raise AudioExtractError(f"ffmpeg 提取音频失败（退出码 {proc.returncode}）: {stderr.strip()}")
+    try:
+        assert proc.stdout is not None
+        last_pct = -1.0
+        for line in proc.stdout:
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key == "out_time_us" and on_progress is not None:
+                processed = _parse_us(value)
+                if processed is None:
+                    continue
+                pct = None
+                if total_seconds and total_seconds > 0:
+                    pct = max(0.0, min(100.0, processed / total_seconds * 100.0))
+                # 去抖：百分比无变化时不重复回调
+                if pct is None or round(pct, 1) != last_pct:
+                    last_pct = round(pct, 1) if pct is not None else last_pct
+                    _safe_call(on_progress, AudioProgress(
+                        percent=round(pct, 1) if pct is not None else None,
+                        processed_seconds=processed,
+                        total_seconds=total_seconds,
+                    ))
+            elif key == "progress" and value == "end":
+                if on_progress is not None:
+                    _safe_call(on_progress, AudioProgress(
+                        percent=100.0 if total_seconds else None,
+                        processed_seconds=total_seconds or 0.0,
+                        total_seconds=total_seconds,
+                    ))
+
+        proc.wait()
+        if proc.returncode != 0:
+            stderr = proc.stderr.read() if proc.stderr else ""
+            raise AudioExtractError(f"ffmpeg 提取音频失败（退出码 {proc.returncode}）: {stderr.strip()}")
+    finally:
+        if task_id:
+            try:
+                from src.service.runner import unregister_process
+                unregister_process(task_id, proc)
+            except Exception:
+                pass
 
 
 def _has_audio_stream(video_path: Path) -> bool:
