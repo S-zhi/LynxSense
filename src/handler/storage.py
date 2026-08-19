@@ -126,6 +126,7 @@ class RetentionIn(BaseModel):
 class RetentionOut(BaseModel):
     days: Optional[int] = None
     updatedAt: Optional[int] = None
+    lastRunAt: Optional[int] = None
 
 
 # ---------- 保留策略配置（轻量：落到本地 JSON） ----------
@@ -147,14 +148,25 @@ def _load_retention() -> RetentionOut:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return RetentionOut()
-    return RetentionOut(days=data.get("days"), updatedAt=data.get("updatedAt"))
+    return RetentionOut(
+        days=data.get("days"),
+        updatedAt=data.get("updatedAt"),
+        lastRunAt=data.get("lastRunAt"),
+    )
 
 
 def _save_retention(out: RetentionOut) -> None:
     p = _retention_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        json.dumps({"days": out.days, "updatedAt": out.updatedAt}, ensure_ascii=False),
+        json.dumps(
+            {
+                "days": out.days,
+                "updatedAt": out.updatedAt,
+                "lastRunAt": out.lastRunAt,
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
 
@@ -326,18 +338,12 @@ def cleanup_preview(
     )
 
 
-@router.post("/cleanup", response_model=CleanupResponse)
-def cleanup(
+def execute_cleanup(
     body: CleanupPreviewRequest,
-    store: TaskStore = Depends(get_store),
-    probes: ProbeStore = Depends(get_probe_store),
+    store: TaskStore,
+    probes: ProbeStore,
 ) -> CleanupResponse:
-    """执行清理。复用 delete_task 风格的清理路径，但允许仅删指定类别产物。
-
-    安全策略：
-      1. RUNNING 状态任务一律跳过，并在响应中返回；
-      2. 真正落盘前再次校验当前状态（防止预览后到执行之间状态变化）。
-    """
+    """核心清理逻辑，可由 API 端点或保留策略调度器复用。"""
     candidates, skipped, artifacts_by_task = _collect_targets(store, body)
     skipped_storage = [
         _build_task_storage(r, _scan_artifacts(r.id), skipped=True) for r in skipped
@@ -405,6 +411,21 @@ def cleanup(
     )
 
 
+@router.post("/cleanup", response_model=CleanupResponse)
+def cleanup(
+    body: CleanupPreviewRequest,
+    store: TaskStore = Depends(get_store),
+    probes: ProbeStore = Depends(get_probe_store),
+) -> CleanupResponse:
+    """执行清理。复用 delete_task 风格的清理路径，但允许仅删指定类别产物。
+
+    安全策略：
+      1. RUNNING 状态任务一律跳过，并在响应中返回；
+      2. 真正落盘前再次校验当前状态（防止预览后到执行之间状态变化）。
+    """
+    return execute_cleanup(body, store, probes)
+
+
 @router.get("/retention", response_model=RetentionOut)
 def get_retention() -> RetentionOut:
     """读取保留策略（days=None 表示不限）。"""
@@ -413,7 +434,17 @@ def get_retention() -> RetentionOut:
 
 @router.put("/retention", response_model=RetentionOut)
 def put_retention(body: RetentionIn) -> RetentionOut:
-    """写入保留策略。"""
-    out = RetentionOut(days=body.days, updatedAt=int(time.time() * 1000))
+    """写入保留策略。若配置了有效天数，异步触发一次清理。"""
+    current = _load_retention()
+    out = RetentionOut(
+        days=body.days,
+        updatedAt=int(time.time() * 1000),
+        lastRunAt=current.lastRunAt,
+    )
     _save_retention(out)
+
+    if body.days is not None and body.days > 0:
+        from src.service.retention_scheduler import trigger_retention_cleanup_async
+        trigger_retention_cleanup_async()
+
     return out

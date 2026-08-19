@@ -21,7 +21,11 @@ from src.config import settings
 from src.handler import health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
 
 from src.handler.deps import get_store
+
+from src.service.retention_scheduler import start_retention_scheduler
+
 from src.service.runner import recover_interrupted_tasks, shutdown_executor
+
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +78,7 @@ def create_app() -> FastAPI:
         if recovered:
             logger.warning("启动恢复：以下未完成任务已重新入队: %s", recovered)
 
+        start_retention_scheduler()
     @app.on_event("shutdown")
     def _shutdown_runner() -> None:
         """关闭应用时通知 runner 线程池退出。"""
