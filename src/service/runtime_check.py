@@ -46,14 +46,30 @@ def build_readiness() -> dict[str, Any]:
     replicate_token_configured = _has_value(os.getenv("REPLICATE_API_TOKEN"))
     replicate_token_invalid = False
     replicate_ready = False
+    replicate_checked_at: int | None = None
+    replicate_cached: bool = False
+    replicate_check_status = "missing"
 
     if replicate_token_configured:
         account_info = query_replicate_balance()
-        if account_info.get("status") == "error" or account_info.get("errorCode") == "invalid_api_token":
+        replicate_checked_at = account_info.get("checkedAt")
+        replicate_cached = bool(account_info.get("cached", False))
+
+        status = account_info.get("status")
+        error_code = account_info.get("errorCode")
+
+        if status == "error" or error_code == "invalid_api_token":
             replicate_token_invalid = True
             replicate_ready = False
-        else:
+            replicate_check_status = "invalid"
+        elif status == "unavailable":
+            replicate_token_invalid = False
             replicate_ready = True
+            replicate_check_status = "unavailable"
+        else:
+            replicate_token_invalid = False
+            replicate_ready = True
+            replicate_check_status = "available"
 
     deepseek_ready = _has_value(
         os.getenv("SUBTRANS_DEEPSEEK_API_KEY")
@@ -120,13 +136,6 @@ def build_readiness() -> dict[str, Any]:
         agent_action = "continue"
         restart_required = False
 
-    if replicate_token_invalid:
-        replicate_check_status = "invalid"
-    elif replicate_ready:
-        replicate_check_status = "available"
-    else:
-        replicate_check_status = "missing"
-
     return {
         "ok": hard_pipeline_ready,
         "initialized": full_pipeline_ready,
@@ -136,8 +145,12 @@ def build_readiness() -> dict[str, Any]:
             "REPLICATE_API_TOKEN",
             "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY",
         ],
+        "replicate_checked_at": replicate_checked_at,
+        "replicate_cached": replicate_cached,
         "checks": {
             "replicate_api_token": replicate_check_status,
+            "replicate_checked_at": replicate_checked_at,
+            "replicate_cached": replicate_cached,
             "deepseek_api_key": "available" if deepseek_ready else "missing",
             "ffmpeg": ffmpeg_status,
             "ffprobe": ffprobe_status,
@@ -151,6 +164,7 @@ def build_readiness() -> dict[str, Any]:
             "full_pipeline": full_pipeline_ready,
             "hard_burn": hard_burn_ready,
             "soft_burn": full_pipeline_ready,
+            "max_concurrent_tasks": settings.pipeline_workers,
         },
         "limits": {
             "max_upload_mb": settings.max_upload_mb,

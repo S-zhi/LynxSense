@@ -88,6 +88,30 @@ def _bootstrap_env() -> None:
 
 _bootstrap_env()
 
+_last_env_mtime: float = -1.0
+
+
+def _sync_env_file() -> None:
+    """如果 .env 文件存在且被修改，重新同步环境变量到 os.environ。"""
+    global _last_env_mtime
+    env_path = _BACKEND_DIR / ".env"
+    if not env_path.exists():
+        return
+    try:
+        mtime = env_path.stat().st_mtime
+        if mtime != _last_env_mtime:
+            _last_env_mtime = mtime
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip().strip('"').strip("'")
+                if key and val:
+                    os.environ[key] = val
+    except Exception:
+        pass
+
 
 def _env_path(key: str, default: Path) -> Path:
     val = os.getenv(key)
@@ -135,11 +159,26 @@ class Settings:
     # SQLite 任务库文件
     db_path: Path = _env_path("SUBTRANS_DB", _BACKEND_DIR / "app.db")
 
-    # 后台流水线并发数（方案 A：线程池）
-    pipeline_workers: int = int(os.getenv("SUBTRANS_WORKERS", "2"))
+    # 后台流水线并发数覆盖（None 表示动态读取 SUBTRANS_WORKERS 或 .env）
+    _pipeline_workers_override: Optional[int] = field(default=None, repr=False)
+
+    # 后台流水线并发数（方案 A：线程池，动态读取，支持运行期调整 SUBTRANS_WORKERS 或编辑 .env）
+    @property
+    def pipeline_workers(self) -> int:
+        if self._pipeline_workers_override is not None:
+            return max(1, self._pipeline_workers_override)
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_WORKERS", "2")
+        try:
+            return max(1, int(val))
+        except (ValueError, TypeError):
+            return 2
 
     # SSE 进度流连接超时上限（秒），默认 7200 秒（2 小时）
     stream_timeout_sec: int = int(os.getenv("SUBTRANS_STREAM_TIMEOUT_SEC", "7200"))
+
+    # Readiness / Replicate 余额检查 TTL 缓存时长（秒），默认 60 秒
+    readiness_ttl_sec: int = int(os.getenv("SUBTRANS_READINESS_TTL_SEC", "60"))
 
     # 允许访问本地 API 的前端来源，逗号分隔覆盖
     cors_allow_origins: tuple[str, ...] = _env_list(

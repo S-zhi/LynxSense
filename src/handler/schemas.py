@@ -103,6 +103,7 @@ class TaskOut(BaseModel):
     progress: int
     currentStep: Optional[str]
     error: Optional[str]
+    errorCode: Optional[str] = None
     outputs: Optional[dict]
     resourceStatus: str  # AVAILABLE | MISSING — 任务产物文件是否在盘
     createdAt: int
@@ -140,6 +141,7 @@ def to_out(rec: TaskRecord) -> TaskOut:
         progress=rec.progress,
         currentStep=rec.current_step,
         error=rec.error,
+        errorCode=rec.error_code,
         outputs=outputs,
         resourceStatus=resource_status,
         createdAt=rec.created_at,

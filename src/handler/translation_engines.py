@@ -15,6 +15,8 @@ from src.store import AVAILABILITY, ENGINE_TYPES, TranslationEngine, Translation
 
 router = APIRouter(prefix="/api/settings/translation-engines", tags=["translation-engines"])
 
+VALIDATE_TIMEOUT_SEC = 10
+
 
 class EngineIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
@@ -117,7 +119,7 @@ def validate_engine(
 
     store.update(engine_id, availability="CHECKING", last_checked_at=checked_at, last_error=None)
     try:
-        client = make_engine_client(rec)
+        client = make_engine_client(rec, timeout=VALIDATE_TIMEOUT_SEC)
         client.complete("Reply with OK only.", "OK", max_tokens=4)
     except TranslationEngineError as exc:
         store.update(engine_id, availability="UNAVAILABLE", last_checked_at=checked_at, last_error=str(exc))
