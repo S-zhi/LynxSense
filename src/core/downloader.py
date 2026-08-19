@@ -11,7 +11,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -67,6 +70,16 @@ class ProbeResult:
     webpage_url: Optional[str] = None
     reason: Optional[str] = None
     detail: Optional[str] = None
+    cached: bool = False
+
+_probe_cache_lock = threading.Lock()
+_probe_cache: dict[tuple[str, str, str], tuple[float, ProbeResult]] = {}
+
+
+def clear_probe_cache() -> None:
+    """清空视频探测结果缓存。"""
+    with _probe_cache_lock:
+        _probe_cache.clear()
 
 # 视频下载回调函数 回调函数逻辑 提供修改进度的展示函数 -> 放入执行流程中的hook内
 ProgressHook = Callable[[DownloadProgress], None]
@@ -191,13 +204,33 @@ def probe_video(
     *,
     cookies_file: Optional[Path] = None,
     format_selector: Optional[str] = None,
+    ttl_sec: Optional[float] = None,
+    force_refresh: bool = False,
 ) -> ProbeResult:
-    """探测 URL 是否能被 yt-dlp 解析并找到可下载格式，不落盘下载。"""
-    if not _is_probe_url(url):
-        return ProbeResult(ok=False, reason="请输入有效的视频链接")
+    """探测 URL 是否能被 yt-dlp 解析并找到可下载格式，不落盘下载。
+
+    支持 TTL 网络级缓存：在 ttl_sec 时间内对相同 URL 的重复探测将直接返回缓存，
+    命中时结果带 cached=True，避免频繁撞上游风控/429。
+    """
+    clean_url = url.strip()
+    if not _is_probe_url(clean_url):
+        return ProbeResult(ok=False, reason="请输入有效的视频链接", cached=False)
+
+    effective_ttl = ttl_sec if ttl_sec is not None else float(settings.probe_cache_ttl_sec)
+    effective_cookies = cookies_file or settings.cookies_file
+    effective_format = format_selector or settings.download_format
+    cache_key = (clean_url, str(effective_cookies or ""), str(effective_format))
+    now = time.time()
+
+    if not force_refresh and effective_ttl > 0:
+        with _probe_cache_lock:
+            if cache_key in _probe_cache:
+                ts, cached_res = _probe_cache[cache_key]
+                if now - ts < effective_ttl:
+                    return dataclasses.replace(cached_res, cached=True)
 
     ydl_opts: dict = {
-        "format": format_selector or settings.download_format,
+        "format": effective_format,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -208,45 +241,54 @@ def probe_video(
         # 导致明明能下载的视频被误判为“无可用格式”。探测只需能解析出格式即可。
     }
 
-    cookies = cookies_file or settings.cookies_file
-    if cookies:
-        ydl_opts["cookiefile"] = str(cookies)
+    if effective_cookies:
+        ydl_opts["cookiefile"] = str(effective_cookies)
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(clean_url, download=False)
     except YtDlpDownloadError as e:
-        return ProbeResult(
+        res = ProbeResult(
             ok=False,
             reason=_probe_failure_reason(str(e)),
             detail=_clip_error(str(e)),
+            cached=False,
         )
     except Exception as e:
-        return ProbeResult(
+        res = ProbeResult(
             ok=False,
             reason="链接探测失败",
             detail=_clip_error(str(e)),
+            cached=False,
         )
+    else:
+        formats_count = _count_formats(info)
+        if formats_count == 0 and not info.get("url"):
+            res = ProbeResult(
+                ok=False,
+                title=info.get("title"),
+                extractor=info.get("extractor_key") or info.get("extractor"),
+                duration=info.get("duration"),
+                webpage_url=info.get("webpage_url") or clean_url,
+                reason="未找到可下载的视频格式",
+                cached=False,
+            )
+        else:
+            res = ProbeResult(
+                ok=True,
+                title=info.get("title"),
+                extractor=info.get("extractor_key") or info.get("extractor"),
+                duration=info.get("duration"),
+                formats_count=formats_count,
+                webpage_url=info.get("webpage_url") or clean_url,
+                cached=False,
+            )
 
-    formats_count = _count_formats(info)
-    if formats_count == 0 and not info.get("url"):
-        return ProbeResult(
-            ok=False,
-            title=info.get("title"),
-            extractor=info.get("extractor_key") or info.get("extractor"),
-            duration=info.get("duration"),
-            webpage_url=info.get("webpage_url") or url,
-            reason="未找到可下载的视频格式",
-        )
+    if effective_ttl > 0:
+        with _probe_cache_lock:
+            _probe_cache[cache_key] = (now, res)
 
-    return ProbeResult(
-        ok=True,
-        title=info.get("title"),
-        extractor=info.get("extractor_key") or info.get("extractor"),
-        duration=info.get("duration"),
-        formats_count=formats_count,
-        webpage_url=info.get("webpage_url") or url,
-    )
+    return res
 
 
 def _resolve_output_path(info: dict, out_dir: Path) -> Optional[Path]:
