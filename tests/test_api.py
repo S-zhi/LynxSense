@@ -1027,6 +1027,21 @@ def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch)
     assert _count_task_dirs(client._tmp) == before
 
 
+def test_upload_creates_atomic_source_file_and_no_part_remaining(client, monkeypatch):
+    """上传成功后，正式文件 source.mp4 存在，且不残留 .part 文件。"""
+    enqueued = []
+    monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+
+    r = _upload(client, _filename="clip.mp4", _content=b"ATOMIC_VIDEO")
+    assert r.status_code == 201
+    tid = r.json()["id"]
+    tdir = client._tmp / tid
+
+    assert (tdir / "source.mp4").exists()
+    assert (tdir / "source.mp4").read_bytes() == b"ATOMIC_VIDEO"
+    assert not (tdir / "source.mp4.part").exists()
+
+
 def test_upload_probe_duration_none_400_and_cleanup(client, monkeypatch):
     """probe_duration 返回 None 时（如 ffprobe 缺失或解析失败）返回 400 并清理记录与目录。"""
     enqueued = []

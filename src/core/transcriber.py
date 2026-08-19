@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 class TranscribeError(RuntimeError):
     """语音识别阶段失败。"""
 
+    def __init__(self, message: str, *, code: str = "transcribe_error"):
+        super().__init__(message)
+        self.code = code
+
 
 class TranscribeCancelledError(RuntimeError):
     """语音识别已被取消。"""
@@ -133,15 +137,31 @@ def _run_replicate_with_retry(
                     time.sleep(sleep_time)
                     elapsed += sleep_time
                 _do_cancel_check(cancel_check)
+        except replicate.exceptions.ModelError as e:
+            raise TranscribeError(f"Replicate 语音识别失败: {e}", code="model_error") from e
+        except (httpx.HTTPStatusError, replicate.exceptions.ReplicateError) as e:
+            status = getattr(e, "status", None) or getattr(getattr(e, "response", None), "status_code", None)
+            if status in (401, 403):
+                code = "unauthorized"
+            elif status == 429:
+                code = "rate_limited"
+            elif status and status >= 500:
+                code = "upstream_error"
+            elif status and 400 <= status < 500:
+                code = "model_error"
+            else:
+                code = "upstream_error"
+            raise TranscribeError(f"Replicate 语音识别失败: {e}", code=code) from e
         except Exception as e:  # 模型报错 / 鉴权等非瞬时错误，不重试
-            if isinstance(e, TranscribeCancelledError) or type(e).__name__ == "PipelineCancelledError":
+            if isinstance(e, TranscribeCancelledError) or type(e).__name__ == "PipelineCancelledError" or isinstance(e, TranscribeError):
                 raise
             raise TranscribeError(f"Replicate 语音识别失败: {e}") from e
 
     _do_cancel_check(cancel_check)
     raise TranscribeError(
         f"Replicate 语音识别多次超时失败（已重试 {retries} 次；"
-        f"冷启动可调大 SUBTRANS_REPLICATE_TIMEOUT）: {last_exc}"
+        f"冷启动可调大 SUBTRANS_REPLICATE_TIMEOUT）: {last_exc}",
+        code="network_error",
     )
 
 
@@ -169,7 +189,7 @@ def transcribe(
     # 进度提示：Replicate 简单 API 调用等待模型冷启动完成并返回结果；等待期间保持 starting/retrying 状态
     _load_env()
     if not os.getenv("REPLICATE_API_TOKEN"):
-        raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）")
+        raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）", code="missing_api_key")
 
     lang = None if language in (None, "", "auto") else language
     model = model_name or "small"
@@ -270,13 +290,20 @@ def _extract_segments(output) -> List[dict]:
 
 def _download_text(url: str) -> str:
     """下载远程文本（SRT）。"""
-    resp = httpx.get(url, timeout=30)
-    resp.raise_for_status()
-    raw = getattr(resp, "content", None)
-    if raw is None:
-        raw = getattr(resp, "text", "").encode("utf-8")
-    text, _ = decode_srt_bytes(raw)
-    return text
+    try:
+        resp = httpx.get(url, timeout=30)
+        resp.raise_for_status()
+        raw = getattr(resp, "content", None)
+        if raw is None:
+            raw = getattr(resp, "text", "").encode("utf-8")
+        text, _ = decode_srt_bytes(raw)
+        return text
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        code = "unauthorized" if status in (401, 403) else "rate_limited" if status == 429 else "upstream_error"
+        raise TranscribeError(f"下载 Replicate 字幕文件失败 HTTP {status}", code=code) from exc
+    except httpx.RequestError as exc:
+        raise TranscribeError("下载 Replicate 字幕文件超时或网络异常", code="network_error") from exc
 
 
 def _parse_srt_segments(srt_text: str) -> List[dict]:
