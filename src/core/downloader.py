@@ -15,6 +15,7 @@ import dataclasses
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -83,6 +84,67 @@ def clear_probe_cache() -> None:
 
 # 视频下载回调函数 回调函数逻辑 提供修改进度的展示函数 -> 放入执行流程中的hook内
 ProgressHook = Callable[[DownloadProgress], None]
+
+
+class _DownloadConcurrencyLimiter:
+    """只限制媒体下载阶段的并发，不占用后续字幕处理的下载名额。
+
+    使用条件变量而不是固定大小的 ``Semaphore``，这样运行中修改
+    ``SUBTRANS_DOWNLOAD_WORKERS`` 后，新任务会使用最新配置；已经运行中的下载
+    不会被强行打断。每次 ``slot`` 退出都会释放名额，即使 yt-dlp 抛出异常。
+    """
+
+    def __init__(self, limit_getter: Callable[[], int]):
+        self._limit_getter = limit_getter
+        self._condition = threading.Condition()
+        self._active = 0
+
+    @property
+    def active(self) -> int:
+        with self._condition:
+            return self._active
+
+    def _limit(self) -> int:
+        try:
+            return max(1, int(self._limit_getter()))
+        except (TypeError, ValueError):
+            return 2
+
+    @contextmanager
+    def slot(self):
+        wait_started = time.monotonic()
+        with self._condition:
+            while self._active >= self._limit():
+                # 周期性重读配置，支持运行中把并发上限调高。
+                self._condition.wait(timeout=0.5)
+            self._active += 1
+        waited = time.monotonic() - wait_started
+
+        try:
+            yield waited
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._condition.notify()
+
+
+def _configured_download_workers() -> int:
+    """读取下载阶段并发配置，并兼容测试中的简化 settings 对象。"""
+    try:
+        return max(1, int(getattr(settings, "download_workers", 2)))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _configured_fragment_workers() -> int:
+    """读取单个 HLS/DASH 媒体任务的分片并发配置。"""
+    try:
+        return max(1, int(getattr(settings, "download_concurrent_fragments", 4)))
+    except (TypeError, ValueError):
+        return 4
+
+
+_download_limiter = _DownloadConcurrencyLimiter(_configured_download_workers)
 
 # 对钩子函数进行封装
 def _make_progress_adapter(on_progress: ProgressHook):
@@ -153,6 +215,8 @@ def download_video(
         "outtmpl": outtmpl,
         "noplaylist": True,          # 只下单个视频，忽略播放列表
         "retries": settings.download_retries,
+        # yt-dlp 的 HLS/DASH 分片默认串行；适度并发可避免单个视频被单连接吞吐限制。
+        "concurrent_fragment_downloads": _configured_fragment_workers(),
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,          # 关闭 yt-dlp 自带进度条，进度走我们的 hook
@@ -169,8 +233,24 @@ def download_video(
     logger.info("开始下载: task=%s url=%s", task_id, url)
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+        with _download_limiter.slot() as wait_seconds:
+            started = time.monotonic()
+            logger.info(
+                "获得下载槽位: task=%s wait=%.2fs active=%d limit=%d",
+                task_id,
+                wait_seconds,
+                _download_limiter.active,
+                _configured_download_workers(),
+            )
+            try:
+                with YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+            finally:
+                logger.info(
+                    "释放下载槽位: task=%s elapsed=%.2fs",
+                    task_id,
+                    time.monotonic() - started,
+                )
     except YtDlpDownloadError as e:
         raise DownloadError(f"视频下载失败: {e}") from e
     except Exception as e:  # 解析 / 网络等其它错误
