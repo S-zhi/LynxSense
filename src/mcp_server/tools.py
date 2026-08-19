@@ -36,6 +36,7 @@ def _normalize_task(api: BusinessApiClient, data: dict[str, Any]) -> dict[str, A
         "progress": data.get("progress", 0),
         "current_step": data.get("currentStep"),
         "error": data.get("error"),
+        "error_code": data.get("errorCode"),
         "resource_status": data.get("resourceStatus"),
         "outputs": outputs,
         "created_at": data.get("createdAt"),

@@ -217,3 +217,80 @@ def test_lang_name_lookup_and_config_override(monkeypatch):
     monkeypatch.setattr(translator, "settings", custom_s)
     assert translator._lang_name("id") == "Indonesian Custom"
     assert translator._lang_name("custom-code") == "Custom Language Name"
+
+
+# ---------- error code mapping & fast fail tests ----------
+
+def test_call_deepseek_http_errors(fake_settings, monkeypatch):
+    import httpx
+
+    def mock_post_401(*a, **k):
+        request = httpx.Request("POST", "https://api.deepseek.com")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("Unauthorized", request=request, response=response)
+
+    monkeypatch.setattr(httpx, "post", mock_post_401)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["hello"], "en", "zh-CN")
+    assert exc_info.value.code == "unauthorized"
+    assert "HTTP 401" in str(exc_info.value)
+
+
+def test_call_deepseek_rate_limit(fake_settings, monkeypatch):
+    import httpx
+
+    def mock_post_429(*a, **k):
+        request = httpx.Request("POST", "https://api.deepseek.com")
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("Rate Limit", request=request, response=response)
+
+    monkeypatch.setattr(httpx, "post", mock_post_429)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["hello"], "en", "zh-CN")
+    assert exc_info.value.code == "rate_limited"
+
+
+def test_call_deepseek_network_error(fake_settings, monkeypatch):
+    import httpx
+
+    def mock_post_network(*a, **k):
+        raise httpx.RequestError("Network connection failed")
+
+    monkeypatch.setattr(httpx, "post", mock_post_network)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["hello"], "en", "zh-CN")
+    assert exc_info.value.code == "network_error"
+
+
+def test_fast_fail_on_unauthorized(fake_settings, monkeypatch):
+    import httpx
+    called_count = 0
+
+    def mock_post_401(*a, **k):
+        nonlocal called_count
+        called_count += 1
+        request = httpx.Request("POST", "https://api.deepseek.com")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("Unauthorized", request=request, response=response)
+
+    monkeypatch.setattr(httpx, "post", mock_post_401)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["a", "b", "c", "d"], "en", "zh-CN")
+    assert exc_info.value.code == "unauthorized"
+    # 应立即抛出，不触发拆分重试 (只调用一次)
+    assert called_count == 1
+
+
+def test_single_item_failure_line_index_message(fake_settings, monkeypatch):
+    import httpx
+
+    def mock_post_500(*a, **k):
+        request = httpx.Request("POST", "https://api.deepseek.com")
+        response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError("Server Error", request=request, response=response)
+
+    monkeypatch.setattr(httpx, "post", mock_post_500)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["a", "b"], "en", "zh-CN")
+    assert exc_info.value.code == "upstream_error"
+    assert "第 1 条字幕翻译失败" in str(exc_info.value)
