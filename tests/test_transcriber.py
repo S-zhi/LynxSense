@@ -170,8 +170,71 @@ def test_transcribe_error_wrapped(monkeypatch, tmp_path):
 def test_transcribe_no_api_token(monkeypatch, tmp_path):
     audio = make_fake_audio(tmp_path)
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
-    with pytest.raises(TranscribeError, match="REPLICATE_API_TOKEN"):
+    with pytest.raises(TranscribeError, match="REPLICATE_API_TOKEN") as exc_info:
         transcribe(audio, "t1")
+    assert exc_info.value.code == "missing_api_key"
+
+
+@pytest.mark.parametrize("status_code, expected_code", [
+    (401, "unauthorized"),
+    (403, "unauthorized"),
+    (429, "rate_limited"),
+    (500, "upstream_error"),
+    (502, "upstream_error"),
+    (400, "model_error"),
+    (422, "model_error"),
+])
+def test_transcribe_http_status_error_codes(monkeypatch, tmp_path, status_code, expected_code):
+    audio = make_fake_audio(tmp_path)
+
+    class StatusErrorClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, ref, input):
+            request = httpx.Request("POST", "https://api.replicate.com/v1/predictions")
+            response = httpx.Response(status_code, request=request)
+            raise httpx.HTTPStatusError("HTTP error", request=request, response=response)
+
+    monkeypatch.setattr(transcriber.replicate, "Client", StatusErrorClient)
+    with pytest.raises(TranscribeError) as exc_info:
+        transcribe(audio, "t1")
+    assert exc_info.value.code == expected_code
+
+
+def test_transcribe_replicate_error_code(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+
+    class ReplicateErrorClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, ref, input):
+            raise transcriber.replicate.exceptions.ReplicateError(
+                title="Unauthorized", status=401, detail="Invalid token"
+            )
+
+    monkeypatch.setattr(transcriber.replicate, "Client", ReplicateErrorClient)
+    with pytest.raises(TranscribeError) as exc_info:
+        transcribe(audio, "t1")
+    assert exc_info.value.code == "unauthorized"
+
+
+def test_transcribe_model_error_code(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+
+    class ModelErrorClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, ref, input):
+            prediction = SimpleNamespace(error="Model failed processing")
+            raise transcriber.replicate.exceptions.ModelError(prediction)
+
+    monkeypatch.setattr(transcriber.replicate, "Client", ModelErrorClient)
+    with pytest.raises(TranscribeError) as exc_info:
+        transcribe(audio, "t1")
+    assert exc_info.value.code == "model_error"
 
 
 # ---------- 冷启动重试 ----------
@@ -275,8 +338,9 @@ def test_transcribe_retries_exhausted(monkeypatch, tmp_path):
     ))
     monkeypatch.setattr(transcriber.time, "sleep", lambda s: None)
 
-    with pytest.raises(TranscribeError, match="多次超时"):
+    with pytest.raises(TranscribeError, match="多次超时") as exc_info:
         transcribe(audio, "t1")
+    assert exc_info.value.code == "network_error"
     assert len(opened_files) == 2
     assert opened_files[0] is not opened_files[1]
     assert all(f.closed for f in opened_files)
