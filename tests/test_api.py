@@ -676,6 +676,7 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert data["formatsCount"] == 2
     assert data["webpageUrl"] == "https://x/v"
     assert data["reason"] is None and data["detail"] is None
+    assert data["cached"] is False
     # 落库：调用一次后历史记录里应能查到此条
     records = client._probe_store.list()
     assert len(records) == 1
