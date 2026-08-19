@@ -79,12 +79,13 @@ class EngineClient:
         raise TranslationEngineError("不支持的翻译协议类型", code="unsupported_api_type")
 
 
-def make_engine_client(config: Any) -> EngineClient:
+def make_engine_client(config: Any, timeout: int | None = None) -> EngineClient:
     api_type = getattr(config, "api_type", None) or config.get("api_type")
     base_url = getattr(config, "base_url", None) or config.get("base_url")
     model = getattr(config, "model", None) or config.get("model")
     api_key = getattr(config, "api_key", None) or config.get("api_key")
-    timeout = getattr(config, "timeout", None) or (config.get("timeout") if isinstance(config, dict) else 60) or 60
+    if timeout is None:
+        timeout = getattr(config, "timeout", None) or (config.get("timeout") if isinstance(config, dict) else 60) or 60
     if not api_key:
         raise TranslationEngineError("未配置 API Key", code="missing_api_key")
     return EngineClient(api_type=api_type, base_url=base_url, model=model, api_key=api_key, timeout=int(timeout))
