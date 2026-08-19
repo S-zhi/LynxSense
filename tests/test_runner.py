@@ -230,3 +230,70 @@ def test_on_event_db_write_throttling(store, monkeypatch):
     # Exactly 3 DB updates triggered instead of 20+
     assert len(update_calls) == 3
     assert store.get(tid).status == "SUCCESS"
+
+
+def test_terminate_process_sigkill_fallback(monkeypatch):
+    import subprocess
+    from unittest.mock import MagicMock
+
+    proc = MagicMock(spec=subprocess.Popen)
+    proc.poll.return_value = None
+    proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="ffmpeg", timeout=5), None]
+
+    runner._terminate_process(proc, task_id="task_123")
+
+    proc.terminate.assert_called_once()
+    proc.kill.assert_called_once()
+    assert proc.wait.call_count == 2
+
+
+def test_cancel_pipeline_cleans_up_partial_artifacts(store, tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "task_dir", lambda task_id: tmp_path / task_id)
+
+    tid = _make_task(store)
+    tdir = tmp_path / tid
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    out_mp4 = tdir / "output.mp4"
+    out_mp4.write_text("half mp4 content")
+    part_file = tdir / "video.mp4.part"
+    part_file.write_text("downloading part")
+    tmp_file = tdir / "tmp_burn.srt"
+    tmp_file.write_text("tmp srt")
+    source_file = tdir / "source.mp4"
+    source_file.write_text("valid source video")
+
+    ok = runner.cancel_pipeline(tid)
+    assert ok is True
+
+    assert not out_mp4.exists()
+    assert not part_file.exists()
+    assert not tmp_file.exists()
+    assert source_file.exists()
+
+
+def test_run_finally_terminates_procs_and_cleans_artifacts(store, tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "task_dir", lambda task_id: tmp_path / task_id)
+
+    tid = _make_task(store)
+    tdir = tmp_path / tid
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    out_mp4 = tdir / "output.mp4"
+    out_mp4.write_text("half mp4 content")
+
+    import subprocess
+    from unittest.mock import MagicMock
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = None
+
+    def fake_pipeline(params, on_event, *, api_key=None):
+        runner.register_process(tid, mock_proc)
+        runner.set_cancelled_signal(tid)
+        raise runner.PipelineCancelledError("cancelled")
+
+    monkeypatch.setattr(runner, "run_pipeline", fake_pipeline)
+    runner._run(tid)
+
+    mock_proc.terminate.assert_called_once()
+    assert not out_mp4.exists()

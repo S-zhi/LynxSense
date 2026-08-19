@@ -14,8 +14,9 @@ import logging
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-from src.config import settings
+from src.config import OUTPUT_VIDEO, settings, task_dir
 from src.service.orchestrator import (
     PipelineEvent,
     PipelineParams,
@@ -103,8 +104,59 @@ def unregister_process(task_id: str, proc: subprocess.Popen) -> None:
                 del _procs[task_id]
 
 
+def _terminate_process(proc: subprocess.Popen, task_id: Optional[str] = None) -> None:
+    """平滑终止子进程：优先发送 SIGTERM，超时则补发 SIGKILL 确保子进程真正退出。"""
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        logger.warning("子进程(PID %s)响应 SIGTERM 超时，发送 SIGKILL: task=%s", getattr(proc, "pid", None), task_id)
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception as e:
+            logger.warning("发送 SIGKILL 终止子进程失败: PID=%s, task=%s, err=%s", getattr(proc, "pid", None), task_id, e)
+    except Exception as e:
+        logger.warning("终止子进程失败: PID=%s, task=%s, err=%s", getattr(proc, "pid", None), task_id, e)
+
+
+def _cleanup_partial_artifacts(task_id: str) -> None:
+    """清理任务取消后留下的半截/临时产物（如半截 output.mp4、.part/.ytdl 临时文件等）。"""
+    d = task_dir(task_id)
+    if not d.exists():
+        return
+
+    out_video = d / OUTPUT_VIDEO
+    if out_video.exists():
+        try:
+            out_video.unlink()
+            logger.info("已清理取消任务的半截成品视频: task=%s, path=%s", task_id, out_video)
+        except Exception as e:
+            logger.warning("清理半截成品视频失败: task=%s, err=%s", task_id, e)
+
+    try:
+        for p in d.iterdir():
+            if p.is_file():
+                name_lower = p.name.lower()
+                if (
+                    name_lower.endswith(".part")
+                    or name_lower.endswith(".ytdl")
+                    or name_lower.endswith(".tmp")
+                    or name_lower.startswith("tmp_")
+                ):
+                    try:
+                        p.unlink()
+                        logger.info("已清理取消任务的临时文件: task=%s, path=%s", task_id, p)
+                    except Exception as e:
+                        logger.warning("清理临时文件失败: task=%s, path=%s, err=%s", task_id, p, e)
+    except Exception as e:
+        logger.warning("清理任务临时文件目录失败: task=%s, err=%s", task_id, e)
+
+
 def cancel_pipeline(task_id: str) -> bool:
-    """取消运行中的任务，终止其关联子进程并更新状态为 CANCELLED。"""
+    """取消运行中的任务，终止其关联子进程，清理半截产物并更新状态为 CANCELLED。"""
     set_cancelled_signal(task_id)
 
     rec = _store.get(task_id)
@@ -117,10 +169,9 @@ def cancel_pipeline(task_id: str) -> bool:
         procs = _procs.pop(task_id, [])
 
     for proc in procs:
-        try:
-            proc.terminate()
-        except Exception as e:
-            logger.warning("终止子进程失败: task=%s, err=%s", task_id, e)
+        _terminate_process(proc, task_id=task_id)
+
+    _cleanup_partial_artifacts(task_id)
 
     logger.info("任务已取消: %s", task_id)
     return True
@@ -245,5 +296,9 @@ def _run(task_id: str) -> None:
             last_state["status"] = "FAILED"
     finally:
         with _procs_lock:
-            _procs.pop(task_id, None)
+            remaining_procs = _procs.pop(task_id, [])
+        for proc in remaining_procs:
+            _terminate_process(proc, task_id=task_id)
+        if is_cancelled_signal(task_id):
+            _cleanup_partial_artifacts(task_id)
         unregister_cancellation_signal(task_id)
