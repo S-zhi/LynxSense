@@ -470,3 +470,34 @@ def test_in_memory_cancellation_signal():
 
     orchestrator.unregister_cancellation_signal(tid)
     assert not orchestrator.is_cancelled_signal(tid)
+
+
+def test_pipeline_cancelled_during_emit(monkeypatch):
+    """验证 run_pipeline 在 emit 过程中检测到取消信号时即刻抛出 PipelineCancelledError，无需 SQLite 操作。"""
+    tid = "t_cancel_emit"
+    orchestrator.register_cancellation_signal(tid)
+
+    def fake_download(url, task_id, on_progress=None, **kw):
+        # 触发 progress 上报
+        if on_progress:
+            on_progress(SimpleNamespace(percent=50))
+            # 模拟在下载过程中用户点击了取消
+            orchestrator.set_cancelled_signal(tid)
+            on_progress(SimpleNamespace(percent=60))
+        return SimpleNamespace(video_path=Path("/d/source.mp4"), title="Cancel Test")
+
+    monkeypatch.setattr(orchestrator, "download_video", fake_download)
+    monkeypatch.setattr(orchestrator.AssetResolver, "require_source", lambda t: Path("/d/source.mp4"))
+
+    params = PipelineParams(
+        task_id=tid,
+        url="http://x/v",
+        source_lang="auto",
+        target_lang="zh-CN",
+    )
+
+    events = []
+    with pytest.raises(PipelineCancelledError, match="任务已被用户取消"):
+        run_pipeline(params, events.append)
+
+    orchestrator.unregister_cancellation_signal(tid)
