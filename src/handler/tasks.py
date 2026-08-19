@@ -89,7 +89,14 @@ def _ensure_translation_engine(
     need_subtitle: bool,
     engines: TranslationEngineStore,
 ) -> None:
-    if not need_subtitle or engine == "deepseek":
+    if not need_subtitle:
+        return
+    if engine == "deepseek":
+        if not (settings.deepseek_api_key and settings.deepseek_api_key.strip()):
+            raise HTTPException(
+                status_code=422,
+                detail="缺少 DeepSeek API Key，请在 .env 配置 SUBTRANS_DEEPSEEK_API_KEY",
+            )
         return
     rec = engines.get(engine)
     if rec is None:
