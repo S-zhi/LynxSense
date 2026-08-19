@@ -229,7 +229,9 @@ PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
 | --- | --- | --- |
 | `SUBTRANS_DATA_DIR` | `./data` | 任务产物目录 |
 | `SUBTRANS_DB` | `./app.db` | SQLite 数据库路径 |
-| `SUBTRANS_WORKERS` | `2` | 后台并发任务数 |
+| `SUBTRANS_WORKERS` | `8` | 整条后台流水线的并发上限（应高于下载并发） |
+| `SUBTRANS_DOWNLOAD_WORKERS` | `2` | 同时进行 yt-dlp 媒体下载的任务数 |
+| `SUBTRANS_DL_CONCURRENT_FRAGMENTS` | `4` | 单个 HLS/DASH 下载的分片并发数 |
 | `SUBTRANS_COOKIES` | 空 | 需要登录或验证的网站 cookies 文件 |
 | `SUBTRANS_WHISPER_MODEL` | 锁定版本 | Replicate Whisper 模型 |
 | `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | 翻译模型 |

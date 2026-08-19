@@ -229,7 +229,9 @@ A failed step moves the job to `FAILED` and records the failing stage and error.
 | --- | --- | --- |
 | `SUBTRANS_DATA_DIR` | `./data` | Job artifact directory |
 | `SUBTRANS_DB` | `./app.db` | SQLite database path |
-| `SUBTRANS_WORKERS` | `2` | Background worker count |
+| `SUBTRANS_WORKERS` | `8` | Total pipeline concurrency (keep above the download cap) |
+| `SUBTRANS_DOWNLOAD_WORKERS` | `2` | Number of tasks allowed to download media concurrently |
+| `SUBTRANS_DL_CONCURRENT_FRAGMENTS` | `4` | Concurrent HLS/DASH fragments per media download |
 | `SUBTRANS_COOKIES` | Empty | Cookies file for sites that require login or verification |
 | `SUBTRANS_WHISPER_MODEL` | Pinned version | Replicate Whisper model |
 | `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | Translation model |
