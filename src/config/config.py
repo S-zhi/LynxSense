@@ -141,6 +141,9 @@ class Settings:
     # SSE 进度流连接超时上限（秒），默认 7200 秒（2 小时）
     stream_timeout_sec: int = int(os.getenv("SUBTRANS_STREAM_TIMEOUT_SEC", "7200"))
 
+    # Readiness / Replicate 余额检查 TTL 缓存时长（秒），默认 60 秒
+    readiness_ttl_sec: int = int(os.getenv("SUBTRANS_READINESS_TTL_SEC", "60"))
+
     # 允许访问本地 API 的前端来源，逗号分隔覆盖
     cors_allow_origins: tuple[str, ...] = _env_list(
         "SUBTRANS_CORS_ORIGINS",
