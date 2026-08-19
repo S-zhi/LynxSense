@@ -180,6 +180,9 @@ class Settings:
     # Readiness / Replicate 余额检查 TTL 缓存时长（秒），默认 60 秒
     readiness_ttl_sec: int = int(os.getenv("SUBTRANS_READINESS_TTL_SEC", "60"))
 
+    # 视频探测 network TTL 缓存时长（秒），默认 300 秒（5 分钟）
+    probe_cache_ttl_sec: int = int(os.getenv("SUBTRANS_PROBE_CACHE_TTL_SEC", "300"))
+
     # 允许访问本地 API 的前端来源，逗号分隔覆盖
     cors_allow_origins: tuple[str, ...] = _env_list(
         "SUBTRANS_CORS_ORIGINS",

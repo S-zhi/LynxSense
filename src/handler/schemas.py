@@ -61,6 +61,7 @@ class TaskProbeOut(BaseModel):
     webpageUrl: Optional[str] = None
     reason: Optional[str] = None
     detail: Optional[str] = None
+    cached: bool = False
 
 
 class ProbeRecordOut(BaseModel):

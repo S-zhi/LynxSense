@@ -330,6 +330,7 @@ def probe_task(
         webpageUrl=result.webpage_url,
         reason=result.reason,
         detail=result.detail,
+        cached=result.cached,
     )
 
 
