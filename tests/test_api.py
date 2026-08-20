@@ -884,6 +884,8 @@ def test_upload_empty_file_400_and_cleanup(client, monkeypatch):
     """0 字节文件应被拒为 400，且任务记录与产物目录应被清理。"""
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+    released = []
+    monkeypatch.setattr(tasks_routes, "release_lock", released.append)
 
     before = _count_task_dirs(client._tmp)
     r = _upload(client, _filename="clip.mp4", _content=b"")
@@ -894,12 +896,15 @@ def test_upload_empty_file_400_and_cleanup(client, monkeypatch):
     assert client.get("/api/tasks").json() == []
     assert _count_task_dirs(client._tmp) == before
     assert enqueued == []
+    assert released == []
 
 
 def test_upload_save_failure_500_and_cleanup(client, monkeypatch):
     """落盘失败时记为 500，任务记录与任务目录应被清掉，避免孤儿。"""
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
+    released = []
+    monkeypatch.setattr(tasks_routes, "release_lock", released.append)
 
     def boom(*a, **kw):
         raise OSError("disk full")
@@ -914,6 +919,7 @@ def test_upload_save_failure_500_and_cleanup(client, monkeypatch):
     assert client.get("/api/tasks").json() == []
     assert _count_task_dirs(client._tmp) == before
     assert enqueued == []
+    assert released == []
 
 
 def test_upload_uses_filename_stem_as_title(client, monkeypatch):
