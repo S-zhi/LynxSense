@@ -41,6 +41,25 @@ test("Api.openFolder: JSON response with detail", async () => {
   );
 });
 
+test("Api.openFolder: structured detail includes actionable suggestion", async () => {
+  mockFetchHandler = async () => ({
+    ok: false,
+    status: 413,
+    text: async () => JSON.stringify({
+      detail: {
+        code: "UPLOAD_TOO_LARGE",
+        message: "上传文件过大",
+        suggestion: "请压缩或切分视频",
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => Api.openFolder("some-id"),
+    /打开文件夹失败：上传文件过大；请压缩或切分视频/,
+  );
+});
+
 test("Api.cancelTask sends POST to /api/tasks/:id/cancel", async () => {
   let requestedUrl = "";
   let requestedMethod = "";
