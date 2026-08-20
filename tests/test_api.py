@@ -510,6 +510,36 @@ def test_success_task_with_missing_video_hides_outputs(client):
     assert data["resourceStatus"] == RESOURCE_STATUS_MISSING
     assert data["outputs"] is None
     assert data["error"] == "资源已删除"
+    assert data["downgradeReason"] == "UNKNOWN"
+    assert data["downgradedAt"] > 0
+
+
+def test_scan_missing_terminal_records_disk_failure(client):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "output.mp4").write_bytes(b"")
+    (d / "translated.srt").write_bytes(b"")
+
+    assert tasks_routes.scan_missing_terminal(client._store, data_dir=client._tmp) == [cid]
+    rec = client._store.get(cid)
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.error == "资源不可读"
+
+
+def test_scan_missing_terminal_records_volume_migration(client, tmp_path):
+    ids = [
+        client.post("/api/tasks", json=_payload(url=f"https://x/{i}")).json()["id"]
+        for i in range(2)
+    ]
+    for task_id in ids:
+        client._store.update(task_id, status="SUCCESS", progress=100)
+
+    missing_root = tmp_path / "unmounted-data"
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=missing_root)
+    assert set(marked) == set(ids)
+    assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"VOLUME_MIGRATED"}
 
 
 def test_success_download_only_task_with_missing_source_hides_outputs(client):
