@@ -429,3 +429,49 @@ def test_cleanup_probe_records_in_storage_api(client, monkeypatch):
     remaining = probes.list()
     assert len(remaining) == 1
     assert remaining[0].url == "https://example.com/new_probe"
+
+
+def test_cleanup_response_note(client, monkeypatch):
+    """测试 CleanupResponse 中 note 字段的填入与范围说明桥接。"""
+    store = client._store
+    probes = client._probe_store
+    now_ms = int(time.time() * 1000)
+
+    # 1. 纯探针清理：有过期 probe，无任务产物清理
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms - 10 * 86400 * 1000)
+    probes.record(url="https://example.com/old_probe_note", ok=True)
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms)
+
+    res1 = _post_cleanup(client, cleanupProbeRecordsOlderThanDays=5)
+    assert res1["deletedProbeRecords"] == 1
+    assert res1["deletedTasks"] == 0
+    assert res1["note"] == "本次清理仅作用于 probe 记录（已清理 1 条），任务产物未动"
+
+    # 2. 纯探针清理：无过期 probe，无任务产物清理
+    res2 = _post_cleanup(client, cleanupProbeRecordsOlderThanDays=5)
+    assert res2["deletedProbeRecords"] == 0
+    assert res2["deletedTasks"] == 0
+    assert res2["note"] == "本次清理仅作用于 probe 记录（未发现过期记录），任务产物未动"
+
+    # 3. 纯任务清理：有任务产物清理，未请求 probe 清理
+    tid = _seed_task(client, store, title="task_note", status="FAILED", source_bytes=1024, audio_bytes=0, srt_bytes=0, output_bytes=0)
+    res3 = _post_cleanup(client, taskIds=[tid])
+    assert res3["deletedTasks"] == 1
+    assert res3["note"] == f"本次清理 1 个任务（释放 {storage_routes._format_bytes(res3['deletedBytes'])}），未触发 probe 记录清理"
+
+    # 4. 组合清理：既有任务产物又有 probe 记录
+    tid2 = _seed_task(client, store, title="task_note_2", status="FAILED", source_bytes=1024, audio_bytes=0, srt_bytes=0, output_bytes=0)
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms - 10 * 86400 * 1000)
+    probes.record(url="https://example.com/old_probe_note_2", ok=True)
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms)
+
+    res4 = _post_cleanup(client, taskIds=[tid2], cleanupProbeRecordsOlderThanDays=5)
+    assert res4["deletedTasks"] == 1
+    assert res4["deletedProbeRecords"] == 1
+    assert res4["note"] == f"本次清理 1 个任务（释放 {storage_routes._format_bytes(res4['deletedBytes'])}）及 1 条 probe 记录"
+
+    # 5. 空操作清理：未触发任何产物和 probe
+    res5 = _post_cleanup(client)
+    assert res5["deletedTasks"] == 0
+    assert res5["deletedProbeRecords"] == 0
+    assert res5["note"] == "未发现符合条件的待清理任务产物"

@@ -161,6 +161,7 @@ class CleanupResponse(BaseModel):
     skippedTasks: List[TaskStorage]
     partial: List[TaskStorage]  # 仅删了部分产物但任务被保留
     deletedProbeRecords: int = 0  # 实际删除的 probe 记录数量
+    note: Optional[str] = None  # 结果说明（范围与桥接说明）
 
 
 class RetentionIn(BaseModel):
@@ -218,6 +219,58 @@ def _save_retention(out: RetentionOut) -> None:
 
 
 # ---------- 工具 ----------
+
+def _format_bytes(n: int) -> str:
+    """按人类可读格式化字节数。"""
+    if n <= 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    v = float(n)
+    i = 0
+    while v >= 1024 and i < len(units) - 1:
+        v /= 1024
+        i += 1
+    if i == 0 or v >= 10:
+        return f"{int(round(v))} {units[i]}"
+    return f"{v:.1f} {units[i]}"
+
+
+def _build_cleanup_note(
+    probe_requested: bool,
+    deleted_probes: int,
+    deleted_tasks: int,
+    partial_count: int,
+    deleted_bytes: int,
+) -> str:
+    """构建清理结果桥接说明 note 字段。"""
+    has_task_changes = deleted_tasks > 0 or partial_count > 0 or deleted_bytes > 0
+
+    if not has_task_changes:
+        if probe_requested:
+            if deleted_probes > 0:
+                return f"本次清理仅作用于 probe 记录（已清理 {deleted_probes} 条），任务产物未动"
+            else:
+                return "本次清理仅作用于 probe 记录（未发现过期记录），任务产物未动"
+        else:
+            return "未发现符合条件的待清理任务产物"
+
+    task_desc_parts = []
+    if deleted_tasks > 0:
+        task_desc_parts.append(f"{deleted_tasks} 个任务")
+    if partial_count > 0:
+        task_desc_parts.append(f"{partial_count} 个任务的部分产物")
+    task_desc = "及".join(task_desc_parts)
+
+    bytes_str = _format_bytes(deleted_bytes)
+
+    if not probe_requested:
+        return f"本次清理 {task_desc}（释放 {bytes_str}），未触发 probe 记录清理"
+
+    if deleted_probes > 0:
+        return f"本次清理 {task_desc}（释放 {bytes_str}）及 {deleted_probes} 条 probe 记录"
+    else:
+        return f"本次清理 {task_desc}（释放 {bytes_str}），probe 记录未变动"
+
 
 def _classify(name: str) -> str:
     """按文件名归类到 _ARTIFACT_KINDS 之一。"""
@@ -460,12 +513,21 @@ def execute_cleanup(
     if body.cleanupProbeRecordsOlderThanDays is not None:
         deleted_probes = probes.cleanup_older_than_days(body.cleanupProbeRecordsOlderThanDays)
 
+    note = _build_cleanup_note(
+        probe_requested=body.cleanupProbeRecordsOlderThanDays is not None,
+        deleted_probes=deleted_probes,
+        deleted_tasks=deleted_tasks,
+        partial_count=len(partial),
+        deleted_bytes=deleted_bytes,
+    )
+
     return CleanupResponse(
         deletedTasks=deleted_tasks,
         deletedBytes=deleted_bytes,
         skippedTasks=skipped_storage,
         partial=partial,
         deletedProbeRecords=deleted_probes,
+        note=note,
     )
 
 
