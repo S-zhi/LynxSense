@@ -31,7 +31,7 @@ from src.config import (
 from src.handler.deps import get_probe_store, get_store, require_api_token
 from src.handler.subtitle_editor import release_lock
 from src.handler.tasks import _DELETED_MESSAGE, _mark_resource_missing, scan_missing_terminal
-from src.store import ProbeStore, TaskStore, TaskRecord
+from src.store import DOWNGRADE_REASON_USER_CLEANED, ProbeStore, TaskStore, TaskRecord
 
 logger = logging.getLogger(__name__)
 
@@ -421,7 +421,9 @@ def execute_cleanup(
         if full_task_cleanup:
             freed = _dir_size(d)
             # 联动降级：删除记录前先将 resource_status 设为 MISSING
-            _mark_resource_missing(store, rec.id, _DELETED_MESSAGE)
+            _mark_resource_missing(
+                store, rec.id, _DELETED_MESSAGE, DOWNGRADE_REASON_USER_CLEANED
+            )
             # 复用 delete_task 同等的清理动作：删记录 + 删目录
             store.delete(rec.id)
             shutil.rmtree(d, ignore_errors=True)
@@ -442,7 +444,11 @@ def execute_cleanup(
                 logger.warning("删除产物失败 %s: %s", fp, e)
         if removed:
             # 单任务联动降级检测：如果有文件被删除，触发 scan_missing_terminal
-            scan_missing_terminal(store, task_id=rec.id)
+            scan_missing_terminal(
+                store,
+                task_id=rec.id,
+                downgrade_reason=DOWNGRADE_REASON_USER_CLEANED,
+            )
             # 任务保留在 DB，仅记录 partial（剩余的产物可能已被清空），使用更新后的记录
             updated = store.get(rec.id) or current
             remaining = _scan_artifacts(rec.id)
