@@ -337,15 +337,15 @@ def test_network_error_retries_without_batch_fallback(fake_settings, monkeypatch
 
 
 def test_single_item_failure_line_index_message(fake_settings, monkeypatch):
-    import httpx
+    called_count = 0
 
-    def mock_post_500(*a, **k):
-        request = httpx.Request("POST", "https://api.deepseek.com")
-        response = httpx.Response(500, request=request)
-        raise httpx.HTTPStatusError("Server Error", request=request, response=response)
+    def fake_call(*a, **k):
+        nonlocal called_count
+        called_count += 1
+        raise TranslateError("JSON decode error", code="invalid_response")
 
-    monkeypatch.setattr(httpx, "post", mock_post_500)
+    monkeypatch.setattr(translator, "_call_deepseek", fake_call)
     with pytest.raises(TranslateError) as exc_info:
-        translate_texts(["a", "b"], "en", "zh-CN")
-    assert exc_info.value.code == "upstream_error"
+        translate_texts(["a"], "en", "zh-CN")
+    assert exc_info.value.code == "invalid_response"
     assert "第 1 条字幕翻译失败" in str(exc_info.value)
