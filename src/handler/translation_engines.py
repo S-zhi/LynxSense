@@ -38,6 +38,7 @@ class EngineOut(BaseModel):
     availability: str
     lastCheckedAt: Optional[int] = None
     lastError: Optional[str] = None
+    apiKeyRotatedAt: Optional[int] = None
 
 
 class EngineCheckOut(BaseModel):
@@ -60,6 +61,7 @@ def _out(rec: TranslationEngine) -> EngineOut:
         model=rec.model, enabled=bool(rec.enabled), hasApiKey=rec.has_api_key,
         availability=rec.availability, lastCheckedAt=rec.last_checked_at,
         lastError=rec.last_error,
+        apiKeyRotatedAt=rec.api_key_rotated_at,
     )
 
 

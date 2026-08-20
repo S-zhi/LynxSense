@@ -31,6 +31,7 @@ class TranslationEngine:
     availability: str = "UNCONFIGURED"
     last_checked_at: Optional[int] = None
     last_error: Optional[str] = None
+    api_key_rotated_at: Optional[int] = None
     created_at: int = 0
     updated_at: int = 0
 
@@ -72,11 +73,15 @@ class TranslationEngineStore:
                     availability TEXT NOT NULL DEFAULT 'UNCONFIGURED',
                     last_checked_at INTEGER,
                     last_error TEXT,
+                    api_key_rotated_at INTEGER,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
                 )
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(translation_engines)")}
+            if "api_key_rotated_at" not in columns:
+                conn.execute("ALTER TABLE translation_engines ADD COLUMN api_key_rotated_at INTEGER")
 
     def reset_dangling_checking(self) -> int:
         """重置所有因服务异常退出/崩溃残留的 CHECKING 状态。"""
@@ -127,15 +132,17 @@ class TranslationEngineStore:
             availability="UNKNOWN" if normalized_key else "UNCONFIGURED",
             created_at=now,
             updated_at=now,
+            api_key_rotated_at=now if normalized_key else None,
         )
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR IGNORE INTO translation_engines
                 (id, name, api_type, base_url, model, api_key, enabled, availability,
-                 last_checked_at, last_error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 last_checked_at, last_error, api_key_rotated_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (rec.id, rec.name, rec.api_type, rec.base_url, rec.model, rec.api_key,
-                 rec.enabled, rec.availability, None, None, rec.created_at, rec.updated_at),
+                rec.enabled, rec.availability, None, None, rec.api_key_rotated_at,
+                rec.created_at, rec.updated_at),
             )
         return self.get("deepseek") or rec
 
@@ -162,15 +169,17 @@ class TranslationEngineStore:
             model=model.strip(), api_key=normalized_key, enabled=int(enabled),
             availability="UNKNOWN" if normalized_key else "UNCONFIGURED",
             created_at=now, updated_at=now,
+            api_key_rotated_at=now if normalized_key else None,
         )
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO translation_engines
                 (id, name, api_type, base_url, model, api_key, enabled, availability,
-                 last_checked_at, last_error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 last_checked_at, last_error, api_key_rotated_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (rec.id, rec.name, rec.api_type, rec.base_url, rec.model, rec.api_key,
-                 rec.enabled, rec.availability, None, None, rec.created_at, rec.updated_at),
+                rec.enabled, rec.availability, None, None, rec.api_key_rotated_at,
+                rec.created_at, rec.updated_at),
             )
         return rec
 
@@ -187,14 +196,17 @@ class TranslationEngineStore:
         if "api_key" in allowed:
             raw_key = allowed["api_key"].strip() if allowed["api_key"] else ""
             if not raw_key:
-                allowed["api_key"] = rec.api_key.strip() if rec.api_key and rec.api_key.strip() else None
+                # Blank values mean "not supplied" for update. Keep the old
+                # secret and avoid changing updated_at for a key-only update.
+                del allowed["api_key"]
             else:
                 allowed["api_key"] = raw_key
-
-            if allowed["api_key"]:
+            if raw_key and allowed["api_key"] != rec.api_key:
+                allowed["api_key_rotated_at"] = _now_ms()
                 allowed.setdefault("availability", "UNKNOWN")
-            else:
-                allowed["availability"] = "UNCONFIGURED"
+            elif raw_key:
+                # Re-sending the same key is a no-op unless other fields change.
+                del allowed["api_key"]
         if not allowed:
             return rec
         allowed["updated_at"] = _now_ms()
@@ -208,6 +220,12 @@ class TranslationEngineStore:
 
     def delete(self, engine_id: str) -> bool:
         with self._connect() as conn:
+            # Clear the secret before deleting the row so it is not retained in
+            # SQLite freelists/WAL longer than necessary.
+            conn.execute(
+                "UPDATE translation_engines SET api_key = NULL, api_key_rotated_at = NULL WHERE id = ?",
+                (engine_id,),
+            )
             cur = conn.execute("DELETE FROM translation_engines WHERE id = ?", (engine_id,))
         return cur.rowcount > 0
 
