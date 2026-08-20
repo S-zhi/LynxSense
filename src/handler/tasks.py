@@ -410,6 +410,7 @@ def probe_task(
         webpage_url=result.webpage_url,
         reason=result.reason,
         detail=result.detail,
+        language=result.language,
     )
     return TaskProbeOut(
         ok=result.ok,
@@ -421,6 +422,7 @@ def probe_task(
         reason=result.reason,
         detail=result.detail,
         cached=result.cached,
+        language=result.language,
     )
 
 
