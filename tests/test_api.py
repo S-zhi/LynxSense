@@ -800,6 +800,7 @@ def test_list_probe_records_default_limit(client, monkeypatch):
     assert set(data[0].keys()) == {
         "id", "url", "ok", "title", "extractor", "duration",
         "formatsCount", "webpageUrl", "reason", "detail", "createdAt",
+        "language",
     }
 
 

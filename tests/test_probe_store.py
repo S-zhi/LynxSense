@@ -35,12 +35,14 @@ def test_record_roundtrip(store):
         ok=False,
         reason="login required",
         detail="Need cookies",
+        language="ja",
     )
     assert rec.id.startswith("probe_")
     assert rec.ok == 0
     assert rec.url == "https://x.com/abc"
     assert rec.reason == "login required"
     assert rec.detail == "Need cookies"
+    assert rec.language == "ja"
     assert rec.created_at > 0
     got = store.get(rec.id)
     assert got == rec

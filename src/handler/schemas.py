@@ -27,6 +27,7 @@ def _probe_record_to_out(rec: ProbeRecord) -> "ProbeRecordOut":
         reason=rec.reason,
         detail=rec.detail,
         createdAt=rec.created_at,
+        language=rec.language,
     )
 
 
@@ -62,6 +63,7 @@ class TaskProbeOut(BaseModel):
     reason: Optional[str] = None
     detail: Optional[str] = None
     cached: bool = False
+    language: Optional[str] = None
 
 
 class ProbeRecordOut(BaseModel):
@@ -78,6 +80,7 @@ class ProbeRecordOut(BaseModel):
     reason: Optional[str] = None
     detail: Optional[str] = None
     createdAt: int
+    language: Optional[str] = None
 
 
 class ProbeRecordsClearOut(BaseModel):
