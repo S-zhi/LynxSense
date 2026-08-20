@@ -345,6 +345,11 @@ def test_single_item_failure_line_index_message(fake_settings, monkeypatch):
         raise TranslateError("JSON decode error", code="invalid_response")
 
     monkeypatch.setattr(translator, "_call_deepseek", fake_call)
+    def mock_post_invalid_json(*a, **k):
+        request = httpx.Request("POST", "https://api.deepseek.com")
+        return httpx.Response(200, json={"choices": [{"message": {"content": ""}}]}, request=request)
+
+    monkeypatch.setattr(httpx, "post", mock_post_invalid_json)
     with pytest.raises(TranslateError) as exc_info:
         translate_texts(["a"], "en", "zh-CN")
     assert exc_info.value.code == "invalid_response"
