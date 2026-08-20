@@ -48,6 +48,9 @@ from src.handler.schemas import (
 from src.service.runner import cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
+    DOWNGRADE_REASON_DISK_FAILURE,
+    DOWNGRADE_REASON_UNKNOWN,
+    DOWNGRADE_REASON_VOLUME_MIGRATED,
     RESOURCE_STATUS_AVAILABLE,
     RESOURCE_STATUS_MISSING,
     ProbeStore,
@@ -95,7 +98,12 @@ def _require(store: TaskStore, task_id: str):
     return rec
 
 
-def _mark_resource_missing(store: TaskStore, task_id: str, reason: str) -> None:
+def _mark_resource_missing(
+    store: TaskStore,
+    task_id: str,
+    reason: str,
+    downgrade_reason: str = DOWNGRADE_REASON_UNKNOWN,
+) -> None:
     """把一个任务的 resource_status 幂等地置为 MISSING。"""
     rec = store.get(task_id)
     if rec is None or rec.resource_status == RESOURCE_STATUS_MISSING:
@@ -104,6 +112,8 @@ def _mark_resource_missing(store: TaskStore, task_id: str, reason: str) -> None:
         task_id,
         resource_status=RESOURCE_STATUS_MISSING,
         error=reason,
+        downgrade_reason=downgrade_reason,
+        downgraded_at=int(time.time() * 1000),
     )
 
 
@@ -133,7 +143,11 @@ def _ensure_translation_engine(
 
 
 def scan_missing_terminal(
-    store: TaskStore, *, task_id: Optional[str] = None, data_dir=None
+    store: TaskStore,
+    *,
+    task_id: Optional[str] = None,
+    data_dir=None,
+    downgrade_reason: Optional[str] = None,
 ) -> List[str]:
     """扫描终态 SUCCESS 任务，把磁盘产物已丢失的降级为 MISSING。
 
@@ -141,13 +155,21 @@ def scan_missing_terminal(
     若指定 task_id，则仅针对该任务执行单任务降级检测。
     返回被降级的 task_id 列表，便于启动日志 / 测试断言 / 资源清理。
     """
-    data_dir = data_dir if data_dir is not None else settings.data_dir
+    data_path = Path(data_dir if data_dir is not None else settings.data_dir)
     downgraded: List[str] = []
     if task_id is not None:
         target = store.get(task_id)
         recs = [target] if target is not None else []
     else:
         recs = store.list()
+
+    success_count = sum(1 for rec in recs if rec.status == "SUCCESS")
+    data_root_unavailable = not data_path.exists()
+    if not data_root_unavailable:
+        try:
+            data_root_unavailable = not any(data_path.iterdir())
+        except OSError:
+            data_root_unavailable = True
 
     for rec in recs:
         if rec.status != "SUCCESS":
@@ -161,17 +183,29 @@ def scan_missing_terminal(
             state_srt, _, _ = AssetResolver.resolve_translated_srt(rec.id)
             if state_out == ResourceState.AVAILABLE and state_srt == ResourceState.AVAILABLE:
                 continue
-            error_msg = "资源不可读" if (state_out == ResourceState.UNREADABLE or state_srt == ResourceState.UNREADABLE) else _DELETED_MESSAGE
+            unreadable = state_out == ResourceState.UNREADABLE or state_srt == ResourceState.UNREADABLE
         else:
             state_src, _, _ = AssetResolver.resolve_source(rec.id)
             if state_src == ResourceState.AVAILABLE:
                 continue
-            error_msg = "资源不可读" if state_src == ResourceState.UNREADABLE else _DELETED_MESSAGE
+            unreadable = state_src == ResourceState.UNREADABLE
+
+        error_msg = "资源不可读" if unreadable else _DELETED_MESSAGE
+        if downgrade_reason is not None:
+            audit_reason = downgrade_reason
+        elif unreadable:
+            audit_reason = DOWNGRADE_REASON_DISK_FAILURE
+        elif data_root_unavailable and success_count > 1:
+            audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+        else:
+            audit_reason = DOWNGRADE_REASON_UNKNOWN
 
         store.update(
             rec.id,
             resource_status=RESOURCE_STATUS_MISSING,
             error=error_msg,
+            downgrade_reason=audit_reason,
+            downgraded_at=int(time.time() * 1000),
         )
         downgraded.append(rec.id)
     return downgraded
@@ -285,12 +319,10 @@ def create_upload_task(
     except HTTPException:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise
     except Exception as e:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(status_code=500, detail="保存上传文件失败") from e
     finally:
         file.file.close()
@@ -298,14 +330,12 @@ def create_upload_task(
     if not dest_part.exists() or dest_part.stat().st_size == 0:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
 
     duration_sec = probe_duration(dest_part, settings.ffprobe_bin)
     if duration_sec is None:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(
             status_code=400,
             detail="无法解析视频时长，请确认文件格式正确且 ffprobe 可用",
@@ -502,7 +532,9 @@ def download_video(task_id: str, store: TaskStore = Depends(get_store)):
             return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
         elif state == ResourceState.UNREADABLE:
             if rec.resource_status == RESOURCE_STATUS_AVAILABLE:
-                _mark_resource_missing(store, task_id, "资源不可读")
+                _mark_resource_missing(
+                    store, task_id, "资源不可读", DOWNGRADE_REASON_DISK_FAILURE
+                )
             raise HTTPException(status_code=409, detail="资源不可读")
 
     # 兜底：成功任务的产物被清掉时，要把状态降级为 MISSING，
@@ -536,7 +568,9 @@ def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
         return FileResponse(path, media_type="application/x-subrip", filename=f"{task_id}.srt")
     elif state == ResourceState.UNREADABLE:
         if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:
-            _mark_resource_missing(store, task_id, "资源不可读")
+            _mark_resource_missing(
+                store, task_id, "资源不可读", DOWNGRADE_REASON_DISK_FAILURE
+            )
         raise HTTPException(status_code=409, detail="资源不可读")
 
     if rec.status == "SUCCESS" and rec.resource_status == RESOURCE_STATUS_AVAILABLE:

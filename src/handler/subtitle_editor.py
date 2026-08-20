@@ -252,33 +252,31 @@ def save_subtitles(
     if not d.exists():
         raise HTTPException(status_code=409, detail="任务目录尚未生成")
 
-    target_path, rel_name = _resolve_target_path(d, body.locale, body.version)
-
-    # 校验：版本文件不能覆盖已有的关键产物名
-    if body.version is not None and rel_name in {ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO}:
-        raise HTTPException(status_code=400, detail="非法的版本文件名")
-
-    # 按 index 升序写回（即使前端发了乱序，磁盘上也按 SRT 规范）
-    sorted_entries = sorted(body.entries, key=lambda e: (e.start, e.index))
-
-    subs = [
-        Subtitle(
-            index=e.index,
-            start=float(e.start),
-            end=float(e.end),
-            text=e.text,
-        )
-        for e in sorted_entries
-    ]
-
-    encoding = "utf-8-sig"
-    if target_path.exists():
-        try:
-            _, encoding = read_srt_content(target_path)
-        except Exception:
-            pass
-
     with task_write_lock(task_id):
+        target_path, rel_name = _resolve_target_path(d, body.locale, body.version)
+
+        # 校验、读取现有编码与写回必须处于同一临界区，避免并发保存时基于过期文件状态写入。
+        if body.version is not None and rel_name in {ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO}:
+            raise HTTPException(status_code=400, detail="非法的版本文件名")
+
+        sorted_entries = sorted(body.entries, key=lambda e: (e.start, e.index))
+        subs = [
+            Subtitle(
+                index=e.index,
+                start=float(e.start),
+                end=float(e.end),
+                text=e.text,
+            )
+            for e in sorted_entries
+        ]
+
+        encoding = "utf-8-sig"
+        if target_path.exists():
+            try:
+                _, encoding = read_srt_content(target_path)
+            except Exception:
+                pass
+
         # 版本文件：若已存在则直接覆盖（用户主动保存即确认）；保留原始编码或默认 utf-8-sig
         write_srt(subs, target_path, encoding=encoding)
 

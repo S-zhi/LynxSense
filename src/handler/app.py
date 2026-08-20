@@ -25,6 +25,12 @@ from src.handler.deps import get_store
 from src.service.retention_scheduler import start_retention_scheduler
 
 from src.service.runner import recover_interrupted_tasks, shutdown_executor
+from src.store import (
+    DOWNGRADE_REASON_DISK_FAILURE,
+    DOWNGRADE_REASON_UNKNOWN,
+    DOWNGRADE_REASON_USER_CLEANED,
+    DOWNGRADE_REASON_VOLUME_MIGRATED,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -68,11 +74,30 @@ def create_app() -> FastAPI:
         SUCCESS 任务的磁盘产物已不在时降级为 MISSING；PENDING 和处理中任务
         重新入队，由流水线根据已有中间产物断点续跑。两项操作都可重复执行。
         """
-        downgraded = tasks.scan_missing_terminal(get_store(), data_dir=settings.data_dir)
+        store = get_store()
+        downgraded = tasks.scan_missing_terminal(store, data_dir=settings.data_dir)
         if downgraded:
-            logger.warning(
-                "启动扫描：以下任务产物已丢失，已降级为 MISSING: %s", downgraded
+            counts = {
+                reason: 0
+                for reason in (
+                    DOWNGRADE_REASON_USER_CLEANED,
+                    DOWNGRADE_REASON_DISK_FAILURE,
+                    DOWNGRADE_REASON_VOLUME_MIGRATED,
+                    DOWNGRADE_REASON_UNKNOWN,
+                )
+            }
+            for task_id in downgraded:
+                rec = store.get(task_id)
+                reason = (rec.downgrade_reason if rec else None) or DOWNGRADE_REASON_UNKNOWN
+                counts[reason] = counts.get(reason, 0) + 1
+
+            logger.info(
+                "启动扫描：降级 %d 个任务为 MISSING，原因统计: %s",
+                len(downgraded), counts,
             )
+            abnormal = counts[DOWNGRADE_REASON_DISK_FAILURE] + counts[DOWNGRADE_REASON_VOLUME_MIGRATED]
+            if abnormal:
+                logger.warning("启动扫描检测到 %d 个磁盘故障或存储迁移任务: %s", abnormal, downgraded)
 
         recovered = recover_interrupted_tasks()
         if recovered:
