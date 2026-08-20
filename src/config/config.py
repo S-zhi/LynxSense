@@ -63,6 +63,12 @@ _DEFAULT_CORS_ORIGINS = (
     "http://localhost:5273", "http://127.0.0.1:5273",
     "http://localhost:8000", "http://127.0.0.1:8000",
 )
+_DEFAULT_TARGET_LANGUAGES = (
+    "zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "ru", "it",
+    "pt", "vi", "th", "ar", "id", "hi", "nl", "pl", "tr", "sv",
+    "uk", "cs", "da", "fi", "el", "he", "hu", "no", "ro", "sk",
+    "af", "ca", "bg", "hr", "ms", "fa", "ur", "bn", "ta", "sw",
+)
 
 
 def _bootstrap_env() -> None:
@@ -91,6 +97,82 @@ _bootstrap_env()
 _last_env_mtime: float = -1.0
 
 
+def _env_int(key: str, default: int) -> int:
+    """读取可热更新的整数配置，非法值回退默认值。"""
+    _sync_env_file()
+    try:
+        return int(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(key: str, default: float) -> float:
+    """读取可热更新的浮点配置，非法值回退默认值。"""
+    _sync_env_file()
+    try:
+        return float(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_str(key: str, default: str) -> str:
+    _sync_env_file()
+    return os.getenv(key, default)
+
+
+def _read_dynamic_setting(name: str):
+    """按字段名读取支持运行期更新的环境配置。"""
+    if name == "download_format":
+        return _env_str("SUBTRANS_DL_FORMAT", "bv*[height<=480]+ba/b[height<=480]")
+    if name == "merge_output_format":
+        return _env_str("SUBTRANS_DL_CONTAINER", "mp4")
+    if name == "cookies_file":
+        return _opt_env_path("SUBTRANS_COOKIES")
+    if name == "download_retries":
+        return max(0, _env_int("SUBTRANS_DL_RETRIES", 3))
+    if name == "max_upload_mb":
+        return max(1, _env_int("SUBTRANS_MAX_UPLOAD_MB", 2048))
+    if name == "max_video_minutes":
+        return max(1, _env_int("SUBTRANS_MAX_VIDEO_MINUTES", 180))
+    if name == "ffmpeg_bin":
+        return _env_str("SUBTRANS_FFMPEG", "ffmpeg")
+    if name == "ffprobe_bin":
+        return _env_str("SUBTRANS_FFPROBE", "ffprobe")
+    if name == "audio_sample_rate":
+        return max(1, _env_int("SUBTRANS_AUDIO_SR", 16000))
+    if name == "audio_channels":
+        return max(1, _env_int("SUBTRANS_AUDIO_CH", 1))
+    if name == "replicate_whisper_model":
+        return _env_str(
+            "SUBTRANS_WHISPER_MODEL",
+            "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969",
+        )
+    if name == "replicate_timeout":
+        return max(1, _env_int("SUBTRANS_REPLICATE_TIMEOUT", 1800))
+    if name == "replicate_retries":
+        return max(1, _env_int("SUBTRANS_REPLICATE_RETRIES", 3))
+    if name == "replicate_retry_interval":
+        return max(0.0, _env_float("SUBTRANS_REPLICATE_RETRY_INTERVAL", 3600.0))
+    if name == "replicate_poll_interval":
+        return max(0.0, _env_float("SUBTRANS_REPLICATE_POLL_INTERVAL", 30.0))
+    if name == "deepseek_api_key":
+        _sync_env_file()
+        return os.getenv("SUBTRANS_DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+    if name == "deepseek_base_url":
+        return _env_str("SUBTRANS_DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    if name == "deepseek_model":
+        return _env_str("SUBTRANS_DEEPSEEK_MODEL", "deepseek-chat")
+    if name == "translate_batch_size":
+        return max(1, _env_int("SUBTRANS_TRANSLATE_BATCH", 8))
+    if name == "translate_timeout":
+        return max(1, _env_int("SUBTRANS_TRANSLATE_TIMEOUT", 60))
+    if name == "target_languages":
+        return _env_list("SUBTRANS_TARGET_LANGUAGES", _DEFAULT_TARGET_LANGUAGES)
+    if name == "lang_names":
+        return _env_json_dict("SUBTRANS_LANG_NAMES", DEFAULT_LANG_NAMES)
+    raise AttributeError(name)
+
+
 def _sync_env_file() -> None:
     """如果 .env 文件存在且被修改，重新同步环境变量到 os.environ。"""
     global _last_env_mtime
@@ -114,17 +196,20 @@ def _sync_env_file() -> None:
 
 
 def _env_path(key: str, default: Path) -> Path:
+    _sync_env_file()
     val = os.getenv(key)
     return Path(val).expanduser() if val else default
 
 
 def _opt_env_path(key: str) -> Optional[Path]:
+    _sync_env_file()
     val = os.getenv(key)
     return Path(val).expanduser() if val else None
 
 
 def _env_list(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
     """读取逗号分隔的环境变量列表，空值回退到默认列表。"""
+    _sync_env_file()
     val = os.getenv(key)
     if not val:
         return default
@@ -134,6 +219,7 @@ def _env_list(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 def _env_json_dict(key: str, default: dict[str, str]) -> dict[str, str]:
     """读取 JSON 字典格式的环境变量，合并到默认字典。非合法 JSON 则使用默认字典。"""
+    _sync_env_file()
     val = os.getenv(key)
     if not val:
         return default
@@ -150,6 +236,45 @@ def _env_json_dict(key: str, default: dict[str, str]) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class Settings:
+    # 这些字段保留 dataclass 构造参数，兼容测试/调用方通过 dataclasses.replace
+    # 注入临时配置；正常实例读取时由 __getattribute__ 重新读取环境变量。
+    _DYNAMIC_ENV_FIELDS = frozenset({
+        "download_format", "merge_output_format", "cookies_file", "download_retries",
+        "max_upload_mb", "max_video_minutes", "ffmpeg_bin", "ffprobe_bin",
+        "audio_sample_rate", "audio_channels", "replicate_whisper_model",
+        "replicate_timeout", "replicate_retries", "replicate_retry_interval",
+        "replicate_poll_interval", "deepseek_api_key", "deepseek_base_url",
+        "deepseek_model", "translate_batch_size", "translate_timeout",
+        "target_languages", "lang_names",
+    })
+    _dynamic_env_overrides: frozenset[str] = field(
+        init=False, default_factory=frozenset, repr=False, compare=False
+    )
+
+    def __post_init__(self):
+        # dataclasses.replace() 可能显式注入临时值；记录它们，避免被环境
+        # 动态读取覆盖。默认实例（包括启动时 .env 已有值）仍保持热更新。
+        overrides = set()
+        for name in self._DYNAMIC_ENV_FIELDS:
+            stored = object.__getattribute__(self, name)
+            if stored != _read_dynamic_setting(name):
+                overrides.add(name)
+        object.__setattr__(self, "_dynamic_env_overrides", frozenset(overrides))
+
+    def __getattribute__(self, name: str):
+        """让尚未显式覆盖的环境配置在每次访问时生效。
+
+        dataclass 字段不能直接改成 property，否则会破坏现有的
+        dataclasses.replace(Settings(...), ...) 调用。这里保留字段 API，
+        仅对默认字段做动态解析；显式传入的字段仍作为实例覆盖值。
+        """
+        if name in type(self)._DYNAMIC_ENV_FIELDS:
+            stored = object.__getattribute__(self, name)
+            if name in object.__getattribute__(self, "_dynamic_env_overrides"):
+                return stored
+            return _read_dynamic_setting(name)
+        return object.__getattribute__(self, name)
+
     # 后端根目录
     backend_dir: Path = _BACKEND_DIR
 
