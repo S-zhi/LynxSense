@@ -595,7 +595,7 @@ const MockApi = (() => {
     },
     async runCleanup() {
       await delay(60);
-      return { deletedTasks: 0, deletedBytes: 0, skippedTasks: [], partial: [] };
+      return { deletedTasks: 0, deletedBytes: 0, skippedTasks: [], partial: [], note: "" };
     },
     async getRetention() {
       await delay(40);

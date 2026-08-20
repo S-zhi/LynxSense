@@ -370,7 +370,7 @@ async function runApply() {
     const msg = res.deletedTasks
       ? `已清理 ${res.deletedTasks} 个任务，释放 ${formatBytes(res.deletedBytes)}`
       : `已清理 ${formatBytes(res.deletedBytes)} 产物`;
-    toast(msg, "ph-trash");
+    toast(res.note || msg, "ph-trash");
     local.selected.clear();
     local.preview = null;
     closePreview();

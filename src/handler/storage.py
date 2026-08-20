@@ -151,6 +151,7 @@ class CleanupPreviewResponse(BaseModel):
     skippedTasks: List[TaskStorage]  # 因 RUNNING 状态被跳过的任务
     targets: List[TaskStorage]       # 将被处理的任务（产物可能按 kind 过滤）
     deletedProbeRecords: int = 0     # 将被清理的 probe 记录数量
+    note: str = ""
 
 
 class CleanupResponse(BaseModel):
@@ -161,6 +162,7 @@ class CleanupResponse(BaseModel):
     skippedTasks: List[TaskStorage]
     partial: List[TaskStorage]  # 仅删了部分产物但任务被保留
     deletedProbeRecords: int = 0  # 实际删除的 probe 记录数量
+    note: str = ""
 
 
 class RetentionIn(BaseModel):
@@ -287,10 +289,22 @@ def _filter_kinds(artifacts: List[StorageArtifact], kinds: Optional[List[str]]) 
     return [a for a in artifacts if a.kind in allow]
 
 
+def _has_task_cleanup_scope(body: CleanupPreviewRequest) -> bool:
+    """是否包含任务产物清理条件；probe 保留期本身不应触发任务清理。"""
+    return (
+        body.taskIds is not None
+        or body.kinds is not None
+        or body.olderThanDays is not None
+        or body.cleanupProbeRecordsOlderThanDays is None
+    )
+
+
 def _collect_targets(
     store: TaskStore, body: CleanupPreviewRequest,
 ) -> tuple[List[TaskRecord], List[TaskRecord], dict[str, List[StorageArtifact]]]:
     """按筛选条件收集：candidate 任务、按 kind 过滤后的 artifact 列表、RUNNING 任务。"""
+    if not _has_task_cleanup_scope(body):
+        return [], [], {}
     now_ms = int(time.time() * 1000)
     candidates: List[TaskRecord] = []
     skipped: List[TaskRecord] = []
@@ -375,12 +389,16 @@ def cleanup_preview(
         cutoff = int(time.time() * 1000) - body.cleanupProbeRecordsOlderThanDays * 86400 * 1000
         probe_count = len([r for r in probes.list(limit=0) if r.created_at < cutoff])
 
+    note = ""
+    if body.cleanupProbeRecordsOlderThanDays is not None:
+        note = "仅清理 probe 记录" if not _has_task_cleanup_scope(body) else "同时清理任务产物和 probe 记录"
     return CleanupPreviewResponse(
         matchedTasks=matched,
         matchedBytes=matched_bytes,
         skippedTasks=[_build_task_storage(r, _scan_artifacts(r.id), skipped=True) for r in skipped],
         targets=targets,
         deletedProbeRecords=probe_count,
+        note=note,
     )
 
 
@@ -460,12 +478,22 @@ def execute_cleanup(
     if body.cleanupProbeRecordsOlderThanDays is not None:
         deleted_probes = probes.cleanup_older_than_days(body.cleanupProbeRecordsOlderThanDays)
 
+    if deleted_tasks or deleted_bytes or partial:
+        note = "已清理任务产物"
+    else:
+        note = "未清理任务产物"
+    if deleted_probes:
+        note += f"，并清理 {deleted_probes} 条 probe 记录"
+    elif body.cleanupProbeRecordsOlderThanDays is not None:
+        note += "，没有符合条件的 probe 记录"
+
     return CleanupResponse(
         deletedTasks=deleted_tasks,
         deletedBytes=deleted_bytes,
         skippedTasks=skipped_storage,
         partial=partial,
         deletedProbeRecords=deleted_probes,
+        note=note,
     )
 
 

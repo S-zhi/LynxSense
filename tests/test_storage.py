@@ -378,3 +378,34 @@ def test_cleanup_probe_records_in_storage_api(client, monkeypatch):
     remaining = probes.list()
     assert len(remaining) == 1
     assert remaining[0].url == "https://example.com/new_probe"
+
+
+def test_probe_only_cleanup_does_not_delete_tasks_and_returns_note(client, monkeypatch):
+    """probe 保留期是独立范围，不应隐式触发全量任务产物清理。"""
+    store = client._store
+    task_id = _seed_task(client, store, title="keep task", status="SUCCESS")
+    probes = client._probe_store
+    now_ms = int(time.time() * 1000)
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms - 10 * 86400 * 1000)
+    probes.record(url="https://example.com/old_probe_only", ok=True)
+
+    pre = client.post(
+        "/api/storage/cleanup_preview",
+        json={"cleanupProbeRecordsOlderThanDays": 5},
+    ).json()
+    assert pre["matchedTasks"] == 0
+    assert pre["targets"] == []
+    assert pre["deletedProbeRecords"] == 1
+    assert "仅清理 probe" in pre["note"]
+
+    monkeypatch.setattr("src.store.probe_store._now_ms", lambda: now_ms)
+    res = client.post(
+        "/api/storage/cleanup",
+        json={"cleanupProbeRecordsOlderThanDays": 5},
+    ).json()
+    assert res["deletedTasks"] == 0
+    assert res["deletedBytes"] == 0
+    assert res["deletedProbeRecords"] == 1
+    assert "probe" in res["note"]
+    assert store.get(task_id) is not None
+    assert (client._tmp / task_id).exists()
