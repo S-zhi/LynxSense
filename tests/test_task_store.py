@@ -138,6 +138,28 @@ def test_update_outputs_and_title(store):
     assert updated.output_subtitle == "/d/translated.srt"
 
 
+def test_reopen_migrates_absolute_output_paths_to_names(store):
+    rec = _create(store)
+    task_root = f"/old/data/{rec.id}"
+    store.update(
+        rec.id,
+        output_video=f"{task_root}/output.mp4",
+        output_subtitle=f"{task_root}/translated.srt",
+    )
+
+    migrated = TaskStore(store.db_path).get(rec.id)
+    assert migrated.output_video == "output.mp4"
+    assert migrated.output_subtitle == "translated.srt"
+
+
+def test_reopen_clears_absolute_path_from_another_task(store):
+    rec = _create(store)
+    store.update(rec.id, output_video="/old/data/task_other/output.mp4")
+
+    migrated = TaskStore(store.db_path).get(rec.id)
+    assert migrated.output_video is None
+
+
 def test_update_ignores_unknown_field(store):
     rec = _create(store)
     updated = store.update(rec.id, bogus="x", progress=5)
@@ -237,4 +259,3 @@ def test_resource_status_migration_adds_column(tmp_path):
     assert rec is not None
     assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
     assert rec.status == "SUCCESS"  # 其它字段保持不变
-

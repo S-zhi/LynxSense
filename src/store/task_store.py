@@ -69,6 +69,16 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _portable_artifact_name(value: Optional[str], task_id: str) -> Optional[str]:
+    """把历史绝对产物路径迁移为文件名；不属于该任务的绝对路径视为无效。"""
+    if not value:
+        return None
+    path = Path(value)
+    if path.is_absolute() and task_id not in path.parts:
+        return None
+    return path.name or None
+
+
 class TaskStore:
     """任务表的增删改查。每次操作开一个短连接，交给 SQLite 处理文件锁。"""
 
@@ -125,6 +135,18 @@ class TaskStore:
                 )
             if "error_code" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN error_code TEXT")
+            # 历史版本曾持久化绝对路径。迁移后只保存文件名，使 data_dir/容器迁移可用。
+            for row in conn.execute(
+                "SELECT id, output_video, output_subtitle FROM tasks "
+                "WHERE output_video IS NOT NULL OR output_subtitle IS NOT NULL"
+            ):
+                video = _portable_artifact_name(row["output_video"], row["id"])
+                subtitle = _portable_artifact_name(row["output_subtitle"], row["id"])
+                if video != row["output_video"] or subtitle != row["output_subtitle"]:
+                    conn.execute(
+                        "UPDATE tasks SET output_video = ?, output_subtitle = ? WHERE id = ?",
+                        (video, subtitle, row["id"]),
+                    )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_created_at "
                 "ON tasks (created_at DESC, id DESC)"
