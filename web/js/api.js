@@ -593,9 +593,19 @@ const MockApi = (() => {
       await delay(60);
       return { matchedTasks: 0, matchedBytes: 0, skippedTasks: [], targets: [] };
     },
-    async runCleanup() {
+    async runCleanup(payload) {
       await delay(60);
-      return { deletedTasks: 0, deletedBytes: 0, skippedTasks: [], partial: [] };
+      const probeReq = payload && payload.cleanupProbeRecordsOlderThanDays !== undefined && payload.cleanupProbeRecordsOlderThanDays !== null;
+      return {
+        deletedTasks: 0,
+        deletedBytes: 0,
+        skippedTasks: [],
+        partial: [],
+        deletedProbeRecords: 0,
+        note: probeReq
+          ? "本次清理仅作用于 probe 记录（未发现过期记录），任务产物未动"
+          : "未发现符合条件的待清理任务产物",
+      };
     },
     async getRetention() {
       await delay(40);
