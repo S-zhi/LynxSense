@@ -291,12 +291,10 @@ def create_upload_task(
     except HTTPException:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise
     except Exception as e:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(status_code=500, detail="保存上传文件失败") from e
     finally:
         file.file.close()
@@ -304,14 +302,12 @@ def create_upload_task(
     if not dest_part.exists() or dest_part.stat().st_size == 0:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(status_code=400, detail="上传的视频文件为空")
 
     duration_sec = probe_duration(dest_part, settings.ffprobe_bin)
     if duration_sec is None:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(
             status_code=400,
             detail="无法解析视频时长，请确认文件格式正确且 ffprobe 可用",
@@ -321,7 +317,6 @@ def create_upload_task(
     if duration_sec > max_video_seconds:
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
-        release_lock(rec.id)
         raise HTTPException(
             status_code=400,
             detail=f"视频时长 ({duration_sec / 60:.1f} 分钟) 超过最大限制 ({settings.max_video_minutes} 分钟)",

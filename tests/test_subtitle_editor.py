@@ -238,6 +238,25 @@ def test_save_subtitles_404(client):
     assert r.status_code == 404
 
 
+def test_save_subtitles_releases_lock_on_disk_error(client, monkeypatch):
+    """写盘异常也必须释放底层锁并移除任务锁条目。"""
+    from src.handler.subtitle_editor import _write_locks
+
+    def fail_write(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(editor_routes, "write_srt", fail_write)
+    body = {
+        "locale": "translated",
+        "entries": [{"id": "1", "index": 1, "start": 0.0, "end": 1.0, "text": "x"}],
+    }
+
+    with pytest.raises(OSError, match="disk full"):
+        client.put(f"/api/tasks/{client._tid}/subtitles", json=body)
+
+    assert client._tid not in _write_locks
+
+
 # ---------- POST /api/tasks/{id}/subtitles/burn ----------
 
 def test_reburn_calls_burn_subtitles(client, tmp_path, monkeypatch):
