@@ -31,6 +31,68 @@ def test_translation_engine_store_seeds_deepseek_once(tmp_path):
     assert again.api_key == "env-key"
 
 
+def test_api_key_rotation_audit_and_blank_update_is_noop(tmp_path):
+    store = TranslationEngineStore(tmp_path / "engines.db")
+    created = store.create(
+        name="Audited", api_type="openai_compatible", base_url="https://e.test",
+        model="m", api_key="first-key",
+    )
+    assert created.api_key_rotated_at == created.created_at
+    original_updated = created.updated_at
+    original_rotated = created.api_key_rotated_at
+
+    # A blank key in an update is a placeholder for the existing secret.
+    unchanged = store.update(created.id, api_key="   ")
+    assert unchanged.api_key == "first-key"
+    assert unchanged.updated_at == original_updated
+    assert unchanged.api_key_rotated_at == original_rotated
+
+    repeated = store.update(created.id, api_key="first-key")
+    assert repeated.updated_at == original_updated
+    assert repeated.api_key_rotated_at == original_rotated
+
+    replaced = store.update(created.id, api_key="second-key")
+    assert replaced.api_key == "second-key"
+    assert replaced.api_key_rotated_at is not None
+    assert replaced.api_key_rotated_at >= original_rotated
+    assert replaced.updated_at >= original_updated
+
+
+def test_translation_engine_schema_migrates_rotation_timestamp(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("""
+            CREATE TABLE translation_engines (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, api_type TEXT NOT NULL,
+                base_url TEXT NOT NULL, model TEXT NOT NULL, api_key TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1, availability TEXT NOT NULL,
+                last_checked_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO translation_engines VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("legacy", "Legacy", "openai_compatible", "https://e.test", "m", "k",
+             1, "UNKNOWN", None, None, 1, 1),
+        )
+    loaded = TranslationEngineStore(db).get("legacy")
+    assert loaded is not None
+    assert loaded.api_key == "k"
+    assert loaded.api_key_rotated_at is None
+
+
+def test_delete_clears_secret_before_removing_engine(tmp_path):
+    store = TranslationEngineStore(tmp_path / "engines.db")
+    created = store.create(
+        name="Disposable", api_type="openai_compatible", base_url="https://e.test",
+        model="m", api_key="secret",
+    )
+    assert store.delete(created.id) is True
+    assert store.get(created.id) is None
+
+
 def test_translation_engine_store_persists_without_exposing_model(tmp_path):
     db = tmp_path / "engines.db"
     store = TranslationEngineStore(db)

@@ -72,6 +72,7 @@ class ProbeResult:
     reason: Optional[str] = None
     detail: Optional[str] = None
     cached: bool = False
+    language: Optional[str] = None
 
 _probe_cache_lock = threading.Lock()
 _probe_cache: dict[tuple[str, str, str], tuple[float, ProbeResult]] = {}
@@ -342,6 +343,7 @@ def probe_video(
             cached=False,
         )
     else:
+        language = _sniff_language(info)
         formats_count = _count_formats(info)
         if formats_count == 0 and not info.get("url"):
             res = ProbeResult(
@@ -351,6 +353,7 @@ def probe_video(
                 duration=info.get("duration"),
                 webpage_url=info.get("webpage_url") or clean_url,
                 reason="未找到可下载的视频格式",
+                language=language,
                 cached=False,
             )
         else:
@@ -361,6 +364,7 @@ def probe_video(
                 duration=info.get("duration"),
                 formats_count=formats_count,
                 webpage_url=info.get("webpage_url") or clean_url,
+                language=language,
                 cached=False,
             )
 
@@ -369,6 +373,36 @@ def probe_video(
             _probe_cache[cache_key] = (now, res)
 
     return res
+
+
+def _sniff_language(info: dict) -> Optional[str]:
+    """从 yt-dlp 元数据中嗅探视频语言线索（best-effort）。"""
+    lang = info.get("language")
+    if isinstance(lang, str) and lang.strip():
+        return _normalize_language_code(lang)
+    for key in ("subtitles", "automatic_captions"):
+        clues = info.get(key)
+        if isinstance(clues, dict):
+            for code in clues:
+                if isinstance(code, str) and code.strip():
+                    return _normalize_language_code(code)
+    return None
+
+
+def _normalize_language_code(code: str) -> str:
+    c = code.replace("_", "-").strip()
+    low = c.lower()
+    if low in ("zh-hans", "zh-cn", "zh-sg", "chs"):
+        return "zh-CN"
+    if low in ("zh-hant", "zh-tw", "zh-hk", "cht"):
+        return "zh-TW"
+    if low.startswith("zh"):
+        return "zh"
+    if "-" in c:
+        base = c.split("-")[0].lower()
+        if len(base) == 2:
+            return base
+    return c.lower()
 
 
 def _resolve_output_path(info: dict, out_dir: Path) -> Optional[Path]:

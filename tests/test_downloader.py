@@ -689,3 +689,13 @@ def test_probe_video_ttl_expiry(monkeypatch):
     res3 = probe_video(url, ttl_sec=10)
     assert res3.cached is False
     assert len(calls) == 2
+
+
+def test_probe_sniffs_language_from_metadata(monkeypatch):
+    def on_extract(url, download, opts):
+        return {"title": "Japanese", "language": "ja-JP", "formats": [{}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    downloader.clear_probe_cache()
+    result = downloader.probe_video("https://example.com/lang", ttl_sec=0)
+    assert result.language == "ja"
