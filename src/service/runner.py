@@ -14,6 +14,7 @@ import logging
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Optional
 
 from src.config import OUTPUT_VIDEO, settings, task_dir
@@ -285,8 +286,10 @@ def _run(task_id: str) -> None:
         if ev.error_code is not None:
             fields["error_code"] = ev.error_code
         if ev.outputs:
-            fields["output_video"] = ev.outputs.get("video")
-            fields["output_subtitle"] = ev.outputs.get("subtitle")
+            video = ev.outputs.get("video")
+            subtitle = ev.outputs.get("subtitle")
+            fields["output_video"] = Path(video).name if video else None
+            fields["output_subtitle"] = Path(subtitle).name if subtitle else None
 
         _store.update(task_id, **fields)
         last_state["status"] = ev.status

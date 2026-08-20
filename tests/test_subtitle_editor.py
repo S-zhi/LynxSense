@@ -272,8 +272,7 @@ def test_reburn_calls_burn_subtitles(client, tmp_path, monkeypatch):
 
     # DB 里 output_video 字段也被刷新
     rec = client._store.get(client._tid)
-    assert rec.output_video is not None
-    assert rec.output_video.endswith("output.mp4")
+    assert rec.output_video == "output.mp4"
 
 
 def test_reburn_accepts_mode_override(client, tmp_path, monkeypatch):

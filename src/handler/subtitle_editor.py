@@ -336,5 +336,5 @@ def reburn_subtitles(
 
     out_name = result.output_path.name
     # 把 DB 里的 output_video 同步刷新，方便前端通过 /download 立即拿到新版本
-    store.update(task_id, output_video=str(result.output_path))
+    store.update(task_id, output_video=out_name)
     return ReburnOut(ok=True, taskId=task_id, mode=mode, outputPath=out_name)
