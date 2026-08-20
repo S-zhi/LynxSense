@@ -337,8 +337,14 @@ def test_network_error_retries_without_batch_fallback(fake_settings, monkeypatch
 
 
 def test_single_item_failure_line_index_message(fake_settings, monkeypatch):
-    import httpx
+    called_count = 0
 
+    def fake_call(*a, **k):
+        nonlocal called_count
+        called_count += 1
+        raise TranslateError("JSON decode error", code="invalid_response")
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake_call)
     def mock_post_invalid_json(*a, **k):
         request = httpx.Request("POST", "https://api.deepseek.com")
         return httpx.Response(200, json={"choices": [{"message": {"content": ""}}]}, request=request)
