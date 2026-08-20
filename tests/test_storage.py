@@ -255,6 +255,57 @@ def test_cleanup_partial_downgrades_resource_status(client):
     assert out["outputs"] is None
 
 
+def test_cleanup_partial_downgrades_resource_status_for_translated_srt(client):
+    """部分清理删除 translated_srt 后，含字幕任务联动降级为 MISSING 且 outputs 置空。"""
+    store = client._store
+    cid = _seed_task(
+        client, store, title="degrade_srt",
+        status="SUCCESS", source_bytes=200, audio_bytes=300, srt_bytes=40, output_bytes=800,
+    )
+
+    res = _post_cleanup(client, taskIds=[cid], kinds=["translated_srt"])
+    assert res["deletedTasks"] == 0
+    assert len(res["partial"]) == 1
+
+    rec = store.get(cid)
+    assert rec is not None
+    assert rec.resource_status == "MISSING"
+    assert rec.downgrade_reason == "USER_CLEANED"
+
+    out = client.get(f"/api/tasks/{cid}").json()
+    assert out["resourceStatus"] == "MISSING"
+    assert out["outputs"] is None
+
+
+def test_cleanup_partial_downgrades_resource_status_for_no_subtitle_source(client):
+    """部分清理删除无字幕任务的 source 后，任务联动降级为 MISSING 且 outputs 置空。"""
+    store = client._store
+    rec = store.create(
+        url="https://example.com/v_nosub",
+        source_lang="auto", target_lang="zh-CN",
+        mode="mono", burn="hard", model="small", engine="deepseek",
+        need_subtitle=False,
+        title="nosub_degrade",
+    )
+    store.update(rec.id, status="SUCCESS", progress=100)
+    d = client._tmp / rec.id
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{SOURCE_VIDEO_STEM}.mp4").write_bytes(b"\0" * 500)
+
+    res = _post_cleanup(client, taskIds=[rec.id], kinds=["source"])
+    assert res["deletedTasks"] == 0
+    assert len(res["partial"]) == 1
+
+    updated_rec = store.get(rec.id)
+    assert updated_rec is not None
+    assert updated_rec.resource_status == "MISSING"
+    assert updated_rec.downgrade_reason == "USER_CLEANED"
+
+    out = client.get(f"/api/tasks/{rec.id}").json()
+    assert out["resourceStatus"] == "MISSING"
+    assert out["outputs"] is None
+
+
 def test_cleanup_full_task_calls_mark_resource_missing(client, monkeypatch):
     """整任务清理会在 store.delete 前先调用 _mark_resource_missing 标记资源丢失。"""
     store = client._store
