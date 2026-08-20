@@ -246,6 +246,8 @@ def test_cleanup_partial_downgrades_resource_status(client):
     rec = store.get(cid)
     assert rec is not None
     assert rec.resource_status == "MISSING"
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgraded_at > 0
 
     # API 接口响应中 resourceStatus 为 MISSING，outputs 为 None
     out = client.get(f"/api/tasks/{cid}").json()
@@ -263,8 +265,8 @@ def test_cleanup_full_task_calls_mark_resource_missing(client, monkeypatch):
 
     calls = []
 
-    def mock_mark(store_arg, task_id_arg, reason_arg):
-        calls.append((task_id_arg, reason_arg))
+    def mock_mark(store_arg, task_id_arg, reason_arg, downgrade_reason_arg):
+        calls.append((task_id_arg, reason_arg, downgrade_reason_arg))
         rec = store_arg.get(task_id_arg)
         if rec:
             store_arg.update(task_id_arg, resource_status="MISSING", error=reason_arg)
@@ -276,6 +278,7 @@ def test_cleanup_full_task_calls_mark_resource_missing(client, monkeypatch):
     assert len(calls) == 1
     assert calls[0][0] == cid
     assert calls[0][1] == "资源已删除"
+    assert calls[0][2] == "USER_CLEANED"
     assert store.get(cid) is None
 
 
