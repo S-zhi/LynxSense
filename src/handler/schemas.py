@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +43,15 @@ class TaskCreate(BaseModel):
     # 配置实例 ID；保留 deepseek 以兼容旧版环境变量配置。
     engine: str = Field(default="deepseek", min_length=1)
     needSubtitle: bool = True  # False = 仅下载视频，跳过识别/翻译/烧录
+
+
+class ErrorDetail(BaseModel):
+    """机器可读错误详情，同时保留可直接展示的中文信息与操作建议。"""
+
+    code: str
+    message: str
+    limits: Optional[dict[str, Any]] = None
+    suggestion: Optional[str] = None
 
 
 class TaskProbeIn(BaseModel):

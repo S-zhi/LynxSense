@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -52,6 +53,12 @@ class TranslateResult:
 
 ProgressHook = Callable[[TranslateProgress], None]
 BatchHook = Callable[[int, int], None]
+
+# 上游 5xx 通常是暂时性故障，但不应因此把一个批次无限拆成单条请求。
+# 每次重试前等待 5、15、60 秒；网络错误则立即重试 3 次，耗尽后直接失败。
+_UPSTREAM_RETRY_DELAYS = (5, 15, 60)
+_NETWORK_RETRY_COUNT = 3
+_RETRYABLE_ERROR_CODES = {"upstream_error", "network_error"}
 
 
 def _lang_name(code: str) -> str:
@@ -161,7 +168,9 @@ def _translate_with_fallback(
     sub_batch = [idx_to_item[idx] for idx in missing_indices]
     current_error = last_error
     try:
-        translated = _translate_batch(sub_batch, source_lang, target_lang, api_key, engine_config=engine_config)
+        translated = _translate_batch_with_retry(
+            sub_batch, source_lang, target_lang, api_key, engine_config=engine_config,
+        )
         if 0 < len(translated) <= len(missing_indices):
             new_added = False
             for idx, res in zip(missing_indices[:len(translated)], translated):
@@ -174,7 +183,12 @@ def _translate_with_fallback(
             return [partial[idx] for idx in indices]
     except Exception as exc:
         err_code = getattr(exc, "code", None)
-        if err_code in ("unauthorized", "missing_api_key", "rate_limited", "insufficient_quota"):
+        if err_code in (
+            "unauthorized", "missing_api_key", "rate_limited", "insufficient_quota",
+            # 上游/网络错误已经在 _translate_batch_with_retry 中完成有限重试。
+            # 继续拆分只会重复请求并掩盖真实故障。
+            *_RETRYABLE_ERROR_CODES,
+        ):
             raise
         current_error = exc
 
@@ -207,6 +221,39 @@ def _translate_with_fallback(
         last_error=current_error,
     )
     return left + right
+
+
+def _translate_batch_with_retry(
+    batch: List[str],
+    source_lang: str,
+    target_lang: str,
+    api_key: str,
+    *,
+    engine_config=None,
+) -> List[str]:
+    """对暂时性接口错误做有限重试，避免触发批量减半递归。
+
+    5xx 使用 5/15/60 秒退避（初次请求后最多重试三次）；网络异常立即重试三次。
+    认证、限流、配额和响应格式错误交由上层原有快失败/拆分逻辑处理。
+    """
+    upstream_attempt = 0
+    network_attempt = 0
+    while True:
+        try:
+            return _translate_batch(batch, source_lang, target_lang, api_key, engine_config=engine_config)
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if code == "upstream_error" and upstream_attempt < len(_UPSTREAM_RETRY_DELAYS):
+                delay = _UPSTREAM_RETRY_DELAYS[upstream_attempt]
+                upstream_attempt += 1
+                logger.warning("翻译上游错误，%d 秒后重试（第 %d/%d 次）", delay, upstream_attempt, len(_UPSTREAM_RETRY_DELAYS))
+                time.sleep(delay)
+                continue
+            if code == "network_error" and network_attempt < _NETWORK_RETRY_COUNT:
+                network_attempt += 1
+                logger.warning("翻译网络错误，立即重试（第 %d/%d 次）", network_attempt, _NETWORK_RETRY_COUNT)
+                continue
+            raise
 
 
 def _translate_batch(batch: List[str], source_lang: str, target_lang: str, api_key: str, *, engine_config=None) -> List[str]:

@@ -303,6 +303,7 @@ def test_fast_fail_on_insufficient_quota_error(fake_settings, monkeypatch):
 
 def test_transient_error_continues_to_halve(fake_settings, monkeypatch):
     called_count = 0
+    sleeps = []
 
     def fake_call(*a, **k):
         nonlocal called_count
@@ -310,11 +311,29 @@ def test_transient_error_continues_to_halve(fake_settings, monkeypatch):
         raise TranslateError("Transient upstream error", code="upstream_error")
 
     monkeypatch.setattr(translator, "_call_deepseek", fake_call)
+    monkeypatch.setattr(translator.time, "sleep", sleeps.append)
     with pytest.raises(TranslateError) as exc_info:
         translate_texts(["a", "b"], "en", "zh-CN")
     assert exc_info.value.code == "upstream_error"
-    # batch size 2 -> 调用 1 次失败 -> 拆分成 size 1 -> 调用 2 次失败并抛错 (共 2 次调用)
-    assert called_count == 2
+    # 5xx 只在原批次上做有限退避重试，不再拆分成单条请求。
+    assert called_count == 4
+    assert sleeps == [5, 15, 60]
+
+
+def test_network_error_retries_without_batch_fallback(fake_settings, monkeypatch):
+    called_count = 0
+
+    def fake_call(*a, **k):
+        nonlocal called_count
+        called_count += 1
+        raise TranslateError("network down", code="network_error")
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake_call)
+    with pytest.raises(TranslateError) as exc_info:
+        translate_texts(["a", "b"], "en", "zh-CN")
+    assert exc_info.value.code == "network_error"
+    # 初次请求 + 3 次重试；失败后不把批次递归减半。
+    assert called_count == 4
 
 
 def test_single_item_failure_line_index_message(fake_settings, monkeypatch):
