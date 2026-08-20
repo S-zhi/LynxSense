@@ -847,7 +847,11 @@ def test_upload_rejects_unsupported_extension_400(client, monkeypatch):
 
     r = _upload(client, _filename="clip.txt", _content=b"x", mode="mono")
     assert r.status_code == 400
-    assert "不支持的视频格式" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "UNSUPPORTED_FORMAT"
+    assert "不支持的视频格式" in detail["message"]
+    assert ".mp4" in detail["limits"]["supportedFormats"]
+    assert detail["suggestion"]
     assert enqueued == []
 
 
@@ -858,7 +862,7 @@ def test_upload_rejects_no_extension_400(client, monkeypatch):
 
     r = _upload(client, _filename="clip", _content=b"x")
     assert r.status_code == 400
-    assert "未知" in r.json()["detail"]
+    assert "未知" in r.json()["detail"]["message"]
     assert enqueued == []
 
 
@@ -994,7 +998,10 @@ def test_upload_content_length_exceeds_max_413(client, monkeypatch):
         files={"file": ("clip.mp4", b"VIDEO", "video/mp4")},
     )
     assert r.status_code == 413
-    assert "超过最大限制" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "UPLOAD_TOO_LARGE"
+    assert "超过最大限制" in detail["message"]
+    assert detail["limits"]["maxMb"] == 1
     assert enqueued == []
 
 
@@ -1021,7 +1028,9 @@ def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch)
         files={"file": ("clip.mp4", large_content, "video/mp4")},
     )
     assert r.status_code == 413
-    assert "超过最大限制" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "UPLOAD_TOO_LARGE"
+    assert "超过最大限制" in detail["message"]
     assert enqueued == []
     assert client.get("/api/tasks").json() == []
     assert _count_task_dirs(client._tmp) == before
@@ -1070,8 +1079,12 @@ def test_upload_duration_exceeds_max_400_and_cleanup(client, monkeypatch):
     before = _count_task_dirs(client._tmp)
     r = _upload(client, _filename="clip.mp4", _content=b"VIDEO")
     assert r.status_code == 400
-    assert "视频时长" in r.json()["detail"]
-    assert "超过最大限制" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "UPLOAD_DURATION_EXCEEDED"
+    assert "视频时长" in detail["message"]
+    assert "超过最大限制" in detail["message"]
+    assert detail["limits"] == {"maxMinutes": 10, "durationMinutes": 10.0}
+    assert detail["suggestion"]
     assert enqueued == []
     assert client.get("/api/tasks").json() == []
     assert _count_task_dirs(client._tmp) == before

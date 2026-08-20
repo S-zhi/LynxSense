@@ -35,6 +35,10 @@ async function readError(res, fallback) {
       if (data && data.detail) {
         if (Array.isArray(data.detail)) {
           detail = data.detail.map((item) => `${item.loc?.join(".")}: ${item.msg}`).join("; ");
+        } else if (typeof data.detail === "object") {
+          const message = data.detail.message || data.detail.code || "请求失败";
+          const suggestion = data.detail.suggestion;
+          detail = suggestion ? `${message}；${suggestion}` : String(message);
         } else {
           detail = String(data.detail);
         }

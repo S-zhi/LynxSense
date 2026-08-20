@@ -35,6 +35,7 @@ from src.handler.deps import (
     require_api_token,
 )
 from src.handler.schemas import (
+    ErrorDetail,
     ProbeRecordOut,
     ProbeRecordsClearOut,
     TaskCreate,
@@ -68,6 +69,23 @@ _UPLOAD_VIDEO_EXTS = {
     ".mp4", ".mov", ".mkv", ".webm", ".avi",
     ".m4v", ".flv", ".ts", ".mpeg", ".mpg", ".wmv",
 }
+
+
+def _upload_error(
+    status_code: int,
+    *,
+    code: str,
+    message: str,
+    limits: Optional[dict] = None,
+    suggestion: Optional[str] = None,
+) -> HTTPException:
+    detail = ErrorDetail(
+        code=code,
+        message=message,
+        limits=limits,
+        suggestion=suggestion,
+    ).model_dump(exclude_none=True)
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 def _require(store: TaskStore, task_id: str):
@@ -205,9 +223,12 @@ def create_upload_task(
     if content_length_hdr:
         try:
             if int(content_length_hdr) > max_upload_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
+                raise _upload_error(
+                    413,
+                    code="UPLOAD_TOO_LARGE",
+                    message=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
+                    limits={"maxMb": settings.max_upload_mb},
+                    suggestion="请压缩或切分视频，也可以改用 URL 任务模式。",
                 )
         except ValueError:
             pass
@@ -216,9 +237,13 @@ def create_upload_task(
     _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
     if ext not in _UPLOAD_VIDEO_EXTS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的视频格式：{ext or '未知'}（支持 {', '.join(sorted(_UPLOAD_VIDEO_EXTS))}）",
+        supported_formats = sorted(_UPLOAD_VIDEO_EXTS)
+        raise _upload_error(
+            400,
+            code="UNSUPPORTED_FORMAT",
+            message=f"不支持的视频格式：{ext or '未知'}（支持 {', '.join(supported_formats)}）",
+            limits={"supportedFormats": supported_formats},
+            suggestion="请将视频转换为受支持的格式后重新上传。",
         )
 
     # 先建记录拿到 task_id，再把源文件落盘到该任务目录
@@ -249,9 +274,12 @@ def create_upload_task(
                     break
                 written_bytes += len(chunk)
                 if written_bytes > max_upload_bytes:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
+                    raise _upload_error(
+                        413,
+                        code="UPLOAD_TOO_LARGE",
+                        message=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
+                        limits={"maxMb": settings.max_upload_mb},
+                        suggestion="请压缩或切分视频，也可以改用 URL 任务模式。",
                     )
                 out.write(chunk)
     except HTTPException:
@@ -288,9 +316,15 @@ def create_upload_task(
         store.delete(rec.id)
         shutil.rmtree(d, ignore_errors=True)
         release_lock(rec.id)
-        raise HTTPException(
-            status_code=400,
-            detail=f"视频时长 ({duration_sec / 60:.1f} 分钟) 超过最大限制 ({settings.max_video_minutes} 分钟)",
+        raise _upload_error(
+            400,
+            code="UPLOAD_DURATION_EXCEEDED",
+            message=f"视频时长 ({duration_sec / 60:.1f} 分钟) 超过最大限制 ({settings.max_video_minutes} 分钟)",
+            limits={
+                "maxMinutes": settings.max_video_minutes,
+                "durationMinutes": round(duration_sec / 60, 1),
+            },
+            suggestion="请裁剪或切分视频后重新上传。",
         )
 
     dest_part.replace(dest)
