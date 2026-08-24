@@ -1,0 +1,17 @@
+{
+  "listen_addr": "127.0.0.1:8787",
+  "data_dir": "./drive-data",
+  "python_base_url": "http://127.0.0.1:8000",
+  "python_api_token": "",
+  "google_client_id": "",
+  "google_client_secret": "",
+  "google_redirect_uri": "",
+  "google_client_config_file": "",
+  "google_scopes": [
+    "https://www.googleapis.com/auth/drive.file"
+  ],
+  "drive_folder_id": "",
+  "max_upload_bytes": 2147483648,
+  "chunk_size_bytes": 16777216,
+  "request_timeout_seconds": 600
+}
