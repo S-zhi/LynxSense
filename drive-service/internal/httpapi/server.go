@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/s-zhi/subtitles-ai-drive/internal/config"
 	driveclient "github.com/s-zhi/subtitles-ai-drive/internal/drive"
@@ -598,6 +600,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// uploadFileNameHeader decodes the browser-safe UTF-8 filename header while
+// preserving compatibility with clients that still send an ASCII filename in
+// X-File-Name. The boolean reports whether either header was supplied.
+func uploadFileNameHeader(r *http.Request) (string, bool, error) {
+	if encoded := r.Header.Get("X-File-Name-Encoded"); encoded != "" {
+		name, err := url.PathUnescape(encoded)
+		if err != nil {
+			return "", true, fmt.Errorf("X-File-Name-Encoded 编码无效: %w", err)
+		}
+		if !utf8.ValidString(name) {
+			return "", true, errors.New("X-File-Name-Encoded 不是有效 UTF-8")
+		}
+		for _, value := range name {
+			if value < 0x20 || value == 0x7f {
+				return "", true, errors.New("文件名不能包含控制字符")
+			}
+		}
+		if name == "" {
+			return "", true, errors.New("文件名不能为空")
+		}
+		return name, true, nil
+	}
+	name := r.Header.Get("X-File-Name")
+	return name, name != "", nil
+}
+
 // handleFolderEntryUpload creates the normal local resumable upload record,
 // but attaches durable batch/entry/parent metadata before PATCH begins.
 func (s *Server) handleFolderEntryUpload(w http.ResponseWriter, r *http.Request, batchID, entryID string) {
@@ -644,7 +672,12 @@ func (s *Server) handleFolderEntryUpload(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	name := entry.Name
-	if requestedName := r.Header.Get("X-File-Name"); requestedName != "" {
+	requestedName, nameProvided, err := uploadFileNameHeader(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if nameProvided {
 		requestedName = path.Base(strings.ReplaceAll(requestedName, "\\", "/"))
 		if requestedName != name {
 			writeError(w, http.StatusConflict, fmt.Errorf("entry name mismatch, manifest=%q request=%q", name, requestedName))
@@ -800,8 +833,12 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	name := r.Header.Get("X-File-Name")
-	if name == "" {
+	name, nameProvided, err := uploadFileNameHeader(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !nameProvided {
 		name = "upload.bin"
 	}
 	mime := r.Header.Get("X-File-Mime")
@@ -976,7 +1013,7 @@ func (s *Server) setCommonHeaders(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,HEAD,DELETE,OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Range,Authorization,X-API-Token,X-Upload-Length,X-Upload-Offset,Upload-Length,Upload-Offset,X-File-Name,X-File-Mime,X-Client-Request-ID,Idempotency-Key")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Range,Authorization,X-API-Token,X-Upload-Length,X-Upload-Offset,Upload-Length,Upload-Offset,X-File-Name,X-File-Name-Encoded,X-File-Mime,X-Client-Request-ID,Idempotency-Key")
 	w.Header().Set("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges,ETag,Location,Upload-Offset,Upload-Length,X-Transfer-ID,X-Client-Request-ID")
 	w.Header().Add("Vary", "Origin")
 }

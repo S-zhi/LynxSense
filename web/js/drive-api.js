@@ -65,6 +65,19 @@ async function readJSON(response) {
 }
 
 /**
+ * Header values are ByteStrings in browsers, so raw Unicode filenames make
+ * fetch throw before the request is sent. Percent-encode UTF-8 into ASCII and
+ * let the sidecar decode the explicitly named header.
+ */
+function uploadMetadataHeaders(file) {
+  return {
+    "X-Upload-Length": String(file.size),
+    "X-File-Name-Encoded": encodeURIComponent(file.name),
+    "X-File-Mime": file.type || "application/octet-stream",
+  };
+}
+
+/**
  * Drive sidecar API。所有路径均相对本机的 8787 端口。
  */
 export const DriveApi = {
@@ -135,7 +148,7 @@ export const DriveApi = {
     return readJSON(response);
   },
   async createFolderEntryUpload(batchId, entryId, file, signal) {
-    const response = await request(`/api/drive/folder-uploads/${encodeURIComponent(batchId)}/entries/${encodeURIComponent(entryId)}/upload`, { method: "POST", headers: { "X-Upload-Length": String(file.size), "X-File-Name": file.name, "X-File-Mime": file.type || "application/octet-stream" }, signal });
+    const response = await request(`/api/drive/folder-uploads/${encodeURIComponent(batchId)}/entries/${encodeURIComponent(entryId)}/upload`, { method: "POST", headers: uploadMetadataHeaders(file), signal });
     await ensureOK(response, "创建文件夹条目上传失败");
     return readJSON(response);
   },
@@ -144,11 +157,7 @@ export const DriveApi = {
   async createUpload(file, signal) {
     const response = await request("/api/drive/uploads", {
       method: "POST",
-      headers: {
-        "X-Upload-Length": String(file.size),
-        "X-File-Name": file.name,
-        "X-File-Mime": file.type || "application/octet-stream",
-      },
+      headers: uploadMetadataHeaders(file),
       signal,
     });
     await ensureOK(response, "创建 Drive 上传失败");

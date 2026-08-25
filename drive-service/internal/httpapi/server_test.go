@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/s-zhi/subtitles-ai-drive/internal/config"
@@ -107,6 +109,26 @@ func TestLocalhostCORSOriginIsReflected(t *testing.T) {
 	server.ServeHTTP(resp, req)
 	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:8000" {
 		t.Fatalf("allow origin = %q", got)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(got, "X-File-Name-Encoded") {
+		t.Fatalf("allow headers = %q", got)
+	}
+}
+
+func TestUploadFileNameHeaderDecodesUnicodeAndRejectsControls(t *testing.T) {
+	t.Parallel()
+	const original = "AI学习 + 100%.mp4"
+	req := httptest.NewRequest(http.MethodPost, "/api/drive/uploads", nil)
+	req.Header.Set("X-File-Name-Encoded", url.PathEscape(original))
+	name, provided, err := uploadFileNameHeader(req)
+	if err != nil || !provided || name != original {
+		t.Fatalf("decoded name=%q provided=%v err=%v", name, provided, err)
+	}
+
+	bad := httptest.NewRequest(http.MethodPost, "/api/drive/uploads", nil)
+	bad.Header.Set("X-File-Name-Encoded", "bad%0Aname.mp4")
+	if _, _, err := uploadFileNameHeader(bad); err == nil {
+		t.Fatal("encoded control character should be rejected")
 	}
 }
 
