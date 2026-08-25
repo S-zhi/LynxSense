@@ -542,6 +542,103 @@ def test_scan_missing_terminal_records_volume_migration(client, tmp_path):
     assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"VOLUME_MIGRATED"}
 
 
+def test_scan_missing_terminal_not_a_directory_error(client, tmp_path, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    # 造一个同名文件代替目录
+    not_a_dir = tmp_path / "file-as-datadir"
+    not_a_dir.write_text("i am a file")
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=not_a_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgrade_errno is not None
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["downgradeReason"] == "USER_CLEANED"
+    assert data["downgradeErrno"] == rec.downgrade_errno
+
+
+def test_scan_missing_terminal_permission_error(client, tmp_path, monkeypatch, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    data_dir = tmp_path / "perm-denied-dir"
+    data_dir.mkdir()
+
+    def fake_iterdir(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr("pathlib.Path.iterdir", fake_iterdir)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.downgrade_errno == 13
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+
+def test_scan_missing_terminal_os_error_io(client, tmp_path, monkeypatch, caplog):
+    import errno
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    data_dir = tmp_path / "eio-dir"
+    data_dir.mkdir()
+
+    def fake_iterdir(*args, **kwargs):
+        err = OSError("Input/output error")
+        err.errno = errno.EIO
+        raise err
+
+    monkeypatch.setattr("pathlib.Path.iterdir", fake_iterdir)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.downgrade_errno == errno.EIO
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+
+def test_scan_missing_terminal_os_error_generic(client, tmp_path, monkeypatch, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    data_dir = tmp_path / "generic-oserror-dir"
+    data_dir.mkdir()
+
+    def fake_iterdir(*args, **kwargs):
+        err = OSError("Unknown error")
+        err.errno = 999
+        raise err
+
+    monkeypatch.setattr("pathlib.Path.iterdir", fake_iterdir)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "UNKNOWN"
+    assert rec.downgrade_errno == 999
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+
 def test_success_download_only_task_with_missing_source_hides_outputs(client):
     """needSubtitle=False 的"仅下载"任务丢失 source.* 也算资源已丢失。"""
     cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
