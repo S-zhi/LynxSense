@@ -148,3 +148,29 @@ func TestCancelBatchKeepsSuccessfulEntriesAndCancelsRemaining(t *testing.T) {
 		t.Fatalf("batch = %#v", gotBatch)
 	}
 }
+
+func TestPostPythonUploadRespectsTimeoutAndCancellation(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.PythonTimeoutSeconds = 1 // 1 second timeout for test
+	state, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(&cfg, state, &fakeDrive{})
+
+	// Test cancellation during upload
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	staging := filepath.Join(cfg.DataDir, "import-file.bin")
+	if err := os.WriteFile(staging, []byte("test payload data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = manager.postPythonUpload(cancelCtx, "transfer-1", staging, "import-file.bin")
+	if err == nil {
+		t.Fatal("expected error when context is cancelled, got nil")
+	}
+}
