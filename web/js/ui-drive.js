@@ -6,7 +6,10 @@ import { toast } from "./toast.js";
 import { DriveApi } from "./drive-api.js";
 
 const CHUNK_SIZE = 16 * 1024 * 1024;
+const FOLDER_UPLOAD_CONCURRENCY = 2;
 const REFRESH_INTERVAL = 5000;
+const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
+const ROOT_FOLDER_LABEL = "Subtitles AI";
 
 const STATUS_LABELS = {
   PENDING: "等待中",
@@ -29,12 +32,128 @@ const local = {
   authError: "",
   files: [],
   filesError: "",
+  filesLoading: false,
+  filesRequestId: 0,
+  rootFolderId: "",
+  currentFolderId: "",
+  currentFolder: null,
+  breadcrumbs: [],
+  pageToken: "",
+  nextPageToken: "",
+  pageHistory: [],
   transfers: [],
   transfersError: "",
   refreshing: false,
   upload: null,
+  folderUpload: null,
   timer: null,
 };
+
+/** 目录上传和文件列表共用的稳定目录判断。 */
+export function isDriveFolder(file) {
+  return file?.mimeType === DRIVE_FOLDER_MIME || file?.mime_type === DRIVE_FOLDER_MIME || file?.kind === "folder";
+}
+
+/** 将浏览器提供的相对路径整理为安全、可复现的 POSIX 路径。 */
+export function normalizeRelativePath(value, fallback = "未命名文件") {
+  const parts = String(value || fallback)
+    .replaceAll("\\", "/")
+    .split("/")
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "." && part !== "..");
+  const safe = parts.map((part) => part.replace(/[<>:\"|?*\u0000-\u001f]/g, "_").trim()).filter(Boolean);
+  return safe.join("/") || fallback;
+}
+
+/** 从 FileList 提取 Drive 文件夹批次所需的 manifest。 */
+export function createFolderManifest(files) {
+  return Array.from(files || []).map((file, index) => {
+    const relativePath = normalizeRelativePath(file?.webkitRelativePath || file?.name, `file-${index + 1}`);
+    const pathParts = relativePath.split("/");
+    return {
+      relativePath,
+      name: pathParts.at(-1) || file?.name || `file-${index + 1}`,
+      size: Math.max(0, Number(file?.size || 0)),
+      mime: file?.type || "application/octet-stream",
+    };
+  });
+}
+
+// 便于其他前端模块和测试使用语义更直接的别名。
+export const buildFolderManifest = createFolderManifest;
+
+/** 目录上传进度的纯计算，浏览器和 Node 测试都可复用。 */
+export function summarizeFolderProgress(upload) {
+  const entries = Array.isArray(upload?.entries) ? upload.entries : [];
+  const totalBytes = entries.reduce((sum, entry) => sum + Math.max(0, Number(entry.size || entry.file?.size || 0)), 0);
+  const completedBytes = entries.reduce((sum, entry) => {
+    const size = Math.max(0, Number(entry.size || entry.file?.size || 0));
+    return sum + Math.min(size, Math.max(0, Number(entry.offset || 0)));
+  }, 0);
+  const completedEntries = entries.filter((entry) => entry.state === "SUCCESS" || (Number(entry.offset || 0) >= Number(entry.size || entry.file?.size || 0) && Number(entry.size || entry.file?.size || 0) > 0)).length;
+  const failedEntries = entries.filter((entry) => entry.state === "FAILED").length;
+  return {
+    totalEntries: entries.length,
+    completedEntries,
+    failedEntries,
+    totalBytes,
+    completedBytes,
+    percent: totalBytes > 0 ? Math.min(100, Math.round((completedBytes / totalBytes) * 100)) : 0,
+  };
+}
+
+export const calculateFolderProgress = summarizeFolderProgress;
+
+/** 为目录上传限制并发数；返回顺序与输入一致，便于稳定更新 UI。 */
+export async function runWithConcurrency(items, limit, worker) {
+  const list = Array.from(items || []);
+  const width = Math.max(1, Math.floor(Number(limit) || 1));
+  const results = new Array(list.length);
+  let cursor = 0;
+  async function consume() {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(list[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(width, list.length) }, consume));
+  return results;
+}
+
+function batchFromResponse(value) {
+  return value?.batch || value?.folderUpload || value || {};
+}
+
+function batchIDFromResponse(value) {
+  const batch = batchFromResponse(value);
+  return String(value?.batchId || value?.batch_id || batch.id || batch.batchId || batch.batch_id || "");
+}
+
+function entriesFromResponse(value) {
+  const batch = batchFromResponse(value);
+  return Array.isArray(value?.entries) ? value.entries : Array.isArray(batch.entries) ? batch.entries : [];
+}
+
+function entryPath(entry) {
+  return String(entry?.relativePath || entry?.relative_path || entry?.path || "");
+}
+
+function entryID(entry) {
+  return String(entry?.entryId || entry?.entry_id || entry?.id || "");
+}
+
+function uploadIDFromResponse(value) {
+  return String(value?.uploadId || value?.upload_id || value?.upload?.id || value?.id || "");
+}
+
+function folderEntryStatus(entry) {
+  return String(entry?.state || entry?.status || "PENDING").toUpperCase();
+}
+
+function hasActiveUpload() {
+  return Boolean(local.upload || (local.folderUpload && !["SUCCESS", "CANCELLED"].includes(local.folderUpload.state)));
+}
 
 /**
  * 初始化 Google Drive 视图，并把按钮事件绑定到独立的 sidecar 状态流。
@@ -47,14 +166,27 @@ export function initDrive() {
   $("#driveAuthAction")?.addEventListener("click", openAuth);
   $("#driveDisconnect")?.addEventListener("click", disconnect);
   $("#driveFileInput")?.addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (file) void startUpload(file);
+    const files = Array.from(event.target.files || []);
+    if (files.length > 1 || files.some((file) => file.webkitRelativePath)) void startFolderUpload(files);
+    else if (files[0]) void startUpload(files[0]);
     event.target.value = "";
   });
+  $("#driveFolderInput")?.addEventListener("change", (event) => {
+    void startFolderUpload(Array.from(event.target.files || []));
+    event.target.value = "";
+  });
+  $("#driveChooseFile")?.addEventListener("click", () => $("#driveFileInput")?.click());
+  $("#driveChooseFolder")?.addEventListener("click", () => $("#driveFolderInput")?.click());
   $("#driveUploadCancel")?.addEventListener("click", cancelUpload);
   bindDropzone();
 
   $("#driveFiles")?.addEventListener("click", handleFileAction);
+  $("#driveFiles")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") handleFileAction(event);
+  });
+  $("#driveBreadcrumbs")?.addEventListener("click", handleBreadcrumbAction);
+  $("#driveFilesPagination")?.addEventListener("click", handlePaginationAction);
+  $("#driveFolderUploadProgress")?.addEventListener("click", handleFolderUploadAction);
   $("#driveTransfers")?.addEventListener("click", handleTransferAction);
   document.addEventListener("viewchange", handleViewChange);
 
@@ -82,10 +214,15 @@ function bindDropzone() {
     });
   });
   dropzone.addEventListener("drop", (event) => {
-    const file = event.dataTransfer?.files?.[0];
-    if (file) void startUpload(file);
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length > 1 || files.some((file) => file.webkitRelativePath)) void startFolderUpload(files);
+    else if (files[0]) void startUpload(files[0]);
+  });
+  dropzone.addEventListener("click", (event) => {
+    if (!event.target.closest("button")) input.click();
   });
   dropzone.addEventListener("keydown", (event) => {
+    if (event.target !== dropzone) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       input.click();
@@ -124,43 +261,75 @@ function stopPolling() {
   local.timer = null;
 }
 
-/**
- * 并行读取 OAuth、文件和传输状态；OAuth 未连接时不请求 Drive 文件列表。
- */
+/** 并行读取 OAuth 和持久化传输状态，文件列表由独立分页函数负责。 */
+async function refreshStatus() {
+  const [authResult, transferResult] = await Promise.allSettled([
+    DriveApi.status(),
+    DriveApi.listTransfers(),
+  ]);
+
+  local.authError = authResult.status === "rejected" ? messageOf(authResult.reason, "无法连接 Drive sidecar") : "";
+  local.auth = authResult.status === "fulfilled" ? authResult.value : null;
+  if (transferResult.status === "fulfilled") {
+    local.transfers = Array.isArray(transferResult.value) ? transferResult.value : [];
+    local.transfersError = "";
+  } else {
+    local.transfersError = messageOf(transferResult.reason, "无法读取传输队列");
+  }
+}
+
+/** 将服务端返回的文件页写入当前目录状态。 */
+function applyFilePage(result, requestedFolderId, requestedPageToken) {
+  local.files = Array.isArray(result?.files) ? result.files : [];
+  local.rootFolderId = String(result?.rootFolderId || result?.root_folder_id || local.rootFolderId || "");
+  local.currentFolder = result?.currentFolder || result?.current_folder || (requestedFolderId ? local.currentFolder : null);
+  local.currentFolderId = requestedFolderId;
+  local.pageToken = requestedPageToken;
+  local.nextPageToken = String(result?.nextPageToken || result?.next_page_token || "");
+  local.filesError = "";
+}
+
+/** 读取一个文件页；请求序号避免快速切换目录时旧响应覆盖新状态。 */
+async function refreshFilesPage({ folderId = local.currentFolderId, pageToken = local.pageToken } = {}) {
+  const requestId = ++local.filesRequestId;
+  local.filesLoading = true;
+  local.filesError = "";
+  renderFiles();
+  try {
+    const result = await DriveApi.listFiles(folderId, pageToken, 100);
+    if (requestId !== local.filesRequestId) return;
+    applyFilePage(result, folderId, pageToken);
+  } catch (error) {
+    if (requestId !== local.filesRequestId) return;
+    local.filesError = messageOf(error, "无法读取 Drive 文件");
+  } finally {
+    if (requestId === local.filesRequestId) {
+      local.filesLoading = false;
+      renderFiles();
+    }
+  }
+}
+
+/** 刷新 OAuth、文件页和传输队列；目录导航/分页不会触发完整状态重置。 */
 async function refresh(showToast = false) {
   if (local.refreshing) return;
   local.refreshing = true;
   render();
-
   try {
-    const [authResult, transferResult] = await Promise.allSettled([
-      DriveApi.status(),
-      DriveApi.listTransfers(),
-    ]);
-
-    local.authError = authResult.status === "rejected" ? messageOf(authResult.reason, "无法连接 Drive sidecar") : "";
-    local.auth = authResult.status === "fulfilled" ? authResult.value : null;
-
-    if (transferResult.status === "fulfilled") {
-      local.transfers = transferResult.value;
-      local.transfersError = "";
-    } else {
-      local.transfersError = messageOf(transferResult.reason, "无法读取传输队列");
-    }
-
+    await refreshStatus();
     if (local.auth?.connected) {
-      try {
-        const result = await DriveApi.listFiles();
-        local.files = Array.isArray(result?.files) ? result.files : [];
-        local.filesError = "";
-      } catch (error) {
-        local.filesError = messageOf(error, "无法读取 Drive 文件");
-      }
+      await refreshFilesPage();
+      await refreshFolderUploadStatus();
     } else {
       local.files = [];
       local.filesError = "";
+      local.currentFolderId = "";
+      local.currentFolder = null;
+      local.breadcrumbs = [];
+      local.pageToken = "";
+      local.nextPageToken = "";
+      local.pageHistory = [];
     }
-
     if (showToast) toast("Google Drive 状态已刷新", "ph-check-circle");
   } finally {
     local.refreshing = false;
@@ -199,6 +368,38 @@ async function disconnect() {
   }
 }
 
+/** 通用断点分片循环；单文件和目录条目共用同一套 409 对齐逻辑。 */
+async function uploadFileChunks(file, upload, onProgress = () => {}) {
+  if (!file?.size) throw new Error("不能上传空文件");
+  let offset = Math.max(0, Number(upload.offset || 0));
+  let transferID = upload.transferID || "";
+  while (offset < file.size) {
+    const before = offset;
+    const chunk = file.slice(before, Math.min(before + CHUNK_SIZE, file.size));
+    try {
+      const result = await DriveApi.uploadChunk(upload.uploadId, chunk, before, upload.signal);
+      offset = Number(result.offset);
+      transferID = result.transferID || transferID;
+    } catch (error) {
+      if (error?.status === 409 && !upload.cancelled) {
+        offset = await DriveApi.uploadOffset(upload.uploadId);
+        upload.offset = offset;
+        onProgress(upload);
+        continue;
+      }
+      throw error;
+    }
+    if (!Number.isFinite(offset) || offset <= before) throw new Error("sidecar 没有推进上传偏移");
+    upload.offset = Math.min(file.size, offset);
+    upload.transferID = transferID;
+    onProgress(upload);
+  }
+  upload.offset = file.size;
+  upload.transferID = transferID;
+  onProgress(upload);
+  return upload;
+}
+
 /**
  * 以 16 MiB 分片上传文件，并在网络短暂中断后用 HEAD 重新对齐服务端偏移。
  */
@@ -211,7 +412,7 @@ async function startUpload(file) {
     toast("请先连接 Google Drive", "ph-cloud-slash");
     return;
   }
-  if (local.upload) {
+  if (hasActiveUpload()) {
     toast("当前已有文件正在上传", "ph-hourglass-simple");
     return;
   }
@@ -219,6 +420,7 @@ async function startUpload(file) {
   const upload = {
     file,
     id: "",
+    uploadId: "",
     offset: 0,
     transferID: "",
     controller: new AbortController(),
@@ -232,6 +434,7 @@ async function startUpload(file) {
   try {
     const created = await DriveApi.createUpload(file, upload.controller.signal);
     upload.id = created.id;
+    upload.uploadId = created.id;
     upload.offset = Number(created.offset || 0);
     if (upload.cancelled) {
       await DriveApi.deleteUpload(upload.id);
@@ -239,23 +442,7 @@ async function startUpload(file) {
     }
     render();
 
-    while (upload.offset < file.size) {
-      const before = upload.offset;
-      const chunk = file.slice(before, Math.min(before + CHUNK_SIZE, file.size));
-      try {
-        const result = await DriveApi.uploadChunk(upload.id, chunk, before, upload.controller.signal);
-        upload.offset = result.offset;
-        upload.transferID = result.transferID || upload.transferID;
-      } catch (error) {
-        if (error?.status === 409 && !upload.cancelled) {
-          upload.offset = await DriveApi.uploadOffset(upload.id);
-          continue;
-        }
-        throw error;
-      }
-      if (upload.offset <= before) throw new Error("sidecar 没有推进上传偏移");
-      render();
-    }
+    await uploadFileChunks(file, upload, () => render());
 
     upload.done = true;
     toast("文件已上传，Drive 后台任务已排队", "ph-check-circle");
@@ -271,6 +458,281 @@ async function startUpload(file) {
     upload.error = messageOf(error, "上传失败");
     toast(upload.error, "ph-warning");
     render();
+  }
+}
+
+/** 将服务端批次响应与浏览器 File 对齐，兼容不同版本的字段命名。 */
+function mergeFolderEntries(manifest, files, remoteEntries) {
+  const used = new Set();
+  return manifest.map((item, index) => {
+    const matchIndex = remoteEntries.findIndex((entry, candidateIndex) => {
+      if (used.has(candidateIndex)) return false;
+      return entryPath(entry) === item.relativePath || candidateIndex === index;
+    });
+    const remote = matchIndex >= 0 ? remoteEntries[matchIndex] : {};
+    if (matchIndex >= 0) used.add(matchIndex);
+    return {
+      ...item,
+      file: files[index],
+      id: entryID(remote),
+      uploadId: String(remote.uploadId || remote.upload_id || remote.upload?.id || ""),
+      transferID: String(remote.transferId || remote.transfer_id || ""),
+      offset: Math.max(0, Number(remote.offset || remote.completedBytes || remote.completed_bytes || 0)),
+      state: folderEntryStatus(remote),
+      error: String(remote.error || ""),
+    };
+  });
+}
+
+/** 上传单个目录条目；失败留在批次中，允许用户只重试失败项。 */
+async function uploadFolderEntry(batch, entry) {
+  if (batch.cancelled || entry.state === "SUCCESS") return entry;
+  if (!entry.file?.size) {
+    entry.state = "FAILED";
+    entry.error = "不能上传空文件";
+    return entry;
+  }
+  entry.state = "TRANSFERRING";
+  entry.error = "";
+  render();
+  try {
+    if (!entry.id) throw new Error("sidecar 未返回文件夹条目 ID");
+    if (!entry.uploadId) {
+      const created = await DriveApi.createFolderEntryUpload(batch.id, entry.id, entry.file, batch.controller.signal);
+      entry.uploadId = uploadIDFromResponse(created);
+      entry.offset = Math.max(entry.offset, Number(created?.offset || 0));
+      entry.transferID = String(created?.transferID || created?.transfer_id || entry.transferID || "");
+    } else if (!entry.offset) {
+      entry.offset = await DriveApi.uploadOffset(entry.uploadId);
+    }
+    await uploadFileChunks(entry.file, {
+      uploadId: entry.uploadId,
+      offset: entry.offset,
+      transferID: entry.transferID,
+      signal: batch.controller.signal,
+      cancelled: batch.cancelled,
+    }, (progress) => {
+      entry.offset = progress.offset;
+      entry.transferID = progress.transferID;
+      render();
+    });
+    entry.offset = entry.file.size;
+    entry.state = "SUCCESS";
+    entry.error = "";
+  } catch (error) {
+    if (batch.cancelled || error?.name === "AbortError") {
+      entry.state = "CANCELLED";
+    } else {
+      entry.state = "FAILED";
+      entry.error = messageOf(error, "目录条目上传失败");
+    }
+  }
+  render();
+  return entry;
+}
+
+/** 创建目录批次并用两个并发 worker 提交条目。 */
+async function startFolderUpload(files) {
+  if (!local.auth?.connected) {
+    toast("请先连接 Google Drive", "ph-cloud-slash");
+    return;
+  }
+  if (hasActiveUpload()) {
+    toast("当前已有文件正在上传", "ph-hourglass-simple");
+    return;
+  }
+  const list = Array.from(files || []);
+  const manifest = createFolderManifest(list);
+  if (!manifest.length) {
+    toast("选择的目录为空，Google Drive 不会创建空目录", "ph-folder-open");
+    const hint = $("#driveFolderUploadHint");
+    if (hint) hint.textContent = "空目录不会上传，请选择至少包含一个文件的目录。";
+    return;
+  }
+  const controller = new AbortController();
+  const batch = {
+    id: "",
+    controller,
+    cancelled: false,
+    state: "PENDING",
+    error: "",
+    entries: manifest.map((item, index) => ({ ...item, file: list[index], state: "PENDING", offset: 0, error: "", id: "", uploadId: "" })),
+  };
+  local.folderUpload = batch;
+  render();
+  try {
+    const created = await DriveApi.createFolderUpload(manifest, controller.signal, `folder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, local.currentFolderId);
+    batch.id = batchIDFromResponse(created);
+    if (!batch.id) throw new Error("sidecar 未返回文件夹批次 ID");
+    let remoteEntries = entriesFromResponse(created);
+    if (!remoteEntries.length) {
+      const status = await DriveApi.folderUploadStatus(batch.id);
+      remoteEntries = entriesFromResponse(status);
+    }
+    batch.entries = mergeFolderEntries(manifest, list, remoteEntries);
+    batch.state = "TRANSFERRING";
+    render();
+    await runWithConcurrency(batch.entries, FOLDER_UPLOAD_CONCURRENCY, (entry) => uploadFolderEntry(batch, entry));
+    if (batch.cancelled) {
+      batch.state = "CANCELLED";
+    } else if (batch.entries.some((entry) => entry.state === "FAILED")) {
+      batch.state = "FAILED";
+      batch.error = "部分文件上传失败，可重试失败条目";
+    } else {
+      batch.state = "SUCCESS";
+      toast("文件夹已上传，Drive 后台任务已排队", "ph-check-circle");
+      await refreshFolderUploadStatus();
+      await refresh();
+    }
+    render();
+  } catch (error) {
+    if (batch.cancelled || error?.name === "AbortError") return;
+    batch.state = "FAILED";
+    batch.error = messageOf(error, "创建文件夹上传失败");
+    toast(batch.error, "ph-warning");
+    render();
+  }
+}
+
+/** 将服务端批次状态合并到本地条目，不覆盖浏览器刚确认的更细粒度 offset。 */
+function applyFolderUploadStatus(value) {
+  const batch = local.folderUpload;
+  if (!batch || !value) return;
+  const remoteBatch = batchFromResponse(value);
+  const remoteEntries = entriesFromResponse(value);
+  if (remoteBatch.state || remoteBatch.status) {
+    const remoteState = folderEntryStatus(remoteBatch);
+    const hasLocalFailure = batch.entries.some((entry) => entry.state === "FAILED" && entry.offset < entry.size);
+    if (!(hasLocalFailure && remoteState === "PENDING")) batch.state = remoteState;
+  }
+  if (remoteBatch.error) batch.error = String(remoteBatch.error);
+  for (const remote of remoteEntries) {
+    const path = entryPath(remote);
+    const entry = batch.entries.find((candidate) => (path && candidate.relativePath === path) || entryID(remote) === candidate.id);
+    if (!entry) continue;
+    const offset = Number(remote.offset || remote.completedBytes || remote.completed_bytes || 0);
+    if (Number.isFinite(offset)) entry.offset = Math.max(entry.offset, offset);
+    const state = folderEntryStatus(remote);
+    const localBrowserFailure = entry.state === "FAILED" && state === "PENDING" && entry.offset < entry.size;
+    if (state && !localBrowserFailure) entry.state = state;
+    if (remote.error) entry.error = String(remote.error);
+    if (!entry.uploadId) entry.uploadId = String(remote.uploadId || remote.upload_id || remote.upload?.id || "");
+    if (!entry.transferID) entry.transferID = String(remote.transferId || remote.transfer_id || "");
+  }
+}
+
+/** 轮询批次状态；失败时保留浏览器本地进度，下一轮可继续。 */
+async function refreshFolderUploadStatus() {
+  if (!local.folderUpload?.id || local.folderUpload.cancelled) return;
+  try {
+    const result = await DriveApi.folderUploadStatus(local.folderUpload.id);
+    applyFolderUploadStatus(result);
+    renderFolderUpload();
+  } catch (error) {
+    // 批次状态不是浏览器上传的关键路径，状态接口暂时不可用时不清除本地进度。
+    local.folderUpload.statusError = messageOf(error, "无法读取文件夹上传进度");
+  }
+}
+
+/** 取消整个目录批次，同时中止浏览器中的最多两个活动分片请求。 */
+async function cancelFolderUpload() {
+  const batch = local.folderUpload;
+  if (!batch) return;
+  batch.cancelled = true;
+  batch.state = "CANCELLED";
+  batch.controller.abort();
+  if (batch.id) {
+    try {
+      await DriveApi.folderUploadAction(batch.id, "cancel");
+    } catch (error) {
+      toast(messageOf(error, "取消文件夹上传失败"), "ph-warning");
+    }
+  }
+  render();
+  toast("文件夹上传已取消", "ph-x-circle");
+}
+
+/** 重试单个失败条目，已存在的 uploadId 会从 sidecar 当前 offset 继续。 */
+async function retryFolderEntry(entryIDValue) {
+  const batch = local.folderUpload;
+  const entry = batch?.entries.find((candidate) => candidate.id === entryIDValue);
+  if (!batch || !entry || entry.state !== "FAILED") return;
+  if (batch.cancelled) {
+    batch.cancelled = false;
+    batch.controller = new AbortController();
+  }
+  batch.error = "";
+  entry.state = "PENDING";
+  entry.error = "";
+  render();
+  // 浏览器分片已经完成、但 Drive worker 失败时，必须让 sidecar 恢复原
+  // transfer；仅重跑本地 while 循环会因为 offset 已到末尾而错误显示成功。
+  if (entry.transferID && entry.offset >= entry.size) {
+    try {
+      const result = await DriveApi.folderEntryAction(batch.id, entry.id, "retry", batch.controller.signal);
+      const remote = entriesFromResponse(result).find((candidate) => entryID(candidate) === entry.id);
+      if (remote) {
+        entry.state = folderEntryStatus(remote);
+        entry.error = String(remote.error || "");
+        entry.transferID = String(remote.transferId || remote.transfer_id || entry.transferID);
+      }
+      batch.state = "TRANSFERRING";
+      render();
+      return;
+    } catch (error) {
+      entry.state = "FAILED";
+      entry.error = messageOf(error, "恢复 Drive 传输失败");
+      batch.state = "FAILED";
+      render();
+      throw error;
+    }
+  }
+  await uploadFolderEntry(batch, entry);
+  const failed = batch.entries.some((candidate) => candidate.state === "FAILED");
+  batch.state = failed ? "FAILED" : batch.entries.every((candidate) => candidate.state === "SUCCESS") ? "SUCCESS" : "TRANSFERRING";
+  if (!failed && batch.state === "SUCCESS") toast("失败条目已重试完成", "ph-check-circle");
+  render();
+}
+
+async function retryFailedFolderEntries() {
+  const batch = local.folderUpload;
+  if (!batch) return;
+  const failed = batch.entries.filter((entry) => entry.state === "FAILED");
+  await runWithConcurrency(failed, FOLDER_UPLOAD_CONCURRENCY, (entry) => retryFolderEntry(entry.id));
+  await refreshFolderUploadStatus();
+  render();
+}
+
+/** 处理文件夹上传进度卡片上的重试/取消动作。 */
+async function handleFolderUploadAction(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const action = button.dataset.action;
+  if (action === "cancel-folder") {
+    button.disabled = true;
+    await cancelFolderUpload();
+    return;
+  }
+  if (action === "retry-folder") {
+    button.disabled = true;
+    try {
+      await retryFailedFolderEntries();
+    } catch (error) {
+      toast(messageOf(error, "重试文件夹上传失败"), "ph-warning");
+    } finally {
+      button.disabled = false;
+    }
+    return;
+  }
+  if (action === "retry-folder-entry") {
+    button.disabled = true;
+    try {
+      await retryFolderEntry(button.dataset.entryId);
+    } catch (error) {
+      toast(messageOf(error, "重试文件夹条目失败"), "ph-warning");
+    } finally {
+      button.disabled = false;
+    }
   }
 }
 
@@ -294,15 +756,30 @@ async function cancelUpload() {
   toast("上传已取消", "ph-x-circle");
 }
 
-/**
- * 处理文件列表中的下载、导入和软删除按钮。
- */
+/** 进入 Drive 子目录；目录行只导航，不提供下载/导入动作。 */
+async function openFolder(fileID, name) {
+  if (!fileID) return;
+  local.currentFolderId = fileID;
+  local.currentFolder = { id: fileID, name: name || "未命名文件夹", mimeType: DRIVE_FOLDER_MIME };
+  local.breadcrumbs = [...local.breadcrumbs, { id: fileID, name: name || "未命名文件夹" }];
+  local.pageToken = "";
+  local.nextPageToken = "";
+  local.pageHistory = [];
+  await refreshFilesPage({ folderId: fileID, pageToken: "" });
+}
+
+/** 处理文件列表中的目录导航、下载、导入和软删除按钮。 */
 async function handleFileAction(event) {
-  const button = event.target.closest("button[data-action]");
+  const button = event.target.closest("[data-action]");
   if (!button) return;
   const fileID = button.dataset.id;
   const action = button.dataset.action;
   if (!fileID) return;
+
+  if (action === "open-folder") {
+    await openFolder(fileID, button.dataset.name);
+    return;
+  }
 
   if (action === "download") {
     window.open(DriveApi.downloadUrl(fileID), "_blank", "noopener,noreferrer");
@@ -335,6 +812,56 @@ async function handleFileAction(event) {
       button.disabled = false;
     }
   }
+}
+
+/** 返回根目录或面包屑中指定的目录。 */
+async function navigateToBreadcrumb(index) {
+  const target = Number(index);
+  if (!Number.isInteger(target) || target < 0) return;
+  if (target === 0) {
+    local.currentFolderId = "";
+    local.currentFolder = null;
+    local.breadcrumbs = [];
+  } else {
+    const crumb = local.breadcrumbs[target - 1];
+    if (!crumb) return;
+    local.currentFolderId = crumb.id;
+    local.currentFolder = { ...crumb, mimeType: DRIVE_FOLDER_MIME };
+    local.breadcrumbs = local.breadcrumbs.slice(0, target);
+  }
+  local.pageToken = "";
+  local.nextPageToken = "";
+  local.pageHistory = [];
+  await refreshFilesPage({ folderId: local.currentFolderId, pageToken: "" });
+}
+
+async function handleBreadcrumbAction(event) {
+  const button = event.target.closest("button[data-breadcrumb-index]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await navigateToBreadcrumb(button.dataset.breadcrumbIndex);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/** 以 pageToken 历史实现上一页/下一页切换，切换目录时历史会重置。 */
+async function handlePaginationAction(event) {
+  const button = event.target.closest("button[data-page-action]");
+  if (!button || button.disabled) return;
+  const action = button.dataset.pageAction;
+  let token = "";
+  if (action === "next" && local.nextPageToken) {
+    local.pageHistory.push(local.pageToken);
+    token = local.nextPageToken;
+  } else if (action === "previous" && local.pageHistory.length) {
+    token = local.pageHistory.pop() || "";
+  } else {
+    return;
+  }
+  local.pageToken = token;
+  await refreshFilesPage({ folderId: local.currentFolderId, pageToken: token });
 }
 
 /**
@@ -418,6 +945,11 @@ function renderAuth() {
  * 渲染浏览器到 sidecar 的本地分片上传进度。
  */
 function renderUpload() {
+  renderSingleUpload();
+  renderFolderUpload();
+}
+
+function renderSingleUpload() {
   const box = $("#driveUploadProgress");
   const name = $("#driveUploadName");
   const value = $("#driveUploadValue");
@@ -440,14 +972,99 @@ function renderUpload() {
   cancel.textContent = upload.done ? "已提交" : "取消";
 }
 
-/**
- * 渲染 Drive 文件表格及其下载、导入、软删除操作。
- */
+/** 渲染目录批次总进度、失败条目重试和整批取消。 */
+function renderFolderUpload() {
+  const box = $("#driveFolderUploadProgress");
+  const name = $("#driveFolderUploadName");
+  const value = $("#driveFolderUploadValue");
+  const bar = $("#driveFolderUploadBar");
+  const bytes = $("#driveFolderUploadBytes");
+  const entriesRoot = $("#driveFolderUploadEntries");
+  const cancel = $("#driveFolderUploadCancel");
+  if (!box || !name || !value || !bar || !bytes || !entriesRoot || !cancel) return;
+  const upload = local.folderUpload;
+  box.hidden = !upload;
+  if (!upload) return;
+  const summary = summarizeFolderProgress(upload);
+  name.textContent = upload.entries[0]?.relativePath?.split("/")[0] || "文件夹上传";
+  value.textContent = upload.error || (upload.state === "SUCCESS" ? "已排队" : upload.state === "CANCELLED" ? "已取消" : `${summary.percent}%`);
+  bar.style.width = `${summary.percent}%`;
+  bytes.textContent = `${summary.completedEntries}/${summary.totalEntries} 个文件 · ${formatBytes(summary.completedBytes)} / ${formatBytes(summary.totalBytes)}`;
+  cancel.disabled = ["SUCCESS", "CANCELLED"].includes(upload.state);
+  cancel.textContent = upload.state === "CANCELLED" ? "已取消" : upload.state === "SUCCESS" ? "已提交" : "取消";
+  cancel.parentElement?.querySelectorAll("button[data-action=\"retry-folder\"]").forEach((node) => node.remove());
+  const retryAll = upload.state === "FAILED"
+    ? `<button class="btn btn--ghost btn--sm" type="button" data-action="retry-folder">重试失败</button>`
+    : "";
+  cancel.insertAdjacentHTML("beforebegin", retryAll);
+  entriesRoot.innerHTML = upload.entries.map((entry) => {
+    const entryName = escapeHtml(entry.relativePath || entry.name || "未命名文件");
+    const state = escapeHtml(entry.state || "PENDING");
+    const detail = entry.error
+      ? `<span class="drive-folder-upload-entry__error">${escapeHtml(entry.error)}</span>`
+      : `<span>${formatBytes(entry.offset)} / ${formatBytes(entry.size)}</span>`;
+    const retry = entry.state === "FAILED"
+      ? `<button class="btn btn--ghost btn--sm" type="button" data-action="retry-folder-entry" data-entry-id="${escapeHtml(entry.id)}">重试</button>`
+      : "";
+    return `<div class="drive-folder-upload-entry">
+      <div class="drive-folder-upload-entry__main"><strong title="${entryName}">${entryName}</strong><span class="drive-folder-upload-entry__state drive-folder-upload-entry__state--${state.toLowerCase()}">${state}</span><small>${detail}</small></div>
+      ${retry}
+    </div>`;
+  }).join("");
+}
+
+/** 面包屑状态独立渲染，避免文件行刷新时重建导航节点。 */
+function renderBreadcrumbs() {
+  const root = $("#driveBreadcrumbs");
+  if (!root) return;
+  const items = [{ id: "", name: ROOT_FOLDER_LABEL }, ...local.breadcrumbs];
+  root.innerHTML = items.map((item, index) => {
+    const label = escapeHtml(item.name || ROOT_FOLDER_LABEL);
+    const separator = index ? `<span class="drive-breadcrumbs__separator" aria-hidden="true">/</span>` : "";
+    return `${separator}<button class="drive-breadcrumbs__item${index === items.length - 1 ? " is-current" : ""}" type="button" data-breadcrumb-index="${index}" ${index === items.length - 1 ? "aria-current=\"page\"" : ""}>${label}</button>`;
+  }).join("");
+}
+
+/** 分页控件独立渲染，能在列表请求期间保留当前页并禁用重复请求。 */
+function renderPagination() {
+  const root = $("#driveFilesPagination");
+  if (!root) return;
+  const hasPrevious = local.pageHistory.length > 0;
+  const hasNext = Boolean(local.nextPageToken);
+  root.innerHTML = `<button class="btn btn--ghost btn--sm" type="button" data-page-action="previous" ${hasPrevious && !local.filesLoading ? "" : "disabled"}>上一页</button><span>${local.filesLoading ? "读取中…" : (hasPrevious ? "分页浏览" : "第一页")}</span><button class="btn btn--ghost btn--sm" type="button" data-page-action="next" ${hasNext && !local.filesLoading ? "" : "disabled"}>下一页</button>`;
+}
+
+function renderFileRow(file) {
+  const name = escapeHtml(file.name || "未命名文件");
+  const id = escapeHtml(file.id);
+  const mime = escapeHtml(shortMime(file.mimeType));
+  if (isDriveFolder(file)) {
+    return `<article class="drive-file drive-file--folder" data-action="open-folder" data-id="${id}" data-name="${name}" role="button" tabindex="0" aria-label="打开文件夹 ${name}">
+      <div class="drive-file__icon" aria-hidden="true"><i class="ph ph-folder-open"></i></div>
+      <div class="drive-file__main"><strong class="drive-file__name" title="${name}">${name}</strong><span class="drive-file__meta">文件夹 · 点击打开</span></div>
+      <div class="drive-file__actions"><i class="ph ph-caret-right" aria-hidden="true"></i></div>
+    </article>`;
+  }
+  const canDownload = file.capabilities?.canDownload !== false;
+  return `<article class="drive-file">
+    <div class="drive-file__icon" aria-hidden="true"><i class="ph ${fileIcon(file.mimeType)}"></i></div>
+    <div class="drive-file__main"><strong class="drive-file__name" title="${name}">${name}</strong><span class="drive-file__meta">${mime} · ${formatBytes(file.size)} · ${formatDate(file.modifiedTime)}</span></div>
+    <div class="drive-file__actions">
+      <button class="iconbtn iconbtn--accent" type="button" data-action="download" data-id="${id}" title="下载" aria-label="下载 ${name}" ${canDownload ? "" : "disabled"}><i class="ph ph-download-simple" aria-hidden="true"></i></button>
+      <button class="iconbtn" type="button" data-action="import" data-id="${id}" title="导入字幕流水线" aria-label="导入 ${name}" ${canDownload ? "" : "disabled"}><i class="ph ph-arrow-line-down" aria-hidden="true"></i></button>
+      <button class="iconbtn iconbtn--danger" type="button" data-action="trash" data-id="${id}" data-name="${name}" title="移入回收站" aria-label="删除 ${name}"><i class="ph ph-trash" aria-hidden="true"></i></button>
+    </div>
+  </article>`;
+}
+
+/** 渲染 Drive 文件表格；空态、目录导航和文件动作彼此独立。 */
 function renderFiles() {
   const root = $("#driveFiles");
   const count = $("#driveFileCount");
   if (!root || !count) return;
-  count.textContent = local.auth?.connected ? `${local.files.length} 个文件` : "未连接";
+  renderBreadcrumbs();
+  renderPagination();
+  count.textContent = local.auth?.connected ? `${local.files.length} 项` : "未连接";
 
   if (local.authError) {
     root.innerHTML = emptyState("ph-plugs-connected", "无法连接 sidecar", local.authError);
@@ -455,6 +1072,10 @@ function renderFiles() {
   }
   if (!local.auth?.connected) {
     root.innerHTML = emptyState("ph-lock-key", "连接后查看文件", "Google Drive 授权完成后，这里会显示 Subtitles AI 文件夹内容。");
+    return;
+  }
+  if (local.filesLoading && !local.files.length) {
+    root.innerHTML = emptyState("ph-spinner-gap ph-spin", "正在读取文件", "正在从 Google Drive 读取当前目录。");
     return;
   }
   if (local.filesError) {
@@ -466,30 +1087,7 @@ function renderFiles() {
     return;
   }
 
-  root.innerHTML = local.files.map((file) => {
-    const name = escapeHtml(file.name || "未命名文件");
-    const id = escapeHtml(file.id);
-    const mime = escapeHtml(shortMime(file.mimeType));
-    const canDownload = file.capabilities?.canDownload !== false;
-    return `<article class="drive-file">
-      <div class="drive-file__icon" aria-hidden="true"><i class="ph ${fileIcon(file.mimeType)}"></i></div>
-      <div class="drive-file__main">
-        <strong class="drive-file__name" title="${name}">${name}</strong>
-        <span class="drive-file__meta">${mime} · ${formatBytes(file.size)} · ${formatDate(file.modifiedTime)}</span>
-      </div>
-      <div class="drive-file__actions">
-        <button class="iconbtn iconbtn--accent" type="button" data-action="download" data-id="${id}" title="下载" aria-label="下载 ${name}" ${canDownload ? "" : "disabled"}>
-          <i class="ph ph-download-simple" aria-hidden="true"></i>
-        </button>
-        <button class="iconbtn" type="button" data-action="import" data-id="${id}" title="导入字幕流水线" aria-label="导入 ${name}" ${canDownload ? "" : "disabled"}>
-          <i class="ph ph-arrow-line-down" aria-hidden="true"></i>
-        </button>
-        <button class="iconbtn iconbtn--danger" type="button" data-action="trash" data-id="${id}" data-name="${name}" title="移入回收站" aria-label="删除 ${name}">
-          <i class="ph ph-trash" aria-hidden="true"></i>
-        </button>
-      </div>
-    </article>`;
-  }).join("");
+  root.innerHTML = local.files.map(renderFileRow).join("");
 }
 
 /**
