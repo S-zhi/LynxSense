@@ -44,6 +44,7 @@ const local = {
   loading: false,
   refreshTimer: null,
   visibilityRefreshRegistered: false,
+  driveSync: null,
 };
 
 let els = {};
@@ -73,6 +74,13 @@ export function initStorage() {
     empty: $("#storageEmpty"),
     checkAll: $("#storageCheckAll"),
     refresh: $("#storageRefresh"),
+    driveUpload: $("#storageDriveUpload"),
+    driveDownload: $("#storageDriveDownload"),
+    driveSync: $("#storageDriveSync"),
+    driveSyncTitle: $("#storageDriveSyncTitle"),
+    driveSyncMeta: $("#storageDriveSyncMeta"),
+    driveSyncBody: $("#storageDriveSyncBody"),
+    driveSyncCancel: $("#storageDriveSyncCancel"),
   };
 
   els.refresh.addEventListener("click", () => refresh(true));
@@ -91,6 +99,9 @@ export function initStorage() {
   els.apply.addEventListener("click", () => runApply());
   els.previewClose.addEventListener("click", () => closePreview());
   els.checkAll.addEventListener("change", (e) => selectAll(e.target.checked));
+  els.driveUpload?.addEventListener("click", () => runDriveSync("UPLOAD"));
+  els.driveDownload?.addEventListener("click", () => runDriveSync("DOWNLOAD"));
+  els.driveSyncCancel?.addEventListener("click", () => cancelDriveSync());
 
   // 当切到本 Tab 时再加载一次，其它时候用定时轻量刷新
   if (state.view === "storage") {
@@ -348,8 +359,11 @@ function updateActions() {
   const n = local.selected.size;
   els.selInfo.textContent = n > 0 ? `已选 ${n} 项` : "未选择";
   const hasSelection = n > 0;
-  els.previewBtn.disabled = !hasSelection;
-  els.apply.disabled = !hasSelection;
+  const syncing = Boolean(local.driveSync?.active);
+  els.previewBtn.disabled = !hasSelection || syncing;
+  els.apply.disabled = !hasSelection || syncing;
+  if (els.driveUpload) els.driveUpload.disabled = !hasSelection || syncing;
+  if (els.driveDownload) els.driveDownload.disabled = !hasSelection || syncing;
 
   // 让表头选择器反映真实状态：全选、部分选择和无可选项分别可见。
   const selectable = local.stats
@@ -359,6 +373,124 @@ function updateActions() {
   els.checkAll.checked = selectable.length > 0 && selectedCount === selectable.length;
   els.checkAll.indeterminate = selectedCount > 0 && selectedCount < selectable.length;
   els.checkAll.disabled = selectable.length === 0;
+}
+
+/* ---------- Google Drive 任务级同步 ---------- */
+async function runDriveSync(direction) {
+  if (local.selected.size === 0 || local.driveSync?.active) return;
+  const taskIds = [...local.selected];
+  local.driveSync = {
+    active: true,
+    direction,
+    taskIds,
+    index: 0,
+    batchId: "",
+    batch: null,
+    cancelled: false,
+    failures: 0,
+  };
+  renderDriveSync();
+  updateActions();
+  try {
+    for (let index = 0; index < taskIds.length; index += 1) {
+      if (local.driveSync.cancelled) break;
+      local.driveSync.index = index;
+      const taskId = taskIds[index];
+      const task = local.stats?.byTask.find((candidate) => candidate.taskId === taskId);
+      const artifactNames = direction === "UPLOAD"
+        ? (task?.artifacts || []).map((artifact) => artifact.name)
+        : [];
+      const started = direction === "UPLOAD"
+        ? await Api.startDriveUpload(taskId, artifactNames)
+        : await Api.startDriveDownload(taskId);
+      local.driveSync.batchId = started.batchId;
+      local.driveSync.batch = started;
+      renderDriveSync();
+      let current = started;
+      while (!new Set(["SUCCESS", "FAILED", "CANCELLED"]).has(current.state)) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        if (local.driveSync.cancelled) break;
+        current = await Api.getDriveBatch(started.batchId);
+        local.driveSync.batch = current;
+        renderDriveSync();
+      }
+      if (current.state === "FAILED") local.driveSync.failures += 1;
+      if (current.state === "CANCELLED") break;
+    }
+    if (local.driveSync.cancelled) {
+      toast("Drive 同步已取消", "ph-x-circle");
+    } else if (local.driveSync.failures > 0) {
+      toast(`Drive 同步完成，${local.driveSync.failures} 个任务存在失败项`, "ph-warning");
+    } else {
+      toast(direction === "UPLOAD" ? "本地产物已逐项上传到 Drive" : "Drive 产物已逐项恢复到本地", "ph-check-circle");
+    }
+    await refresh();
+    await loadTasks();
+  } catch (error) {
+    if (!local.driveSync.cancelled) toast(error.message || "Drive 同步失败", "ph-warning");
+  } finally {
+    if (local.driveSync) local.driveSync.active = false;
+    renderDriveSync();
+    updateActions();
+  }
+}
+
+async function cancelDriveSync() {
+  const sync = local.driveSync;
+  if (!sync?.active) return;
+  sync.cancelled = true;
+  if (sync.batchId) {
+    try {
+      sync.batch = await Api.cancelDriveBatch(sync.batchId);
+    } catch (error) {
+      toast(error.message || "取消 Drive 同步失败", "ph-warning");
+    }
+  }
+  renderDriveSync();
+}
+
+function renderDriveSync() {
+  const sync = local.driveSync;
+  if (!els.driveSync) return;
+  if (!sync) {
+    els.driveSync.hidden = true;
+    return;
+  }
+  els.driveSync.hidden = false;
+  const directionLabel = sync.direction === "UPLOAD" ? "上传到 Drive" : "从 Drive 下载";
+  const taskId = sync.taskIds[sync.index] || "—";
+  const batch = sync.batch || {};
+  const entries = Array.isArray(batch.entries) ? batch.entries : [];
+  const pending = entries.filter((entry) => entry.state !== "SUCCESS");
+  const completed = Number(batch.completedEntries || 0);
+  const total = Number(batch.totalEntries || entries.length || 0);
+  els.driveSyncTitle.textContent = `${directionLabel} · ${taskId}`;
+  els.driveSyncMeta.textContent = `${sync.index + 1}/${sync.taskIds.length} 个任务 · ${completed}/${total} 个产物已完成 · ${batch.state || "PENDING"}`;
+  els.driveSyncCancel.hidden = !sync.active;
+  els.driveSyncBody.replaceChildren();
+  if (entries.length === 0 && !["SUCCESS", "FAILED", "CANCELLED"].includes(batch.state)) {
+    const loading = el("span", "storage-sync__item storage-sync__item--active");
+    loading.textContent = "正在读取 Drive 文件列表";
+    els.driveSyncBody.append(loading);
+    return;
+  }
+  if (pending.length === 0) {
+    const done = el("span", "storage-sync__item storage-sync__item--success");
+    done.textContent = batch.state === "FAILED" ? "存在失败项，可重试" : "待处理列表已清空";
+    els.driveSyncBody.append(done);
+    return;
+  }
+  for (const entry of pending) {
+    const stateClass = entry.state === "FAILED"
+      ? "storage-sync__item--failed"
+      : (entry.state === "TRANSFERRING" ? "storage-sync__item--active" : "");
+    const item = el("span", `storage-sync__item ${stateClass}`.trim());
+    item.textContent = entry.state === "FAILED"
+      ? `${entry.name} · 失败`
+      : `${entry.name} · ${entry.state || "等待中"}`;
+    if (entry.error) item.title = entry.error;
+    els.driveSyncBody.append(item);
+  }
 }
 
 /* ---------- 预览 / 执行 ---------- */

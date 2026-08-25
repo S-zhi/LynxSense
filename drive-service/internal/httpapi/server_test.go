@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,45 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/store"
 	"github.com/s-zhi/subtitles-ai-drive/internal/transfer"
 )
+
+type taskFolderDriveStub struct {
+	files   []driveclient.File
+	creates int
+}
+
+func (d *taskFolderDriveStub) List(_ context.Context, _, _ string, _ int64) (*driveclient.FileList, error) {
+	return &driveclient.FileList{Files: append([]driveclient.File(nil), d.files...)}, nil
+}
+
+func (d *taskFolderDriveStub) CreateFolder(_ context.Context, name, _ string, properties map[string]string) (*driveclient.File, error) {
+	d.creates++
+	copyProperties := make(map[string]string, len(properties))
+	for key, value := range properties {
+		copyProperties[key] = value
+	}
+	folder := driveclient.File{
+		ID:            "task-folder-1",
+		Name:          name,
+		MimeType:      "application/vnd.google-apps.folder",
+		AppProperties: copyProperties,
+	}
+	d.files = append(d.files, folder)
+	return &folder, nil
+}
+
+func (d *taskFolderDriveStub) ValidateFolderUnderRoot(context.Context, string) (*driveclient.File, error) {
+	return nil, nil
+}
+
+func (d *taskFolderDriveStub) Metadata(context.Context, string) (*driveclient.File, error) {
+	return nil, nil
+}
+
+func (d *taskFolderDriveStub) Trash(context.Context, string) error { return nil }
+
+func (d *taskFolderDriveStub) DownloadRange(context.Context, string, string) (*driveclient.File, *http.Response, error) {
+	return nil, nil, nil
+}
 
 // TestUploadEndpointSupportsOffsetChecks 验证分片上传的偏移校验、查询和删除流程。
 func TestUploadEndpointSupportsOffsetChecks(t *testing.T) {
@@ -184,5 +224,58 @@ func TestFolderUploadManifestIsSafeAndIdempotent(t *testing.T) {
 	}
 	if second.Batch.ID != first.Batch.ID || len(second.Entries) != 1 || second.Entries[0].ID != first.Entries[0].ID {
 		t.Fatalf("idempotent retry = %#v, first=%#v", second, first)
+	}
+}
+
+func TestTaskFolderEndpointUsesUniqueTaskIDAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	auth := oauth.NewManager(&cfg)
+	drive := &taskFolderDriveStub{}
+	server := New(&cfg, auth, drive, nil, nil)
+	const taskID = "task_c4b659ea"
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/drive/task-folders", strings.NewReader(`{"taskId":"`+taskID+`"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstResp := httptest.NewRecorder()
+	server.ServeHTTP(firstResp, firstReq)
+	if firstResp.Code != http.StatusCreated {
+		t.Fatalf("first task folder status = %d body=%s", firstResp.Code, firstResp.Body.String())
+	}
+	var first struct {
+		Folder  driveclient.File `json:"folder"`
+		TaskID  string           `json:"taskId"`
+		Created bool             `json:"created"`
+	}
+	if err := json.Unmarshal(firstResp.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.TaskID != taskID || !first.Created || first.Folder.Name != taskID || first.Folder.AppProperties["subtitles_ai_task_id"] != taskID {
+		t.Fatalf("first task folder payload = %#v", first)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/drive/task-folders", strings.NewReader(`{"taskId":"`+taskID+`"}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondResp := httptest.NewRecorder()
+	server.ServeHTTP(secondResp, secondReq)
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("idempotent task folder status = %d body=%s", secondResp.Code, secondResp.Body.String())
+	}
+	var second struct {
+		Folder  driveclient.File `json:"folder"`
+		Created bool             `json:"created"`
+	}
+	if err := json.Unmarshal(secondResp.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Created || second.Folder.ID != first.Folder.ID || drive.creates != 1 {
+		t.Fatalf("idempotent task folder payload = %#v, creates=%d", second, drive.creates)
+	}
+
+	unsafeReq := httptest.NewRequest(http.MethodPost, "/api/drive/task-folders", strings.NewReader(`{"taskId":"../title"}`))
+	unsafeResp := httptest.NewRecorder()
+	server.ServeHTTP(unsafeResp, unsafeReq)
+	if unsafeResp.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe task id status = %d body=%s", unsafeResp.Code, unsafeResp.Body.String())
 	}
 }

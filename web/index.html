@@ -416,8 +416,27 @@
                 <button class="btn btn--danger btn--sm" id="storageApply" type="button" disabled>
                   <i class="ph ph-trash" aria-hidden="true"></i><span>执行清理</span>
                 </button>
+                <button class="btn btn--ghost btn--sm" id="storageDriveUpload" type="button" disabled>
+                  <i class="ph ph-cloud-arrow-up" aria-hidden="true"></i><span>上传到 Drive</span>
+                </button>
+                <button class="btn btn--ghost btn--sm" id="storageDriveDownload" type="button" disabled>
+                  <i class="ph ph-cloud-arrow-down" aria-hidden="true"></i><span>从 Drive 下载</span>
+                </button>
               </div>
             </div>
+
+            <section class="storage-sync" id="storageDriveSync" hidden aria-live="polite">
+              <div class="storage-sync__head">
+                <div>
+                  <strong id="storageDriveSyncTitle">Drive 同步</strong>
+                  <span id="storageDriveSyncMeta">等待开始</span>
+                </div>
+                <button class="btn btn--ghost btn--sm" id="storageDriveSyncCancel" type="button" hidden>
+                  <i class="ph ph-x-circle" aria-hidden="true"></i><span>取消</span>
+                </button>
+              </div>
+              <div class="storage-sync__body" id="storageDriveSyncBody"></div>
+            </section>
 
             <!-- 预览结果摘要 -->
             <div class="storage__preview" id="storagePreviewBox" hidden>

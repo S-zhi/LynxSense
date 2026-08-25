@@ -223,6 +223,44 @@ const RealApi = {
   },
 
   // ---------- 本地资源治理 ----------
+  async startDriveUpload(taskId, artifactNames = []) {
+    const res = await request(this.base, `/api/storage/tasks/${encodeURIComponent(taskId)}/drive/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(artifactNames.length ? { artifactNames } : {}),
+    });
+    if (!res.ok) throw new Error(await readError(res, "创建 Drive 上传批次失败"));
+    return res.json();
+  },
+
+  async startDriveDownload(taskId) {
+    const res = await request(this.base, `/api/storage/tasks/${encodeURIComponent(taskId)}/drive/download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error(await readError(res, "创建 Drive 下载批次失败"));
+    return res.json();
+  },
+
+  async getDriveBatch(batchId) {
+    const res = await request(this.base, `/api/storage/drive/batches/${encodeURIComponent(batchId)}`);
+    if (!res.ok) throw new Error(await readError(res, "读取 Drive 批次失败"));
+    return res.json();
+  },
+
+  async retryDriveBatch(batchId) {
+    const res = await request(this.base, `/api/storage/drive/batches/${encodeURIComponent(batchId)}/retry`, { method: "POST" });
+    if (!res.ok) throw new Error(await readError(res, "重试 Drive 批次失败"));
+    return res.json();
+  },
+
+  async cancelDriveBatch(batchId) {
+    const res = await request(this.base, `/api/storage/drive/batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST" });
+    if (!res.ok) throw new Error(await readError(res, "取消 Drive 批次失败"));
+    return res.json();
+  },
+
   async getStorageStats() {
     const res = await request(this.base, "/api/storage/stats");
     if (!res.ok) throw new Error("获取存储统计失败：" + res.status);
@@ -589,6 +627,27 @@ const MockApi = (() => {
       await delay(60);
       return { totalBytes: 0, totalTasks: 0, runnableTaskCount: 0, byKind: {}, byTask: [] };
     },
+    async startDriveUpload(taskId, artifactNames = []) {
+      await delay(60);
+      return {
+        batchId: `mock-drive-${taskId}`,
+        taskId,
+        direction: "UPLOAD",
+        state: "SUCCESS",
+        folderName: taskId,
+        totalEntries: artifactNames.length,
+        completedEntries: artifactNames.length,
+        pendingArtifacts: [],
+        entries: artifactNames.map((name) => ({ name, state: "SUCCESS", completedBytes: 0 })),
+      };
+    },
+    async startDriveDownload(taskId) {
+      await delay(60);
+      return { batchId: `mock-drive-${taskId}`, taskId, direction: "DOWNLOAD", state: "SUCCESS", folderName: taskId, pendingArtifacts: [], entries: [] };
+    },
+    async getDriveBatch(batchId) { await delay(40); return { batchId, state: "SUCCESS", pendingArtifacts: [], entries: [] }; },
+    async retryDriveBatch(batchId) { await delay(40); return { batchId, state: "SUCCESS", pendingArtifacts: [], entries: [] }; },
+    async cancelDriveBatch(batchId) { await delay(40); return { batchId, state: "CANCELLED", pendingArtifacts: [], entries: [] }; },
     async previewCleanup() {
       await delay(60);
       return { matchedTasks: 0, matchedBytes: 0, skippedTasks: [], targets: [] };
