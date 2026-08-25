@@ -126,7 +126,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // handleListFiles 解析分页参数并返回 Drive 应用目录中的文件列表。
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	pageSize, _ := strconv.ParseInt(r.URL.Query().Get("pageSize"), 10, 64)
-	files, err := s.drive.List(r.Context(), r.URL.Query().Get("pageToken"), pageSize)
+	files, err := s.drive.List(r.Context(), r.URL.Query().Get("parentId"), r.URL.Query().Get("pageToken"), pageSize)
 	if err != nil {
 		writeDriveError(w, err)
 		return
