@@ -40,7 +40,7 @@ GET    /healthz
 GET    /api/oauth/status
 GET    /api/oauth/google/start
 POST   /api/oauth/google/disconnect
-GET    /api/drive/files?pageToken=&pageSize=
+GET    /api/drive/files?parentId=&pageToken=&pageSize=  # parentId 可选，缺省为 sidecar 根目录
 DELETE /api/drive/files/{fileId}                 # 移入 Drive 垃圾箱
 GET    /api/drive/files/{fileId}/download        # 支持 Range/HEAD
 POST   /api/drive/files/{fileId}/import          # 下载后提交 Python 流水线
@@ -53,6 +53,12 @@ GET    /api/drive/transfers/{id}
 POST   /api/drive/transfers/{id}/pause
 POST   /api/drive/transfers/{id}/resume
 POST   /api/drive/transfers/{id}/cancel
+POST   /api/drive/folder-uploads                  # 创建文件夹 manifest 批次
+GET    /api/drive/folder-uploads/{batchId}         # 查询批次和所有条目
+POST   /api/drive/folder-uploads/{batchId}/entries/{entryId}/upload
+POST   /api/drive/folder-uploads/{batchId}/entries/{entryId}/retry
+POST   /api/drive/folder-uploads/{batchId}/retry
+POST   /api/drive/folder-uploads/{batchId}/cancel
 ```
 
 浏览器上传先发送 `X-Upload-Length`、`X-File-Name`、`X-File-Mime`：
@@ -66,3 +72,22 @@ curl -i -X POST http://127.0.0.1:8787/api/drive/uploads \
 随后以 `PATCH` 搭配 `X-Upload-Offset` 上传任意大小的片段；服务端返回新的 `Upload-Offset`。客户端中断后先 `HEAD` 查询偏移再继续即可。文件收齐后，sidecar 使用 Google Drive resumable upload，默认 16 MiB（按 Drive 要求对齐到 256 KiB）的块，并将每块完成后的 offset 写入状态文件。
 
 下载同样使用 `Range: bytes=<offset>-` 写入本地 `.part` 文件，支持重试、暂停、取消和进程重启恢复。下载完成后会校验 Drive 提供的 MD5（如果有），再把文件流式提交给 Python 的 `/api/tasks/upload`；sidecar 不在本地引入或复制 Python 业务代码。
+
+### 文件夹批量上传
+
+`POST /api/drive/folder-uploads` 接收以下形式的 manifest（也兼容直接传数组，以及 `files`/`path` 字段）：
+
+```json
+{
+  "parentId": "optional-drive-folder-id",
+  "entries": [
+    {"relativePath": "season-1/episode-01.mp4", "size": 1048576, "mime": "video/mp4"}
+  ]
+}
+```
+
+路径必须是相对路径，不能包含 `..`、绝对路径、NUL 或控制字符；重复路径、文件夹 MIME、空文件和超过资源上限的 manifest 会被同步拒绝。`max_folder_entries`、`max_folder_bytes`、`max_manifest_bytes`、`max_folder_depth` 和 `max_folder_directories` 控制批次数量、总字节数、JSON 请求体、目录深度和目录总数；单个文件仍受 `max_upload_bytes` 限制。批次创建会按路径深度先创建父目录，再创建子目录。每个条目随后通过返回的 `uploadUrl` 使用原有 `HEAD`/`PATCH` 分片协议上传，上传完成后自动进入 Drive worker。`max_concurrent_transfers` 默认 3，限制同时运行的 Drive/Python worker 数量。
+
+可用 `Idempotency-Key` 或 `X-Client-Request-ID` 重试批次创建；相同 key 会返回同一个批次和条目，不会重复创建 Drive 目录。状态接口返回批次聚合进度（`completed_entries`、`completed_bytes` 和 `state`）以及每个 entry 的上传/传输 ID。失败条目可通过 entry/batch `retry` 重试，整个批次可通过 `cancel` 取消。
+
+Drive 文件夹不能下载或导入 Python 流水线；这两种请求会在创建响应体前同步返回 400。

@@ -27,6 +27,12 @@ type Config struct {
 	GoogleScopes           []string `json:"google_scopes"`
 	DriveFolderID          string   `json:"drive_folder_id"`
 	MaxUploadBytes         int64    `json:"max_upload_bytes"`
+	MaxFolderEntries       int      `json:"max_folder_entries"`
+	MaxFolderBytes         int64    `json:"max_folder_bytes"`
+	MaxManifestBytes       int64    `json:"max_manifest_bytes"`
+	MaxFolderDepth         int      `json:"max_folder_depth"`
+	MaxFolderDirectories   int      `json:"max_folder_directories"`
+	MaxConcurrentTransfers int      `json:"max_concurrent_transfers"`
 	ChunkSizeBytes         int64    `json:"chunk_size_bytes"`
 	RequestTimeoutSeconds  int      `json:"request_timeout_seconds"`
 }
@@ -34,13 +40,19 @@ type Config struct {
 // Default 返回适合本地开发的 sidecar 安全默认配置。
 func Default() Config {
 	return Config{
-		ListenAddr:            "127.0.0.1:8787",
-		DataDir:               "./drive-data",
-		PythonBaseURL:         "http://127.0.0.1:8000",
-		GoogleScopes:          []string{defaultScope},
-		MaxUploadBytes:        2 * 1024 * 1024 * 1024,
-		ChunkSizeBytes:        16 * 1024 * 1024,
-		RequestTimeoutSeconds: 600,
+		ListenAddr:             "127.0.0.1:8787",
+		DataDir:                "./drive-data",
+		PythonBaseURL:          "http://127.0.0.1:8000",
+		GoogleScopes:           []string{defaultScope},
+		MaxUploadBytes:         2 * 1024 * 1024 * 1024,
+		MaxFolderEntries:       1000,
+		MaxFolderBytes:         2 * 1024 * 1024 * 1024,
+		MaxManifestBytes:       8 * 1024 * 1024,
+		MaxFolderDepth:         64,
+		MaxFolderDirectories:   5000,
+		MaxConcurrentTransfers: 3,
+		ChunkSizeBytes:         16 * 1024 * 1024,
+		RequestTimeoutSeconds:  600,
 	}
 }
 
@@ -72,6 +84,24 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.MaxUploadBytes <= 0 {
 		cfg.MaxUploadBytes = Default().MaxUploadBytes
+	}
+	if cfg.MaxFolderEntries <= 0 {
+		cfg.MaxFolderEntries = Default().MaxFolderEntries
+	}
+	if cfg.MaxFolderBytes <= 0 {
+		cfg.MaxFolderBytes = Default().MaxFolderBytes
+	}
+	if cfg.MaxManifestBytes <= 0 {
+		cfg.MaxManifestBytes = Default().MaxManifestBytes
+	}
+	if cfg.MaxFolderDepth <= 0 {
+		cfg.MaxFolderDepth = Default().MaxFolderDepth
+	}
+	if cfg.MaxFolderDirectories <= 0 {
+		cfg.MaxFolderDirectories = Default().MaxFolderDirectories
+	}
+	if cfg.MaxConcurrentTransfers <= 0 {
+		cfg.MaxConcurrentTransfers = Default().MaxConcurrentTransfers
 	}
 	if cfg.ChunkSizeBytes <= 0 {
 		cfg.ChunkSizeBytes = Default().ChunkSizeBytes

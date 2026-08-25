@@ -109,3 +109,58 @@ func TestLocalhostCORSOriginIsReflected(t *testing.T) {
 		t.Fatalf("allow origin = %q", got)
 	}
 }
+
+func TestFolderUploadManifestIsSafeAndIdempotent(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	state, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := oauth.NewManager(&cfg)
+	drive := driveclient.NewClient(&cfg, auth, state)
+	transfers := transfer.NewManager(&cfg, state, drive)
+	server := New(&cfg, auth, drive, transfers, state)
+
+	unsafeReq := httptest.NewRequest(http.MethodPost, "/api/drive/folder-uploads", bytes.NewBufferString(`{"entries":[{"relativePath":"../escape.txt","size":1}]}`))
+	unsafeReq.Header.Set("Content-Type", "application/json")
+	unsafeResp := httptest.NewRecorder()
+	server.ServeHTTP(unsafeResp, unsafeReq)
+	if unsafeResp.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe manifest status = %d body=%s", unsafeResp.Code, unsafeResp.Body.String())
+	}
+
+	body := `{"entries":[{"relativePath":"video.mp4","size":1,"mime":"video/mp4"}]}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/drive/folder-uploads", bytes.NewBufferString(body))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Idempotency-Key", "folder-request-1")
+	createResp := httptest.NewRecorder()
+	server.ServeHTTP(createResp, createReq)
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("create folder upload status = %d body=%s", createResp.Code, createResp.Body.String())
+	}
+	var first folderUploadResponse
+	if err := json.Unmarshal(createResp.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Batch.ID == "" || len(first.Entries) != 1 || first.Entries[0].RelativePath != "video.mp4" {
+		t.Fatalf("folder response = %#v", first)
+	}
+
+	retryReq := httptest.NewRequest(http.MethodPost, "/api/drive/folder-uploads", bytes.NewBufferString(body))
+	retryReq.Header.Set("Content-Type", "application/json")
+	retryReq.Header.Set("Idempotency-Key", "folder-request-1")
+	retryResp := httptest.NewRecorder()
+	server.ServeHTTP(retryResp, retryReq)
+	if retryResp.Code != http.StatusOK {
+		t.Fatalf("idempotent retry status = %d body=%s", retryResp.Code, retryResp.Body.String())
+	}
+	var second folderUploadResponse
+	if err := json.Unmarshal(retryResp.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Batch.ID != first.Batch.ID || len(second.Entries) != 1 || second.Entries[0].ID != first.Entries[0].ID {
+		t.Fatalf("idempotent retry = %#v, first=%#v", second, first)
+	}
+}

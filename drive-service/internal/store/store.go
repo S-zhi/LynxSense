@@ -17,43 +17,89 @@ import (
 
 // Upload 描述发送到 Drive 前的类 Tus 本地暂存上传。
 type Upload struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Name      string `json:"name"`
-	MIME      string `json:"mime"`
-	Length    int64  `json:"length"`
-	Offset    int64  `json:"offset"`
-	Completed bool   `json:"completed"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID           string `json:"id"`
+	Path         string `json:"path"`
+	Name         string `json:"name"`
+	MIME         string `json:"mime"`
+	Length       int64  `json:"length"`
+	Offset       int64  `json:"offset"`
+	Completed    bool   `json:"completed"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	BatchID      string `json:"batch_id,omitempty"`
+	EntryID      string `json:"entry_id,omitempty"`
+	ParentID     string `json:"parent_id,omitempty"`
+	RelativePath string `json:"relative_path,omitempty"`
 }
 
 // Transfer 是 Drive 上传或 Python 导入的持久化状态机记录。LocalPath 和
 // SessionURL 使断点任务能够在重启后继续。
 type Transfer struct {
+	ID            string            `json:"id"`
+	Kind          string            `json:"kind"`
+	State         string            `json:"state"`
+	UploadID      string            `json:"upload_id,omitempty"`
+	FileID        string            `json:"file_id,omitempty"`
+	FileName      string            `json:"file_name,omitempty"`
+	MIME          string            `json:"mime,omitempty"`
+	LocalPath     string            `json:"local_path,omitempty"`
+	SessionURL    string            `json:"session_url,omitempty"`
+	PythonTaskID  string            `json:"python_task_id,omitempty"`
+	TotalBytes    int64             `json:"total_bytes"`
+	Transferred   int64             `json:"transferred_bytes"`
+	ExpectedMD5   string            `json:"expected_md5,omitempty"`
+	ETag          string            `json:"etag,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	CreatedAt     string            `json:"created_at"`
+	UpdatedAt     string            `json:"updated_at"`
+	BatchID       string            `json:"batch_id,omitempty"`
+	EntryID       string            `json:"entry_id,omitempty"`
+	ParentID      string            `json:"parent_id,omitempty"`
+	RelativePath  string            `json:"relative_path,omitempty"`
+	AppProperties map[string]string `json:"app_properties,omitempty"`
+}
+
+// FolderBatch is the durable aggregate state for one manifest upload. The
+// counters are derived from FolderEntries and are kept here so a status poll
+// does not need to scan every transfer in the common case.
+type FolderBatch struct {
+	ID               string `json:"id"`
+	ClientRequestID  string `json:"client_request_id,omitempty"`
+	RootParentID     string `json:"root_parent_id,omitempty"`
+	State            string `json:"state"`
+	TotalEntries     int    `json:"total_entries"`
+	TotalBytes       int64  `json:"total_bytes"`
+	CompletedEntries int    `json:"completed_entries"`
+	CompletedBytes   int64  `json:"completed_bytes"`
+	Error            string `json:"error,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+}
+
+type FolderEntry struct {
 	ID           string `json:"id"`
-	Kind         string `json:"kind"`
-	State        string `json:"state"`
-	UploadID     string `json:"upload_id,omitempty"`
-	FileID       string `json:"file_id,omitempty"`
-	FileName     string `json:"file_name,omitempty"`
+	BatchID      string `json:"batch_id"`
+	RelativePath string `json:"relative_path"`
+	Name         string `json:"name"`
 	MIME         string `json:"mime,omitempty"`
-	LocalPath    string `json:"local_path,omitempty"`
-	SessionURL   string `json:"session_url,omitempty"`
-	PythonTaskID string `json:"python_task_id,omitempty"`
-	TotalBytes   int64  `json:"total_bytes"`
-	Transferred  int64  `json:"transferred_bytes"`
-	ExpectedMD5  string `json:"expected_md5,omitempty"`
-	ETag         string `json:"etag,omitempty"`
+	Size         int64  `json:"size"`
+	ParentID     string `json:"parent_id,omitempty"`
+	FolderID     string `json:"folder_id,omitempty"`
+	FileID       string `json:"file_id,omitempty"`
+	UploadID     string `json:"upload_id,omitempty"`
+	TransferID   string `json:"transfer_id,omitempty"`
+	State        string `json:"state"`
 	Error        string `json:"error,omitempty"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
 }
 
 type stateFile struct {
-	DriveFolderID string              `json:"drive_folder_id,omitempty"`
-	Uploads       map[string]Upload   `json:"uploads"`
-	Transfers     map[string]Transfer `json:"transfers"`
+	DriveFolderID string                 `json:"drive_folder_id,omitempty"`
+	Uploads       map[string]Upload      `json:"uploads"`
+	Transfers     map[string]Transfer    `json:"transfers"`
+	FolderBatches map[string]FolderBatch `json:"folder_batches"`
+	FolderEntries map[string]FolderEntry `json:"folder_entries"`
 }
 
 // Store 是由所有 handler 和传输 worker 共享的并发安全状态仓库。
@@ -68,7 +114,7 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
-	s := &Store{path: path, data: stateFile{Uploads: map[string]Upload{}, Transfers: map[string]Transfer{}}}
+	s := &Store{path: path, data: stateFile{Uploads: map[string]Upload{}, Transfers: map[string]Transfer{}, FolderBatches: map[string]FolderBatch{}, FolderEntries: map[string]FolderEntry{}}}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -84,6 +130,12 @@ func Open(path string) (*Store, error) {
 	}
 	if s.data.Transfers == nil {
 		s.data.Transfers = map[string]Transfer{}
+	}
+	if s.data.FolderBatches == nil {
+		s.data.FolderBatches = map[string]FolderBatch{}
+	}
+	if s.data.FolderEntries == nil {
+		s.data.FolderEntries = map[string]FolderEntry{}
 	}
 	return s, nil
 }
@@ -134,6 +186,18 @@ func (s *Store) SetDriveFolderID(id string) error {
 // CreateUpload 注册一个新的本地暂存上传。
 func (s *Store) CreateUpload(path, name, mime string, length int64) (Upload, error) {
 	u := Upload{ID: newID(), Path: path, Name: name, MIME: mime, Length: length, CreatedAt: now(), UpdatedAt: now()}
+	err := s.mutate(func(d *stateFile) error { d.Uploads[u.ID] = u; return nil })
+	return u, err
+}
+
+// CreateUploadWithMetadata is the folder-upload variant of CreateUpload. The
+// original CreateUpload signature is intentionally kept for existing clients.
+func (s *Store) CreateUploadWithMetadata(path, name, mime string, length int64, batchID, entryID, parentID, relativePath string) (Upload, error) {
+	u := Upload{
+		ID: newID(), Path: path, Name: name, MIME: mime, Length: length,
+		BatchID: batchID, EntryID: entryID, ParentID: parentID, RelativePath: relativePath,
+		CreatedAt: now(), UpdatedAt: now(),
+	}
 	err := s.mutate(func(d *stateFile) error { d.Uploads[u.ID] = u; return nil })
 	return u, err
 }
@@ -223,6 +287,162 @@ func (s *Store) ListTransfers() []Transfer {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].UpdatedAt > result[j].UpdatedAt })
 	return result
+}
+
+// CreateFolderBatch creates a batch; clientRequestID makes retries idempotent.
+// The lookup and insert happen under the same lock, so two concurrent retries
+// cannot create duplicate batches.
+func (s *Store) CreateFolderBatch(clientRequestID, rootParentID string, totalEntries int, totalBytes int64) (FolderBatch, bool, error) {
+	var out FolderBatch
+	existing := false
+	err := s.mutate(func(d *stateFile) error {
+		if clientRequestID != "" {
+			for _, batch := range d.FolderBatches {
+				if batch.ClientRequestID == clientRequestID {
+					out, existing = batch, true
+					return nil
+				}
+			}
+		}
+		created := now()
+		out = FolderBatch{
+			ID: newID(), ClientRequestID: clientRequestID, RootParentID: rootParentID,
+			State: "PENDING", TotalEntries: totalEntries, TotalBytes: totalBytes,
+			CreatedAt: created, UpdatedAt: created,
+		}
+		d.FolderBatches[out.ID] = out
+		return nil
+	})
+	return out, existing, err
+}
+
+// GetFolderBatch returns a snapshot of one folder upload batch.
+func (s *Store) GetFolderBatch(id string) (FolderBatch, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.data.FolderBatches[id]
+	return b, ok
+}
+
+// GetFolderBatchByClientRequestID returns the batch associated with an
+// idempotency key, if one exists.
+func (s *Store) GetFolderBatchByClientRequestID(clientRequestID string) (FolderBatch, bool) {
+	if clientRequestID == "" {
+		return FolderBatch{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, batch := range s.data.FolderBatches {
+		if batch.ClientRequestID == clientRequestID {
+			return batch, true
+		}
+	}
+	return FolderBatch{}, false
+}
+
+// ListFolderBatches returns batches ordered by most recent update.
+func (s *Store) ListFolderBatches() []FolderBatch {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]FolderBatch, 0, len(s.data.FolderBatches))
+	for _, batch := range s.data.FolderBatches {
+		out = append(out, batch)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt == out[j].UpdatedAt {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].UpdatedAt > out[j].UpdatedAt
+	})
+	return out
+}
+
+// UpdateFolderBatch atomically applies a change to a batch.
+func (s *Store) UpdateFolderBatch(id string, fn func(*FolderBatch) error) (FolderBatch, error) {
+	var out FolderBatch
+	err := s.mutate(func(d *stateFile) error {
+		batch, ok := d.FolderBatches[id]
+		if !ok {
+			return fmt.Errorf("folder batch %s not found", id)
+		}
+		if err := fn(&batch); err != nil {
+			return err
+		}
+		batch.UpdatedAt = now()
+		d.FolderBatches[id] = batch
+		out = batch
+		return nil
+	})
+	return out, err
+}
+
+// CreateFolderEntry persists one manifest file entry.
+func (s *Store) CreateFolderEntry(entry FolderEntry) (FolderEntry, error) {
+	if entry.ID == "" {
+		entry.ID = newID()
+	}
+	if entry.State == "" {
+		entry.State = "PENDING"
+	}
+	created := now()
+	if entry.CreatedAt == "" {
+		entry.CreatedAt = created
+	}
+	entry.UpdatedAt = created
+	err := s.mutate(func(d *stateFile) error {
+		if _, exists := d.FolderEntries[entry.ID]; exists {
+			return fmt.Errorf("folder entry %s already exists", entry.ID)
+		}
+		d.FolderEntries[entry.ID] = entry
+		return nil
+	})
+	return entry, err
+}
+
+// GetFolderEntry returns a snapshot of one manifest file entry.
+func (s *Store) GetFolderEntry(id string) (FolderEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.data.FolderEntries[id]
+	return entry, ok
+}
+
+// ListFolderEntries returns entries for a batch in deterministic path order.
+func (s *Store) ListFolderEntries(batchID string) []FolderEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]FolderEntry, 0)
+	for _, entry := range s.data.FolderEntries {
+		if batchID == "" || entry.BatchID == batchID {
+			out = append(out, entry)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RelativePath == out[j].RelativePath {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].RelativePath < out[j].RelativePath
+	})
+	return out
+}
+
+// UpdateFolderEntry atomically applies a change to an entry.
+func (s *Store) UpdateFolderEntry(id string, fn func(*FolderEntry) error) (FolderEntry, error) {
+	var out FolderEntry
+	err := s.mutate(func(d *stateFile) error {
+		entry, ok := d.FolderEntries[id]
+		if !ok {
+			return fmt.Errorf("folder entry %s not found", id)
+		}
+		if err := fn(&entry); err != nil {
+			return err
+		}
+		entry.UpdatedAt = now()
+		d.FolderEntries[id] = entry
+		out = entry
+		return nil
+	})
+	return out, err
 }
 
 // RecoverableTransfers 筛选非终态任务，以便进程启动时安全恢复。
