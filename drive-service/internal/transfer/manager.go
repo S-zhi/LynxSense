@@ -1,3 +1,5 @@
+// Package transfer runs the two long-lived pipelines exposed by the sidecar:
+// local staging to Drive, and Drive download to the existing Python API.
 package transfer
 
 import (
@@ -34,6 +36,8 @@ const (
 	StateCancelled    = "CANCELLED"
 )
 
+// Manager owns background transfer workers and their cancellation functions.
+// Progress is written to Store before each externally visible step.
 type Manager struct {
 	cfg   *config.Config
 	store *store.Store
@@ -43,10 +47,12 @@ type Manager struct {
 	cancels map[string]context.CancelFunc
 }
 
+// NewManager constructs the process-wide transfer coordinator.
 func NewManager(cfg *config.Config, state *store.Store, client *driveclient.Client) *Manager {
 	return &Manager{cfg: cfg, store: state, drive: client, cancels: map[string]context.CancelFunc{}}
 }
 
+// StartDriveUpload schedules a resumable local-file to Drive transfer.
 func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) {
 	if !upload.Completed || upload.Length <= 0 || upload.Path == "" {
 		return store.Transfer{}, errors.New("upload staging file is incomplete")
@@ -67,6 +73,7 @@ func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) 
 	return t, nil
 }
 
+// StartPythonImport schedules a Drive-to-Python import transfer.
 func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	if fileID == "" {
 		return store.Transfer{}, errors.New("fileId 不能为空")
@@ -83,12 +90,14 @@ func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	return t, nil
 }
 
+// Recover restarts transfers left in a non-terminal state after a process exit.
 func (m *Manager) Recover() {
 	for _, t := range m.store.RecoverableTransfers() {
 		m.start(t.ID)
 	}
 }
 
+// Pause marks a transfer paused and cancels its current HTTP request.
 func (m *Manager) Pause(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -104,6 +113,7 @@ func (m *Manager) Pause(id string) error {
 	return nil
 }
 
+// Resume restarts a paused or failed transfer using its persisted checkpoint.
 func (m *Manager) Resume(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -119,6 +129,7 @@ func (m *Manager) Resume(id string) error {
 	return nil
 }
 
+// Cancel stops a transfer and removes its local staging artifacts.
 func (m *Manager) Cancel(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -216,6 +227,8 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 		}
 		t, _ = m.store.GetTransfer(id)
 		if t.SessionURL == "" {
+			// A Drive resumable session is opaque and may expire. Resetting both
+			// URL and offset ensures a replacement session never skips bytes.
 			if t.Transferred != 0 {
 				if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.Transferred = 0; return nil }); err != nil {
 					return err

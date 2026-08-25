@@ -1,3 +1,5 @@
+// Package httpapi exposes the local HTTP contract used by the web client and
+// keeps transport concerns separate from OAuth, Drive, and transfer workers.
 package httpapi
 
 import (
@@ -19,6 +21,8 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/transfer"
 )
 
+// Server routes OAuth, file, upload, and transfer requests to the shared
+// process-wide service instances.
 type Server struct {
 	cfg       *config.Config
 	auth      *oauth.Manager
@@ -27,10 +31,14 @@ type Server struct {
 	store     *store.Store
 }
 
+// New wires the HTTP facade to the single-user service dependencies.
 func New(cfg *config.Config, auth *oauth.Manager, client *driveclient.Client, transfers *transfer.Manager, state *store.Store) *Server {
 	return &Server{cfg: cfg, auth: auth, drive: client, transfers: transfers, store: state}
 }
 
+// ServeHTTP implements the complete local API. Long-running upload/download
+// work is handed to transfer.Manager so request cancellation does not erase a
+// durable checkpoint.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.setCommonHeaders(w, r)
 	if r.Method == http.MethodOptions {
@@ -171,6 +179,8 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, fileID str
 }
 
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
+	// The browser uploads to local disk first. This keeps the request contract
+	// independent from Drive latency and lets the worker resume after restart.
 	lengthHeader := r.Header.Get("X-Upload-Length")
 	if lengthHeader == "" {
 		lengthHeader = r.Header.Get("Upload-Length")
@@ -251,6 +261,8 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusConflict, fmt.Errorf("offset mismatch, server=%d", u.Offset))
 		return
 	}
+	// Only the declared remaining bytes may be written; io.CopyN below also
+	// prevents a client from accidentally consuming the next request's data.
 	if r.ContentLength > u.Length-offset {
 		writeError(w, http.StatusRequestEntityTooLarge, errors.New("chunk exceeds upload length"))
 		return
@@ -298,6 +310,8 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request, id st
 }
 
 func (s *Server) handleDeleteUpload(w http.ResponseWriter, id string) {
+	// A completed staging upload belongs to the Drive worker and cannot be
+	// removed through this endpoint; use transfer cancellation instead.
 	u, ok := s.store.GetUpload(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, errors.New("upload not found"))

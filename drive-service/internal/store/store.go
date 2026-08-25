@@ -1,3 +1,6 @@
+// Package store persists upload and transfer metadata in one private JSON
+// file. Every mutation is serialized and atomically renamed so a restart can
+// recover the last acknowledged transfer position.
 package store
 
 import (
@@ -13,6 +16,7 @@ import (
 	"time"
 )
 
+// Upload describes a Tus-like local staging upload before it is sent to Drive.
 type Upload struct {
 	ID        string `json:"id"`
 	Path      string `json:"path"`
@@ -25,6 +29,8 @@ type Upload struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// Transfer is the durable state-machine record for a Drive upload or Python
+// import. LocalPath and SessionURL make resumable work restartable.
 type Transfer struct {
 	ID           string `json:"id"`
 	Kind         string `json:"kind"`
@@ -51,12 +57,15 @@ type stateFile struct {
 	Transfers     map[string]Transfer `json:"transfers"`
 }
 
+// Store is the concurrency-safe state repository shared by all handlers and
+// transfer workers.
 type Store struct {
 	path string
 	mu   sync.Mutex
 	data stateFile
 }
 
+// Open loads an existing state file or initializes an empty repository.
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
@@ -91,6 +100,8 @@ func (s *Store) mutate(fn func(*stateFile) error) error {
 }
 
 func (s *Store) saveLocked() error {
+	// Write then rename keeps readers from observing a partially written JSON
+	// document if the process is interrupted during persistence.
 	b, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
 		return err
@@ -105,12 +116,14 @@ func (s *Store) saveLocked() error {
 	return nil
 }
 
+// DriveFolderID returns the cached application-folder ID, if known.
 func (s *Store) DriveFolderID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data.DriveFolderID
 }
 
+// SetDriveFolderID persists the Drive folder used by all sidecar files.
 func (s *Store) SetDriveFolderID(id string) error {
 	return s.mutate(func(d *stateFile) error {
 		d.DriveFolderID = id
@@ -118,12 +131,14 @@ func (s *Store) SetDriveFolderID(id string) error {
 	})
 }
 
+// CreateUpload registers a new local staging upload.
 func (s *Store) CreateUpload(path, name, mime string, length int64) (Upload, error) {
 	u := Upload{ID: newID(), Path: path, Name: name, MIME: mime, Length: length, CreatedAt: now(), UpdatedAt: now()}
 	err := s.mutate(func(d *stateFile) error { d.Uploads[u.ID] = u; return nil })
 	return u, err
 }
 
+// GetUpload returns an upload snapshot without exposing mutable internal state.
 func (s *Store) GetUpload(id string) (Upload, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,6 +146,7 @@ func (s *Store) GetUpload(id string) (Upload, bool) {
 	return u, ok
 }
 
+// UpdateUpload applies an atomic mutation and refreshes UpdatedAt.
 func (s *Store) UpdateUpload(id string, fn func(*Upload) error) (Upload, error) {
 	var out Upload
 	err := s.mutate(func(d *stateFile) error {
@@ -149,10 +165,12 @@ func (s *Store) UpdateUpload(id string, fn func(*Upload) error) (Upload, error) 
 	return out, err
 }
 
+// DeleteUpload removes the local staging record.
 func (s *Store) DeleteUpload(id string) error {
 	return s.mutate(func(d *stateFile) error { delete(d.Uploads, id); return nil })
 }
 
+// CreateTransfer persists a new transfer in PENDING state unless supplied.
 func (s *Store) CreateTransfer(t Transfer) (Transfer, error) {
 	if t.ID == "" {
 		t.ID = newID()
@@ -168,6 +186,7 @@ func (s *Store) CreateTransfer(t Transfer) (Transfer, error) {
 	return t, err
 }
 
+// GetTransfer returns a transfer snapshot.
 func (s *Store) GetTransfer(id string) (Transfer, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -175,6 +194,7 @@ func (s *Store) GetTransfer(id string) (Transfer, bool) {
 	return t, ok
 }
 
+// UpdateTransfer applies an atomic state/progress mutation.
 func (s *Store) UpdateTransfer(id string, fn func(*Transfer) error) (Transfer, error) {
 	var out Transfer
 	err := s.mutate(func(d *stateFile) error {
@@ -193,6 +213,7 @@ func (s *Store) UpdateTransfer(id string, fn func(*Transfer) error) (Transfer, e
 	return out, err
 }
 
+// ListTransfers returns transfers newest-updated first.
 func (s *Store) ListTransfers() []Transfer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -204,6 +225,8 @@ func (s *Store) ListTransfers() []Transfer {
 	return result
 }
 
+// RecoverableTransfers selects non-terminal transfers that can be restarted
+// safely when the process boots again.
 func (s *Store) RecoverableTransfers() []Transfer {
 	all := s.ListTransfers()
 	result := make([]Transfer, 0, len(all))

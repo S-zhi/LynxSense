@@ -1,3 +1,5 @@
+// Package drive is a small Google Drive v3 client tailored to the sidecar's
+// four operations: list, soft-delete, resumable upload, and ranged download.
 package drive
 
 import (
@@ -26,10 +28,12 @@ const (
 	folderMIME = "application/vnd.google-apps.folder"
 )
 
+// Capabilities contains the Drive permissions needed by the HTTP API.
 type Capabilities struct {
 	CanDownload bool `json:"canDownload"`
 }
 
+// File is the subset of Drive file metadata exposed by the sidecar.
 type File struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
@@ -44,17 +48,22 @@ type File struct {
 	Etag           string       `json:"etag"`
 }
 
+// FileList is a paginated response from the Drive files endpoint.
 type FileList struct {
 	NextPageToken string `json:"nextPageToken"`
 	Files         []File `json:"files"`
 }
 
+// Client owns the authenticated Drive transport and the cached application
+// folder ID. It is safe to share one instance across HTTP handlers.
 type Client struct {
 	cfg   *config.Config
 	oauth *oauth.Manager
 	store *store.Store
 }
 
+// NewClient constructs the process-wide Drive client. Authentication is
+// resolved lazily so starting the server does not require an interactive login.
 func NewClient(cfg *config.Config, auth *oauth.Manager, state *store.Store) *Client {
 	return &Client{cfg: cfg, oauth: auth, store: state}
 }
@@ -63,6 +72,8 @@ func (c *Client) ensureFolder(ctx context.Context) (string, error) {
 	if c.cfg.DriveFolderID != "" {
 		return c.cfg.DriveFolderID, nil
 	}
+	// Cache the folder ID in durable state: the Drive API lookup is otherwise
+	// repeated after every restart, and duplicate folders could be created.
 	if id := c.store.DriveFolderID(); id != "" {
 		return id, nil
 	}
@@ -95,6 +106,7 @@ func (c *Client) ensureFolder(ctx context.Context) (string, error) {
 	return folder.ID, nil
 }
 
+// List returns files owned by this sidecar under its application folder.
 func (c *Client) List(ctx context.Context, pageToken string, pageSize int64) (*FileList, error) {
 	folderID, err := c.ensureFolder(ctx)
 	if err != nil {
@@ -120,6 +132,7 @@ func (c *Client) List(ctx context.Context, pageToken string, pageSize int64) (*F
 	return &result, nil
 }
 
+// Metadata fetches metadata for a single Drive file.
 func (c *Client) Metadata(ctx context.Context, fileID string) (*File, error) {
 	values := url.Values{
 		"fields":            {"id,name,mimeType,size,modifiedTime,md5Checksum,capabilities,trashed,parents"},
@@ -132,6 +145,7 @@ func (c *Client) Metadata(ctx context.Context, fileID string) (*File, error) {
 	return &result, nil
 }
 
+// Trash moves a file to Drive trash instead of deleting it irreversibly.
 func (c *Client) Trash(ctx context.Context, fileID string) error {
 	body, _ := json.Marshal(map[string]bool{"trashed": true})
 	return c.doJSON(ctx, http.MethodPatch, apiBase+"/files/"+url.PathEscape(fileID)+"?supportsAllDrives=true&fields=id,trashed", bytes.NewReader(body), map[string]string{"Content-Type": "application/json"}, &File{})
@@ -171,8 +185,12 @@ func (c *Client) DownloadRange(ctx context.Context, fileID, rangeHeader string) 
 	return metadata, resp, nil
 }
 
+// UploadSession identifies a Drive resumable-upload session.
 type UploadSession struct{ URL string }
 
+// StartUploadSession creates a resumable upload session and returns its
+// opaque URL. The caller can safely retry individual chunks without replaying
+// already acknowledged bytes.
 func (c *Client) StartUploadSession(ctx context.Context, name, mime string, size int64) (UploadSession, error) {
 	if size <= 0 {
 		return UploadSession{}, errors.New("Drive upload size must be positive")
@@ -219,12 +237,15 @@ func (c *Client) StartUploadSession(ctx context.Context, name, mime string, size
 	return UploadSession{URL: location}, nil
 }
 
+// ChunkResult reports how far Drive accepted a resumable upload.
 type ChunkResult struct {
 	NextOffset int64
 	Completed  bool
 	File       *File
 }
 
+// UploadChunk sends one chunk to Drive. A 308 response advances the caller's
+// offset; a 404 indicates that the opaque session expired and must be replaced.
 func (c *Client) UploadChunk(ctx context.Context, sessionURL string, file *os.File, offset, total, chunkSize int64) (ChunkResult, error) {
 	if offset >= total {
 		return ChunkResult{NextOffset: total, Completed: true}, nil

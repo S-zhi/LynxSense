@@ -1,3 +1,6 @@
+// Package config loads and normalizes the local configuration for the Drive
+// sidecar. It deliberately keeps OAuth credentials and tokens outside source
+// control, while providing stable defaults for the single-user deployment.
 package config
 
 import (
@@ -31,6 +34,7 @@ type Config struct {
 	RequestTimeoutSeconds  int      `json:"request_timeout_seconds"`
 }
 
+// Default returns the safe local-development defaults for the sidecar.
 func Default() Config {
 	return Config{
 		ListenAddr:            "127.0.0.1:8787",
@@ -43,6 +47,8 @@ func Default() Config {
 	}
 }
 
+// Load reads JSON configuration from path and applies defaults for omitted or
+// invalid non-secret values. An empty path returns Default without I/O.
 func Load(path string) (Config, error) {
 	cfg := Default()
 	if path == "" {
@@ -91,6 +97,8 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+// EnsureDataDir creates the private directory used for OAuth state, transfer
+// state, and temporary staging files.
 func (c Config) EnsureDataDir() error {
 	if c.DataDir == "" {
 		return errors.New("data_dir is empty")
@@ -98,18 +106,23 @@ func (c Config) EnsureDataDir() error {
 	return os.MkdirAll(filepath.Clean(c.DataDir), 0o700)
 }
 
+// StatePath returns the persisted transfer-state file path.
 func (c Config) StatePath() string {
 	return filepath.Join(c.DataDir, "state.json")
 }
 
+// TokenPath returns the path where the refresh token is persisted locally.
 func (c Config) TokenPath() string {
 	return filepath.Join(c.DataDir, "oauth_token.json")
 }
 
+// StagingDir returns the directory used for resumable Drive downloads.
 func (c Config) StagingDir() string {
 	return filepath.Join(c.DataDir, "staging")
 }
 
+// ClientConfigPath returns the configured OAuth client JSON path, falling back
+// to oauth_client.json in the private data directory.
 func (c Config) ClientConfigPath() string {
 	if c.GoogleClientConfigFile != "" {
 		return c.GoogleClientConfigFile

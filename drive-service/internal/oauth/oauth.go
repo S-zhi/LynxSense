@@ -1,3 +1,6 @@
+// Package oauth implements the single-user Google OAuth flow and persists the
+// refresh token in the sidecar data directory. It never embeds user tokens in
+// source-controlled configuration.
 package oauth
 
 import (
@@ -41,6 +44,8 @@ type pendingAuth struct {
 	listener net.Listener
 }
 
+// Manager coordinates one pending browser authorization and subsequent token
+// refreshes for the process-wide Drive client.
 type Manager struct {
 	cfg *config.Config
 
@@ -52,6 +57,7 @@ type Manager struct {
 	clientLoaded bool
 }
 
+// NewManager constructs an OAuth manager without performing network I/O.
 func NewManager(cfg *config.Config) *Manager { return &Manager{cfg: cfg} }
 
 func (m *Manager) credentials() (string, string, error) {
@@ -63,6 +69,8 @@ func (m *Manager) credentials() (string, string, error) {
 	m.clientLoaded = true
 	m.clientID = m.cfg.GoogleClientID
 	m.clientSecret = m.cfg.GoogleClientSecret
+	// Missing credentials are not cached as a permanent failure: the operator
+	// can add oauth_client.json while the sidecar remains running.
 	if m.clientID == "" || m.clientSecret == "" {
 		path := m.cfg.ClientConfigPath()
 		b, err := os.ReadFile(path)
@@ -96,6 +104,8 @@ func (m *Manager) credentials() (string, string, error) {
 	return m.clientID, m.clientSecret, nil
 }
 
+// oauthConfig builds the Google endpoint configuration for either the
+// loopback callback or the configured callback URI.
 func (m *Manager) oauthConfig(redirect string) (*oauth2.Config, error) {
 	id, secret, err := m.credentials()
 	if err != nil {
@@ -121,6 +131,8 @@ func (m *Manager) Start() (string, error) {
 	var listener net.Listener
 	var err error
 	if redirect == "" {
+		// Binding port 0 lets the OS choose an unused loopback port, avoiding a
+		// hard-coded callback port and making concurrent local services safer.
 		listener, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return "", fmt.Errorf("start OAuth loopback listener: %w", err)
@@ -142,6 +154,8 @@ func (m *Manager) Start() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// state prevents login-response mix-ups; verifier enables PKCE even if the
+	// authorization code is intercepted before it reaches the callback.
 	p := &pendingAuth{cfg: ocfg, state: state, verifier: verifier, listener: listener}
 	m.mu.Lock()
 	if m.pending != nil && m.pending.listener != nil {
@@ -161,6 +175,8 @@ func (m *Manager) Start() (string, error) {
 	return ocfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)), nil
 }
 
+// Callback handles a configured redirect endpoint when the browser cannot use
+// the internally managed loopback listener.
 func (m *Manager) Callback(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	p := m.pending
@@ -247,6 +263,9 @@ func (m *Manager) loadToken() (*oauth2.Token, error) {
 	return &tok, nil
 }
 
+// TokenSource returns a refresh-capable source backed by the persisted token.
+// Refreshed tokens are written back so an expired access token is transparent
+// to later uploads and downloads.
 func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	tok, err := m.loadToken()
 	if err != nil {
@@ -269,6 +288,8 @@ func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	return &persistingSource{inner: oauth2.ReuseTokenSource(tok, inner), save: m.saveToken}, nil
 }
 
+// HTTPClient returns an authenticated client with the configured request
+// timeout. Request cancellation still takes precedence over that timeout.
 func (m *Manager) HTTPClient(ctx context.Context) (*http.Client, error) {
 	source, err := m.TokenSource(ctx)
 	if err != nil {
@@ -281,6 +302,8 @@ func (m *Manager) HTTPClient(ctx context.Context) (*http.Client, error) {
 	return client, nil
 }
 
+// Disconnect revokes the current access token when possible and removes the
+// local refresh token, requiring a new browser login next time.
 func (m *Manager) Disconnect(ctx context.Context) error {
 	tok, err := m.loadToken()
 	if err != nil {
@@ -304,6 +327,7 @@ func (m *Manager) Disconnect(ctx context.Context) error {
 	return nil
 }
 
+// Status reports configuration and connection state without exposing tokens.
 func (m *Manager) Status() map[string]any {
 	id, _, credErr := m.credentials()
 	tok, tokErr := m.loadToken()
@@ -334,6 +358,8 @@ func (m *Manager) Status() map[string]any {
 	}
 }
 
+// persistingSource de-duplicates token writes while allowing oauth2 to refresh
+// the access token on demand.
 type persistingSource struct {
 	inner oauth2.TokenSource
 	save  func(*oauth2.Token) error

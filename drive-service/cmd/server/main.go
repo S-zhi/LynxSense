@@ -1,3 +1,5 @@
+// Command server starts the local Google Drive sidecar used by the Python web
+// application. All service dependencies are singletons for this process.
 package main
 
 import (
@@ -37,8 +39,12 @@ func main() {
 	auth := oauth.NewManager(&cfg)
 	drive := driveclient.NewClient(&cfg, auth, state)
 	transfers := transfer.NewManager(&cfg, state, drive)
+	// Re-queue durable non-terminal transfers before accepting new requests.
 	transfers.Recover()
 
+	// ReadHeaderTimeout only bounds request-header parsing. Body streaming is
+	// governed by request context and the per-client transfer pipeline, while
+	// IdleTimeout applies between keep-alive requests rather than upload bytes.
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           httpapi.New(&cfg, auth, drive, transfers, state),
