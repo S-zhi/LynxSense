@@ -1,5 +1,5 @@
-// Package drive is a small Google Drive v3 client tailored to the sidecar's
-// four operations: list, soft-delete, resumable upload, and ranged download.
+// Package drive 是面向 sidecar 的轻量 Google Drive v3 客户端，覆盖文件列表、
+// 软删除、断点上传和范围下载四项基础操作。
 package drive
 
 import (
@@ -28,12 +28,12 @@ const (
 	folderMIME = "application/vnd.google-apps.folder"
 )
 
-// Capabilities contains the Drive permissions needed by the HTTP API.
+// Capabilities 描述 HTTP API 所需的 Drive 文件权限。
 type Capabilities struct {
 	CanDownload bool `json:"canDownload"`
 }
 
-// File is the subset of Drive file metadata exposed by the sidecar.
+// File 是 sidecar 对外暴露的 Drive 文件元数据子集。
 type File struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
@@ -48,22 +48,22 @@ type File struct {
 	Etag           string       `json:"etag"`
 }
 
-// FileList is a paginated response from the Drive files endpoint.
+// FileList 是 Drive 文件接口的分页响应。
 type FileList struct {
 	NextPageToken string `json:"nextPageToken"`
 	Files         []File `json:"files"`
 }
 
-// Client owns the authenticated Drive transport and the cached application
-// folder ID. It is safe to share one instance across HTTP handlers.
+// Client 持有已认证的 Drive 通道和缓存的应用目录 ID，可由所有 HTTP handler
+// 共享同一个实例。
 type Client struct {
 	cfg   *config.Config
 	oauth *oauth.Manager
 	store *store.Store
 }
 
-// NewClient constructs the process-wide Drive client. Authentication is
-// resolved lazily so starting the server does not require an interactive login.
+// NewClient 创建进程级 Drive 客户端。认证采用延迟解析，因此启动服务时不要求
+// 立即完成浏览器登录。
 func NewClient(cfg *config.Config, auth *oauth.Manager, state *store.Store) *Client {
 	return &Client{cfg: cfg, oauth: auth, store: state}
 }
@@ -72,8 +72,7 @@ func (c *Client) ensureFolder(ctx context.Context) (string, error) {
 	if c.cfg.DriveFolderID != "" {
 		return c.cfg.DriveFolderID, nil
 	}
-	// Cache the folder ID in durable state: the Drive API lookup is otherwise
-	// repeated after every restart, and duplicate folders could be created.
+	// 将目录 ID 缓存到持久化状态中，避免每次重启都查询 Drive，也避免重复创建目录。
 	if id := c.store.DriveFolderID(); id != "" {
 		return id, nil
 	}
@@ -106,7 +105,7 @@ func (c *Client) ensureFolder(ctx context.Context) (string, error) {
 	return folder.ID, nil
 }
 
-// List returns files owned by this sidecar under its application folder.
+// List 返回此 sidecar 应用目录下的文件。
 func (c *Client) List(ctx context.Context, pageToken string, pageSize int64) (*FileList, error) {
 	folderID, err := c.ensureFolder(ctx)
 	if err != nil {
@@ -132,7 +131,7 @@ func (c *Client) List(ctx context.Context, pageToken string, pageSize int64) (*F
 	return &result, nil
 }
 
-// Metadata fetches metadata for a single Drive file.
+// Metadata 获取单个 Drive 文件的元数据。
 func (c *Client) Metadata(ctx context.Context, fileID string) (*File, error) {
 	values := url.Values{
 		"fields":            {"id,name,mimeType,size,modifiedTime,md5Checksum,capabilities,trashed,parents"},
@@ -145,14 +144,13 @@ func (c *Client) Metadata(ctx context.Context, fileID string) (*File, error) {
 	return &result, nil
 }
 
-// Trash moves a file to Drive trash instead of deleting it irreversibly.
+// Trash 将文件移入 Drive 回收站，而不是执行不可逆删除。
 func (c *Client) Trash(ctx context.Context, fileID string) error {
 	body, _ := json.Marshal(map[string]bool{"trashed": true})
 	return c.doJSON(ctx, http.MethodPatch, apiBase+"/files/"+url.PathEscape(fileID)+"?supportsAllDrives=true&fields=id,trashed", bytes.NewReader(body), map[string]string{"Content-Type": "application/json"}, &File{})
 }
 
-// DownloadRange returns an authenticated media response. The caller owns the
-// response body and must close it.
+// DownloadRange 返回已认证的媒体响应。响应体由调用方负责关闭。
 func (c *Client) DownloadRange(ctx context.Context, fileID, rangeHeader string) (*File, *http.Response, error) {
 	metadata, err := c.Metadata(ctx, fileID)
 	if err != nil {
@@ -170,8 +168,8 @@ func (c *Client) DownloadRange(ctx context.Context, fileID, rangeHeader string) 
 	if rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
-	// Range offsets are byte offsets in the original media. Disable transparent
-	// gzip so an encoded response cannot change the byte accounting.
+	// Range 偏移量基于原始媒体的字节位置。禁用透明 gzip，避免响应编码改变
+	// 断点下载的字节计数。
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -185,12 +183,11 @@ func (c *Client) DownloadRange(ctx context.Context, fileID, rangeHeader string) 
 	return metadata, resp, nil
 }
 
-// UploadSession identifies a Drive resumable-upload session.
+// UploadSession 标识一个 Drive 断点上传会话。
 type UploadSession struct{ URL string }
 
-// StartUploadSession creates a resumable upload session and returns its
-// opaque URL. The caller can safely retry individual chunks without replaying
-// already acknowledged bytes.
+// StartUploadSession 创建断点上传会话并返回不透明的会话 URL。调用方可以安全地
+// 重试单个分片，而无需重复发送已经确认的字节。
 func (c *Client) StartUploadSession(ctx context.Context, name, mime string, size int64) (UploadSession, error) {
 	if size <= 0 {
 		return UploadSession{}, errors.New("Drive upload size must be positive")
@@ -237,15 +234,15 @@ func (c *Client) StartUploadSession(ctx context.Context, name, mime string, size
 	return UploadSession{URL: location}, nil
 }
 
-// ChunkResult reports how far Drive accepted a resumable upload.
+// ChunkResult 表示 Drive 已确认的断点上传进度。
 type ChunkResult struct {
 	NextOffset int64
 	Completed  bool
 	File       *File
 }
 
-// UploadChunk sends one chunk to Drive. A 308 response advances the caller's
-// offset; a 404 indicates that the opaque session expired and must be replaced.
+// UploadChunk 向 Drive 发送一个分片。308 响应会推进调用方偏移量；404 表示不透明
+// 会话已过期，需要创建新会话。
 func (c *Client) UploadChunk(ctx context.Context, sessionURL string, file *os.File, offset, total, chunkSize int64) (ChunkResult, error) {
 	if offset >= total {
 		return ChunkResult{NextOffset: total, Completed: true}, nil

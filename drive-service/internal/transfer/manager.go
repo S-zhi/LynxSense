@@ -1,5 +1,5 @@
-// Package transfer runs the two long-lived pipelines exposed by the sidecar:
-// local staging to Drive, and Drive download to the existing Python API.
+// Package transfer 负责执行 sidecar 暴露的两条长任务流水线：本地暂存上传到
+// Drive，以及从 Drive 下载后提交到现有 Python API。
 package transfer
 
 import (
@@ -36,8 +36,8 @@ const (
 	StateCancelled    = "CANCELLED"
 )
 
-// Manager owns background transfer workers and their cancellation functions.
-// Progress is written to Store before each externally visible step.
+// Manager 管理后台传输 worker 及其取消函数。每个对外可见步骤执行前，进度都会
+// 先写入 Store。
 type Manager struct {
 	cfg   *config.Config
 	store *store.Store
@@ -47,12 +47,12 @@ type Manager struct {
 	cancels map[string]context.CancelFunc
 }
 
-// NewManager constructs the process-wide transfer coordinator.
+// NewManager 创建进程级传输协调器。
 func NewManager(cfg *config.Config, state *store.Store, client *driveclient.Client) *Manager {
 	return &Manager{cfg: cfg, store: state, drive: client, cancels: map[string]context.CancelFunc{}}
 }
 
-// StartDriveUpload schedules a resumable local-file to Drive transfer.
+// StartDriveUpload 创建一个从本地文件断点上传到 Drive 的任务。
 func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) {
 	if !upload.Completed || upload.Length <= 0 || upload.Path == "" {
 		return store.Transfer{}, errors.New("upload staging file is incomplete")
@@ -73,7 +73,7 @@ func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) 
 	return t, nil
 }
 
-// StartPythonImport schedules a Drive-to-Python import transfer.
+// StartPythonImport 创建一个从 Drive 下载并导入 Python 的任务。
 func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	if fileID == "" {
 		return store.Transfer{}, errors.New("fileId 不能为空")
@@ -90,14 +90,14 @@ func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	return t, nil
 }
 
-// Recover restarts transfers left in a non-terminal state after a process exit.
+// Recover 重新启动进程退出时遗留的非终态传输任务。
 func (m *Manager) Recover() {
 	for _, t := range m.store.RecoverableTransfers() {
 		m.start(t.ID)
 	}
 }
 
-// Pause marks a transfer paused and cancels its current HTTP request.
+// Pause 将任务标记为暂停，并取消当前 HTTP 请求。
 func (m *Manager) Pause(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -113,7 +113,7 @@ func (m *Manager) Pause(id string) error {
 	return nil
 }
 
-// Resume restarts a paused or failed transfer using its persisted checkpoint.
+// Resume 使用已持久化的断点重启暂停或失败的任务。
 func (m *Manager) Resume(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -129,7 +129,7 @@ func (m *Manager) Resume(id string) error {
 	return nil
 }
 
-// Cancel stops a transfer and removes its local staging artifacts.
+// Cancel 停止传输任务并删除本地暂存文件。
 func (m *Manager) Cancel(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -227,8 +227,8 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 		}
 		t, _ = m.store.GetTransfer(id)
 		if t.SessionURL == "" {
-			// A Drive resumable session is opaque and may expire. Resetting both
-			// URL and offset ensures a replacement session never skips bytes.
+			// Drive 断点会话是不透明的，可能随时过期。重置 URL 和偏移量，
+			// 确保新会话不会跳过任何字节。
 			if t.Transferred != 0 {
 				if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.Transferred = 0; return nil }); err != nil {
 					return err
@@ -414,9 +414,8 @@ func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPa
 			return fmt.Errorf("Drive range download returned %s", response.Status)
 		}
 		if offset > 0 && response.StatusCode == http.StatusOK {
-			// A server that ignores Range would otherwise append the full file to
-			// the partial file. Restart from zero so the local artifact remains
-			// verifiable instead of silently corrupting it.
+			// 如果服务端忽略 Range，直接追加会把完整文件接到残缺文件后面。
+			// 从零开始重新下载，避免本地文件静默损坏且无法校验。
 			_ = response.Body.Close()
 			if err := file.Truncate(0); err != nil {
 				return err

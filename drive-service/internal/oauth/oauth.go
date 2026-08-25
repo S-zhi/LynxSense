@@ -1,6 +1,5 @@
-// Package oauth implements the single-user Google OAuth flow and persists the
-// refresh token in the sidecar data directory. It never embeds user tokens in
-// source-controlled configuration.
+// Package oauth 实现单用户 Google OAuth 流程，并将 Refresh Token 持久化到 sidecar
+// 数据目录中。用户 Token 不会写入受源码管理的配置。
 package oauth
 
 import (
@@ -44,8 +43,7 @@ type pendingAuth struct {
 	listener net.Listener
 }
 
-// Manager coordinates one pending browser authorization and subsequent token
-// refreshes for the process-wide Drive client.
+// Manager 管理一次浏览器授权流程，以及进程级 Drive 客户端后续的 Token 刷新。
 type Manager struct {
 	cfg *config.Config
 
@@ -57,7 +55,7 @@ type Manager struct {
 	clientLoaded bool
 }
 
-// NewManager constructs an OAuth manager without performing network I/O.
+// NewManager 创建 OAuth 管理器，不执行网络 I/O。
 func NewManager(cfg *config.Config) *Manager { return &Manager{cfg: cfg} }
 
 func (m *Manager) credentials() (string, string, error) {
@@ -96,16 +94,14 @@ func (m *Manager) credentials() (string, string, error) {
 		}
 	}
 	if m.clientID == "" || m.clientSecret == "" {
-		// Do not cache a missing configuration: the user may place the OAuth
-		// client JSON while the local sidecar is still running.
+		// 不缓存缺失配置；sidecar 运行期间用户仍可能补充 OAuth 客户端 JSON。
 		m.clientLoaded = false
 		return "", "", errors.New("Google OAuth ClientID/ClientSecret 尚未配置；请填写配置或导入 Desktop OAuth JSON")
 	}
 	return m.clientID, m.clientSecret, nil
 }
 
-// oauthConfig builds the Google endpoint configuration for either the
-// loopback callback or the configured callback URI.
+// oauthConfig 为 loopback 回调或显式配置的回调地址构造 Google OAuth 配置。
 func (m *Manager) oauthConfig(redirect string) (*oauth2.Config, error) {
 	id, secret, err := m.credentials()
 	if err != nil {
@@ -123,16 +119,15 @@ func (m *Manager) oauthConfig(redirect string) (*oauth2.Config, error) {
 	}, nil
 }
 
-// Start starts a browser authorization flow. With an empty configured redirect
-// URI it creates a temporary loopback listener, which is the recommended flow
-// for a local Desktop OAuth client.
+// Start 启动浏览器授权流程。未配置回调地址时，会创建临时 loopback 监听器，
+// 这是本地 Desktop OAuth 客户端推荐的方式。
 func (m *Manager) Start() (string, error) {
 	redirect := m.cfg.GoogleRedirectURI
 	var listener net.Listener
 	var err error
 	if redirect == "" {
-		// Binding port 0 lets the OS choose an unused loopback port, avoiding a
-		// hard-coded callback port and making concurrent local services safer.
+		// 绑定端口 0 让操作系统自动选择未占用的 loopback 端口，避免固定端口，
+		// 也降低与其他本地服务冲突的可能性。
 		listener, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return "", fmt.Errorf("start OAuth loopback listener: %w", err)
@@ -154,8 +149,8 @@ func (m *Manager) Start() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// state prevents login-response mix-ups; verifier enables PKCE even if the
-	// authorization code is intercepted before it reaches the callback.
+	// state 用于防止登录响应串线；verifier 启用 PKCE，即使授权码在到达回调前
+	// 被截获，也不能直接兑换 Token。
 	p := &pendingAuth{cfg: ocfg, state: state, verifier: verifier, listener: listener}
 	m.mu.Lock()
 	if m.pending != nil && m.pending.listener != nil {
@@ -175,8 +170,8 @@ func (m *Manager) Start() (string, error) {
 	return ocfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)), nil
 }
 
-// Callback handles a configured redirect endpoint when the browser cannot use
-// the internally managed loopback listener.
+// Callback 处理显式配置的回调地址，适用于浏览器无法访问内部 loopback 监听器
+// 的场景。
 func (m *Manager) Callback(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	p := m.pending
@@ -263,9 +258,8 @@ func (m *Manager) loadToken() (*oauth2.Token, error) {
 	return &tok, nil
 }
 
-// TokenSource returns a refresh-capable source backed by the persisted token.
-// Refreshed tokens are written back so an expired access token is transparent
-// to later uploads and downloads.
+// TokenSource 返回由持久化 Token 支持的可刷新 TokenSource。刷新后的 Token 会
+// 写回磁盘，使后续上传和下载无需感知 Access Token 过期。
 func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	tok, err := m.loadToken()
 	if err != nil {
@@ -276,8 +270,8 @@ func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	}
 	redirect := m.cfg.GoogleRedirectURI
 	if redirect == "" {
-		// The redirect URI is only needed during the code exchange. The token
-		// endpoint accepts the same client credentials for refresh requests.
+		// 回调地址只在授权码兑换阶段需要；刷新请求的 Token 接口仍接受同一组
+		// 客户端凭据。
 		redirect = "http://127.0.0.1"
 	}
 	ocfg, err := m.oauthConfig(redirect)
@@ -288,8 +282,8 @@ func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	return &persistingSource{inner: oauth2.ReuseTokenSource(tok, inner), save: m.saveToken}, nil
 }
 
-// HTTPClient returns an authenticated client with the configured request
-// timeout. Request cancellation still takes precedence over that timeout.
+// HTTPClient 返回带认证信息且使用配置请求超时的 HTTP 客户端。请求取消仍优先于
+// 此超时生效。
 func (m *Manager) HTTPClient(ctx context.Context) (*http.Client, error) {
 	source, err := m.TokenSource(ctx)
 	if err != nil {
@@ -302,8 +296,8 @@ func (m *Manager) HTTPClient(ctx context.Context) (*http.Client, error) {
 	return client, nil
 }
 
-// Disconnect revokes the current access token when possible and removes the
-// local refresh token, requiring a new browser login next time.
+// Disconnect 尽可能撤销当前 Access Token，并删除本地 Refresh Token；下次使用时
+// 需要重新通过浏览器登录。
 func (m *Manager) Disconnect(ctx context.Context) error {
 	tok, err := m.loadToken()
 	if err != nil {
@@ -327,7 +321,7 @@ func (m *Manager) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-// Status reports configuration and connection state without exposing tokens.
+// Status 返回配置和连接状态，但不会暴露任何 Token。
 func (m *Manager) Status() map[string]any {
 	id, _, credErr := m.credentials()
 	tok, tokErr := m.loadToken()
@@ -358,8 +352,7 @@ func (m *Manager) Status() map[string]any {
 	}
 }
 
-// persistingSource de-duplicates token writes while allowing oauth2 to refresh
-// the access token on demand.
+// persistingSource 在允许 oauth2 按需刷新 Access Token 的同时，去重 Token 写入。
 type persistingSource struct {
 	inner oauth2.TokenSource
 	save  func(*oauth2.Token) error

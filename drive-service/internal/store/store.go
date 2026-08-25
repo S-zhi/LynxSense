@@ -1,6 +1,5 @@
-// Package store persists upload and transfer metadata in one private JSON
-// file. Every mutation is serialized and atomically renamed so a restart can
-// recover the last acknowledged transfer position.
+// Package store 将上传和传输元数据持久化到一个私有 JSON 文件中。所有变更都会
+// 串行化并通过原子重命名写入，使服务重启后能够恢复最近确认的传输位置。
 package store
 
 import (
@@ -16,7 +15,7 @@ import (
 	"time"
 )
 
-// Upload describes a Tus-like local staging upload before it is sent to Drive.
+// Upload 描述发送到 Drive 前的类 Tus 本地暂存上传。
 type Upload struct {
 	ID        string `json:"id"`
 	Path      string `json:"path"`
@@ -29,8 +28,8 @@ type Upload struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// Transfer is the durable state-machine record for a Drive upload or Python
-// import. LocalPath and SessionURL make resumable work restartable.
+// Transfer 是 Drive 上传或 Python 导入的持久化状态机记录。LocalPath 和
+// SessionURL 使断点任务能够在重启后继续。
 type Transfer struct {
 	ID           string `json:"id"`
 	Kind         string `json:"kind"`
@@ -57,15 +56,14 @@ type stateFile struct {
 	Transfers     map[string]Transfer `json:"transfers"`
 }
 
-// Store is the concurrency-safe state repository shared by all handlers and
-// transfer workers.
+// Store 是由所有 handler 和传输 worker 共享的并发安全状态仓库。
 type Store struct {
 	path string
 	mu   sync.Mutex
 	data stateFile
 }
 
-// Open loads an existing state file or initializes an empty repository.
+// Open 加载已有状态文件；如果文件不存在，则初始化空仓库。
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
@@ -100,8 +98,8 @@ func (s *Store) mutate(fn func(*stateFile) error) error {
 }
 
 func (s *Store) saveLocked() error {
-	// Write then rename keeps readers from observing a partially written JSON
-	// document if the process is interrupted during persistence.
+	// 先写临时文件再重命名，避免进程在持久化过程中被中断时，读取方看到
+	// 不完整的 JSON 文档。
 	b, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
 		return err
@@ -116,14 +114,14 @@ func (s *Store) saveLocked() error {
 	return nil
 }
 
-// DriveFolderID returns the cached application-folder ID, if known.
+// DriveFolderID 返回已缓存的应用目录 ID；如果尚未获取则返回空字符串。
 func (s *Store) DriveFolderID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data.DriveFolderID
 }
 
-// SetDriveFolderID persists the Drive folder used by all sidecar files.
+// SetDriveFolderID 持久化所有 sidecar 文件使用的 Drive 目录。
 func (s *Store) SetDriveFolderID(id string) error {
 	return s.mutate(func(d *stateFile) error {
 		d.DriveFolderID = id
@@ -131,14 +129,14 @@ func (s *Store) SetDriveFolderID(id string) error {
 	})
 }
 
-// CreateUpload registers a new local staging upload.
+// CreateUpload 注册一个新的本地暂存上传。
 func (s *Store) CreateUpload(path, name, mime string, length int64) (Upload, error) {
 	u := Upload{ID: newID(), Path: path, Name: name, MIME: mime, Length: length, CreatedAt: now(), UpdatedAt: now()}
 	err := s.mutate(func(d *stateFile) error { d.Uploads[u.ID] = u; return nil })
 	return u, err
 }
 
-// GetUpload returns an upload snapshot without exposing mutable internal state.
+// GetUpload 返回上传快照，不暴露内部可变状态。
 func (s *Store) GetUpload(id string) (Upload, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -146,7 +144,7 @@ func (s *Store) GetUpload(id string) (Upload, bool) {
 	return u, ok
 }
 
-// UpdateUpload applies an atomic mutation and refreshes UpdatedAt.
+// UpdateUpload 原子地应用上传变更并刷新 UpdatedAt。
 func (s *Store) UpdateUpload(id string, fn func(*Upload) error) (Upload, error) {
 	var out Upload
 	err := s.mutate(func(d *stateFile) error {
@@ -165,12 +163,12 @@ func (s *Store) UpdateUpload(id string, fn func(*Upload) error) (Upload, error) 
 	return out, err
 }
 
-// DeleteUpload removes the local staging record.
+// DeleteUpload 删除本地暂存记录。
 func (s *Store) DeleteUpload(id string) error {
 	return s.mutate(func(d *stateFile) error { delete(d.Uploads, id); return nil })
 }
 
-// CreateTransfer persists a new transfer in PENDING state unless supplied.
+// CreateTransfer 持久化一个新的传输任务；未指定状态时默认为 PENDING。
 func (s *Store) CreateTransfer(t Transfer) (Transfer, error) {
 	if t.ID == "" {
 		t.ID = newID()
@@ -186,7 +184,7 @@ func (s *Store) CreateTransfer(t Transfer) (Transfer, error) {
 	return t, err
 }
 
-// GetTransfer returns a transfer snapshot.
+// GetTransfer 返回传输任务快照。
 func (s *Store) GetTransfer(id string) (Transfer, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,7 +192,7 @@ func (s *Store) GetTransfer(id string) (Transfer, bool) {
 	return t, ok
 }
 
-// UpdateTransfer applies an atomic state/progress mutation.
+// UpdateTransfer 原子地应用状态或进度变更。
 func (s *Store) UpdateTransfer(id string, fn func(*Transfer) error) (Transfer, error) {
 	var out Transfer
 	err := s.mutate(func(d *stateFile) error {
@@ -213,7 +211,7 @@ func (s *Store) UpdateTransfer(id string, fn func(*Transfer) error) (Transfer, e
 	return out, err
 }
 
-// ListTransfers returns transfers newest-updated first.
+// ListTransfers 按最近更新时间倒序返回传输任务。
 func (s *Store) ListTransfers() []Transfer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,8 +223,7 @@ func (s *Store) ListTransfers() []Transfer {
 	return result
 }
 
-// RecoverableTransfers selects non-terminal transfers that can be restarted
-// safely when the process boots again.
+// RecoverableTransfers 筛选非终态任务，以便进程启动时安全恢复。
 func (s *Store) RecoverableTransfers() []Transfer {
 	all := s.ListTransfers()
 	result := make([]Transfer, 0, len(all))

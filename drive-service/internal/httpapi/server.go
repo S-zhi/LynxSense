@@ -1,5 +1,5 @@
-// Package httpapi exposes the local HTTP contract used by the web client and
-// keeps transport concerns separate from OAuth, Drive, and transfer workers.
+// Package httpapi 对外提供 Web 客户端使用的本地 HTTP 接口，并将传输层职责与
+// OAuth、Drive 客户端和后台传输 worker 分离。
 package httpapi
 
 import (
@@ -21,8 +21,7 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/transfer"
 )
 
-// Server routes OAuth, file, upload, and transfer requests to the shared
-// process-wide service instances.
+// Server 将 OAuth、文件、上传和传输请求路由到进程内共享的服务实例。
 type Server struct {
 	cfg       *config.Config
 	auth      *oauth.Manager
@@ -31,14 +30,13 @@ type Server struct {
 	store     *store.Store
 }
 
-// New wires the HTTP facade to the single-user service dependencies.
+// New 将 HTTP 外观层与单用户服务依赖连接起来。
 func New(cfg *config.Config, auth *oauth.Manager, client *driveclient.Client, transfers *transfer.Manager, state *store.Store) *Server {
 	return &Server{cfg: cfg, auth: auth, drive: client, transfers: transfers, store: state}
 }
 
-// ServeHTTP implements the complete local API. Long-running upload/download
-// work is handed to transfer.Manager so request cancellation does not erase a
-// durable checkpoint.
+// ServeHTTP 实现完整的本地 API。长时间运行的上传/下载会交给 transfer.Manager，
+// 因此请求取消不会抹掉已持久化的断点。
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.setCommonHeaders(w, r)
 	if r.Method == http.MethodOptions {
@@ -179,8 +177,8 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, fileID str
 }
 
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
-	// The browser uploads to local disk first. This keeps the request contract
-	// independent from Drive latency and lets the worker resume after restart.
+	// 浏览器先将文件上传到本地磁盘，使请求协议不受 Drive 网络延迟影响，
+	// 并允许后台 worker 在重启后继续任务。
 	lengthHeader := r.Header.Get("X-Upload-Length")
 	if lengthHeader == "" {
 		lengthHeader = r.Header.Get("Upload-Length")
@@ -261,8 +259,8 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusConflict, fmt.Errorf("offset mismatch, server=%d", u.Offset))
 		return
 	}
-	// Only the declared remaining bytes may be written; io.CopyN below also
-	// prevents a client from accidentally consuming the next request's data.
+	// 只能写入声明的剩余字节；下面的 io.CopyN 也能防止客户端数据意外吞掉
+	// 下一个请求的内容。
 	if r.ContentLength > u.Length-offset {
 		writeError(w, http.StatusRequestEntityTooLarge, errors.New("chunk exceeds upload length"))
 		return
@@ -310,8 +308,8 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request, id st
 }
 
 func (s *Server) handleDeleteUpload(w http.ResponseWriter, id string) {
-	// A completed staging upload belongs to the Drive worker and cannot be
-	// removed through this endpoint; use transfer cancellation instead.
+	// 已完成的本地暂存上传已经交给 Drive worker，不能通过此接口删除；
+	// 如需终止，应取消对应的传输任务。
 	u, ok := s.store.GetUpload(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, errors.New("upload not found"))
@@ -364,8 +362,8 @@ func (s *Server) handleTransferAction(w http.ResponseWriter, id, action string) 
 
 func (s *Server) setCommonHeaders(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin == "http://127.0.0.1:8000" || origin == "http://localhost:8000" {
-		// The sidecar is local-only; allow the two local origins used by the
-		// Python UI while keeping arbitrary origins out of the CORS response.
+		// sidecar 仅供本地使用，只允许 Python UI 使用的两个本地来源，
+		// 不向任意来源返回 CORS 许可。
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,HEAD,DELETE,OPTIONS")
