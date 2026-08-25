@@ -609,8 +609,12 @@ const MockApi = (() => {
     },
     async getRetention() {
       await delay(40);
-      try { return JSON.parse(localStorage.getItem("subtrans_mock_retention") || "null") || { days: null, updatedAt: null }; }
-      catch (e) { return { days: null, updatedAt: null }; }
+      try {
+        return JSON.parse(localStorage.getItem("subtrans_mock_retention") || "null")
+          || { days: 30, updatedAt: null };
+      } catch (e) {
+        return { days: 30, updatedAt: null };
+      }
     },
     async putRetention(days) {
       await delay(40);
