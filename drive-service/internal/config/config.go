@@ -23,7 +23,6 @@ type Config struct {
 	PythonAPIToken         string   `json:"python_api_token"`
 	GoogleClientID         string   `json:"google_client_id"`
 	GoogleClientSecret     string   `json:"google_client_secret"`
-	GoogleRedirectURI      string   `json:"google_redirect_uri"`
 	GoogleClientConfigFile string   `json:"google_client_config_file"`
 	GoogleScopes           []string `json:"google_scopes"`
 	DriveFolderID          string   `json:"drive_folder_id"`

@@ -120,26 +120,19 @@ func (m *Manager) oauthConfig(redirect string) (*oauth2.Config, error) {
 	}, nil
 }
 
-// Start 启动浏览器授权流程。未配置回调地址时，会创建临时 loopback 监听器，
-// 这是本地 Desktop OAuth 客户端推荐的方式。
+// Start 启动浏览器授权流程，并始终创建随机端口的临时 loopback 监听器。
+// 这是本地 Desktop OAuth 客户端推荐的动态回调方式。
 func (m *Manager) Start() (string, error) {
-	redirect := m.cfg.GoogleRedirectURI
-	var listener net.Listener
-	var err error
-	if redirect == "" {
-		// 绑定端口 0 让操作系统自动选择未占用的 loopback 端口，避免固定端口，
-		// 也降低与其他本地服务冲突的可能性。
-		listener, err = net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return "", fmt.Errorf("start OAuth loopback listener: %w", err)
-		}
-		redirect = "http://" + listener.Addr().String()
+	// 绑定端口 0 让操作系统自动选择未占用的 loopback 端口，避免固定端口，
+	// 也降低与其他本地服务冲突的可能性。
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("start OAuth loopback listener: %w", err)
 	}
+	redirect := "http://" + listener.Addr().String()
 	ocfg, err := m.oauthConfig(redirect)
 	if err != nil {
-		if listener != nil {
-			_ = listener.Close()
-		}
+		_ = listener.Close()
 		return "", err
 	}
 	state, err := randomString(32)
@@ -160,28 +153,13 @@ func (m *Manager) Start() (string, error) {
 	m.pending = p
 	m.mu.Unlock()
 
-	if listener != nil {
-		p.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			m.finishCallback(w, r, p)
-		})}
-		go func() {
-			_ = p.server.Serve(listener)
-		}()
-	}
+	p.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.finishCallback(w, r, p)
+	})}
+	go func() {
+		_ = p.server.Serve(listener)
+	}()
 	return ocfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)), nil
-}
-
-// Callback 处理显式配置的回调地址，适用于浏览器无法访问内部 loopback 监听器
-// 的场景。
-func (m *Manager) Callback(w http.ResponseWriter, r *http.Request) {
-	m.mu.Lock()
-	p := m.pending
-	m.mu.Unlock()
-	if p == nil {
-		http.Error(w, "没有进行中的 Google OAuth 授权", http.StatusBadRequest)
-		return
-	}
-	m.finishCallback(w, r, p)
 }
 
 // finishCallback 校验 OAuth state 和 PKCE 参数，兑换授权码并保存 Refresh Token。
@@ -273,13 +251,9 @@ func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	if tok == nil || tok.RefreshToken == "" {
 		return nil, errors.New("尚未完成 Google Drive 授权")
 	}
-	redirect := m.cfg.GoogleRedirectURI
-	if redirect == "" {
-		// 回调地址只在授权码兑换阶段需要；刷新请求的 Token 接口仍接受同一组
-		// 客户端凭据。
-		redirect = "http://127.0.0.1"
-	}
-	ocfg, err := m.oauthConfig(redirect)
+	// 刷新 Token 不会再次发送 redirect_uri；这里仅提供一个占位值构造
+	// oauth2.Config，真正的动态回调地址只在首次授权码兑换时使用。
+	ocfg, err := m.oauthConfig("http://127.0.0.1")
 	if err != nil {
 		return nil, err
 	}

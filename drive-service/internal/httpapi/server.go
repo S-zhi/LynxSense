@@ -60,10 +60,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, url, http.StatusFound)
 		return
 	}
-	if r.URL.Path == "/api/oauth/google/callback" && r.Method == http.MethodGet {
-		s.auth.Callback(w, r)
-		return
-	}
 	if r.URL.Path == "/api/oauth/google/disconnect" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
 		if err := s.auth.Disconnect(r.Context()); err != nil {
 			writeError(w, http.StatusBadGateway, err)
