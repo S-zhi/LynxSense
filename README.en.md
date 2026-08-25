@@ -82,16 +82,34 @@ SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 
 Credentials are read only by the business service. Never put them in MCP tool arguments or commit them to the repository.
 
-### 3. Start the business service
+### 3. Configure Google Drive (optional)
+
+The Google Drive sidecar reads OAuth application credentials from a local file. The file is ignored by Git and must not be committed:
 
 ```bash
-uv run uvicorn src.handler.app:app --reload --port 8000
+cp drive-service/config.example.json drive-service/config.local.json
+```
+
+Fill in `google_client_id` and `google_client_secret` in `drive-service/config.local.json`, or place the Google Desktop OAuth JSON at `drive-service/drive-data/oauth_client.json`. On first use, open the **Google Drive** page and click the authorization button. The browser will use a dynamic loopback callback; the Refresh Token stays in the local `drive-data` directory.
+
+### 4. Start the business service and Drive sidecar
+
+```bash
+./scripts/start.sh
+```
+
+To use another Drive configuration file:
+
+```bash
+DRIVE_CONFIG=/absolute/path/to/config.local.json ./scripts/start.sh
 ```
 
 Verify the service:
 
 ```bash
 curl http://127.0.0.1:8000/api/health
+# {"ok":true}
+curl http://127.0.0.1:8787/healthz
 # {"ok":true}
 ```
 
@@ -165,7 +183,7 @@ See [MCP Server documentation](./docs/mcp-server.md) and the [MCP Agent guide](.
 
 ## 🖥️ Web Workbench
 
-The Web workbench and API share port `8000`; no separate frontend server is required.
+The Web workbench and API share port `8000`; no separate frontend server is required. The Google Drive page talks to the local sidecar on port `8787`.
 
 1. Open <http://localhost:8000/>.
 2. Paste a video page URL or drop in a local video.
@@ -268,9 +286,10 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before contributing. Report security i
 | --- | --- |
 | Hard subtitles report a missing `subtitles` filter | Install `ffmpeg-full`, or use `--burn soft` |
 | Download fails or the site requires authentication | Check the URL and set `SUBTRANS_COOKIES` to a cookies file |
-| MCP returns `BUSINESS_UNAVAILABLE` | Start the `uvicorn` business service, then rerun the setup check |
+| MCP returns `BUSINESS_UNAVAILABLE` | Run `./scripts/start.sh` and confirm both ports 8000 and 8787 are running |
 | MCP returns `NOT_INITIALIZED` | Complete `.env` credentials and restart the business service |
 | Frontend cannot reach the backend | Confirm <http://localhost:8000/api/health> is available |
+| Google Drive page reports sidecar offline | Confirm `./scripts/start.sh` is running and check <http://127.0.0.1:8787/healthz> |
 
 ## 📄 License & Compliance
 

@@ -82,16 +82,34 @@ SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 
 密钥只由业务服务读取，不应写入 MCP 参数或提交到仓库。
 
-### 3. 启动业务服务
+### 3. 配置 Google Drive（需要云盘功能时）
+
+Google Drive sidecar 使用本地配置文件读取 OAuth 应用身份；该文件已被 Git 忽略，不会提交到仓库：
 
 ```bash
-uv run uvicorn src.handler.app:app --reload --port 8000
+cp drive-service/config.example.json drive-service/config.local.json
+```
+
+然后在 `drive-service/config.local.json` 中填写 `google_client_id`、`google_client_secret`，或将 Google Desktop OAuth JSON 放到 `drive-service/drive-data/oauth_client.json`。首次使用时，在网页的 **Google Drive** 页面点击授权，浏览器会打开动态 loopback 回调；Refresh Token 会保存在本地 `drive-data` 目录。
+
+### 4. 启动业务服务和 Drive sidecar
+
+```bash
+./scripts/start.sh
+```
+
+如需指定其他 Drive 配置文件，可使用：
+
+```bash
+DRIVE_CONFIG=/absolute/path/to/config.local.json ./scripts/start.sh
 ```
 
 验证服务：
 
 ```bash
 curl http://127.0.0.1:8000/api/health
+# {"ok":true}
+curl http://127.0.0.1:8787/healthz
 # {"ok":true}
 ```
 
@@ -165,7 +183,7 @@ SUBTRANS_MCP_TRANSPORT=streamable-http \
 
 ## 🖥️ Web 工作台
 
-Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务。
+Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务；Google Drive 页面会通过 CORS 访问同机的 `8787` sidecar。
 
 1. 打开 <http://localhost:8000/>。
 2. 粘贴视频页面地址，或拖入本地视频。
@@ -268,9 +286,10 @@ tests/             Python 测试
 | --- | --- |
 | 硬字幕提示缺少 `subtitles` filter | 安装 `ffmpeg-full`，或改用 `--burn soft` |
 | 下载失败或网站要求登录 | 检查 URL，并通过 `SUBTRANS_COOKIES` 指定 cookies 文件 |
-| MCP 返回 `BUSINESS_UNAVAILABLE` | 先启动 `uvicorn` 业务服务，再运行环境检查 |
+| MCP 返回 `BUSINESS_UNAVAILABLE` | 先运行 `./scripts/start.sh`，确认 8000 和 8787 端口都已启动 |
 | MCP 返回 `NOT_INITIALIZED` | 补齐 `.env` 中的密钥并重启业务服务 |
 | 前端无法连接后端 | 确认 <http://localhost:8000/api/health> 可访问 |
+| Google Drive 页面显示 sidecar 离线 | 确认 `./scripts/start.sh` 已启动，并检查 <http://127.0.0.1:8787/healthz> |
 
 ## 📄 许可证与合规
 

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+# 同时启动 Python 业务服务和 Google Drive sidecar。
+# OAuth Client 与 Refresh Token 只从本地 config.local.json / drive-data 读取。
+
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DRIVE_CONFIG="${DRIVE_CONFIG:-${ROOT_DIR}/drive-service/config.local.json}"
+API_PORT="${API_PORT:-8000}"
+
+if [[ "${DRIVE_CONFIG}" != /* ]]; then
+  DRIVE_CONFIG="${ROOT_DIR}/${DRIVE_CONFIG}"
+fi
+
+if [[ ! -f "${DRIVE_CONFIG}" ]]; then
+  echo "缺少 Google Drive 配置：${DRIVE_CONFIG}" >&2
+  echo "请先执行：cp drive-service/config.example.json drive-service/config.local.json" >&2
+  exit 1
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "找不到 uv，请先安装 https://docs.astral.sh/uv/" >&2
+  exit 1
+fi
+if ! command -v go >/dev/null 2>&1; then
+  echo "找不到 Go，请先安装 Go 1.23 或更高版本" >&2
+  exit 1
+fi
+
+api_pid=""
+drive_pid=""
+
+stop_process() {
+  local pid="$1"
+  [[ -z "${pid}" ]] && return 0
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill "${pid}" 2>/dev/null || true
+    # go run 可能额外派生一个编译后的 sidecar 进程；只清理这个 PID 的直接子进程。
+    if command -v pgrep >/dev/null 2>&1; then
+      local child
+      child="$(pgrep -P "${pid}" 2>/dev/null || true)"
+      for child_pid in ${child}; do
+        kill "${child_pid}" 2>/dev/null || true
+      done
+    fi
+  fi
+}
+
+cleanup() {
+  stop_process "${api_pid}"
+  stop_process "${drive_pid}"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+echo "Subtitles AI API      → http://127.0.0.1:${API_PORT}"
+echo "Google Drive sidecar  → ${DRIVE_CONFIG}"
+echo "按 Ctrl-C 同时停止两个服务。"
+
+(
+  cd "${ROOT_DIR}/drive-service"
+  exec go run ./cmd/server -config "${DRIVE_CONFIG}"
+) &
+drive_pid=$!
+
+(
+  cd "${ROOT_DIR}"
+  exec uv run uvicorn src.handler.app:app --reload --port "${API_PORT}"
+) &
+api_pid=$!
+
+# macOS 默认 Bash 没有 wait -n；轮询两个已知 PID 可保持脚本兼容性。
+while kill -0 "${api_pid}" 2>/dev/null && kill -0 "${drive_pid}" 2>/dev/null; do
+  sleep 1
+done
+
+if ! kill -0 "${api_pid}" 2>/dev/null; then
+  wait "${api_pid}" || true
+else
+  wait "${drive_pid}" || true
+fi

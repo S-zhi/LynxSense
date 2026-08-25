@@ -1,6 +1,8 @@
 """FastAPI 应用装配：创建 app、配置 CORS、挂载各业务路由 + 前端静态文件。
 
-启动：
+启动（推荐，同时启动 Google Drive sidecar）：
+    ./scripts/start.sh
+仅启动 FastAPI：
     uv run uvicorn src.handler.app:app --reload --port 8000
     API 文档：http://localhost:8000/docs
     前端页面：http://localhost:8000/
