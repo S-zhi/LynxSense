@@ -23,9 +23,12 @@ import (
 )
 
 const (
-	apiBase    = "https://www.googleapis.com/drive/v3"
-	uploadBase = "https://www.googleapis.com/upload/drive/v3"
-	folderMIME = "application/vnd.google-apps.folder"
+	apiBase         = "https://www.googleapis.com/drive/v3"
+	uploadBase      = "https://www.googleapis.com/upload/drive/v3"
+	folderMIME      = "application/vnd.google-apps.folder"
+	rootFolderName  = "Subtitles AI"
+	appPropertyKey  = "subtitles_ai"
+	rootPropertyKey = "subtitles_ai_root"
 )
 
 // Capabilities 描述 HTTP API 所需的 Drive 文件权限。
@@ -35,23 +38,26 @@ type Capabilities struct {
 
 // File 是 sidecar 对外暴露的 Drive 文件元数据子集。
 type File struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	MimeType       string       `json:"mimeType"`
-	Size           int64        `json:"size,string"`
-	ModifiedTime   string       `json:"modifiedTime"`
-	Md5Checksum    string       `json:"md5Checksum"`
-	WebContentLink string       `json:"webContentLink"`
-	Capabilities   Capabilities `json:"capabilities"`
-	Parents        []string     `json:"parents"`
-	Trashed        bool         `json:"trashed"`
-	Etag           string       `json:"etag"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	MimeType       string            `json:"mimeType"`
+	Size           int64             `json:"size,string"`
+	ModifiedTime   string            `json:"modifiedTime"`
+	Md5Checksum    string            `json:"md5Checksum"`
+	WebContentLink string            `json:"webContentLink"`
+	Capabilities   Capabilities      `json:"capabilities"`
+	Parents        []string          `json:"parents"`
+	Trashed        bool              `json:"trashed"`
+	Etag           string            `json:"etag"`
+	AppProperties  map[string]string `json:"appProperties"`
 }
 
 // FileList 是 Drive 文件接口的分页响应。
 type FileList struct {
 	NextPageToken string `json:"nextPageToken"`
 	Files         []File `json:"files"`
+	RootFolderID  string `json:"rootFolderId,omitempty"`
+	CurrentFolder *File  `json:"currentFolder,omitempty"`
 }
 
 // Client 持有已认证的 Drive 通道和缓存的应用目录 ID，可由所有 HTTP handler
@@ -70,57 +76,228 @@ func NewClient(cfg *config.Config, auth *oauth.Manager, state *store.Store) *Cli
 
 // ensureFolder 获取或创建 sidecar 专用的 Drive 文件夹，并将其 ID 缓存到状态仓库。
 func (c *Client) ensureFolder(ctx context.Context) (string, error) {
-	if c.cfg.DriveFolderID != "" {
+	if c == nil {
+		return "", errors.New("Drive client is nil")
+	}
+	if c.cfg != nil && c.cfg.DriveFolderID != "" {
 		return c.cfg.DriveFolderID, nil
 	}
 	// 将目录 ID 缓存到持久化状态中，避免每次重启都查询 Drive，也避免重复创建目录。
-	if id := c.store.DriveFolderID(); id != "" {
-		return id, nil
+	if c.store != nil {
+		if id := c.store.DriveFolderID(); id != "" {
+			return id, nil
+		}
 	}
-	q := fmt.Sprintf("name = 'Subtitles AI' and mimeType = '%s' and trashed = false", folderMIME)
+	// Prefer the explicit marker.  The name-only query below is retained for
+	// installations created by older versions of the sidecar.
+	q := fmt.Sprintf("appProperties has { key = '%s' and value = 'true' } and mimeType = '%s' and trashed = false", rootPropertyKey, folderMIME)
 	values := url.Values{
-		"q": {q}, "spaces": {"drive"}, "pageSize": {"10"},
-		"fields": {"files(id,name,mimeType,parents)"},
+		"q":                         {q},
+		"spaces":                    {"drive"},
+		"pageSize":                  {"10"},
+		"supportsAllDrives":         {"true"},
+		"includeItemsFromAllDrives": {"true"},
+		"fields":                    {"files(id,name,mimeType,parents,trashed,appProperties)"},
 	}
 	var result FileList
 	if err := c.doJSON(ctx, http.MethodGet, apiBase+"/files?"+values.Encode(), nil, nil, &result); err != nil {
 		return "", fmt.Errorf("find Drive folder: %w", err)
 	}
-	if len(result.Files) > 0 {
-		if err := c.store.SetDriveFolderID(result.Files[0].ID); err != nil {
+	if rootID := firstUsableFolderID(result.Files); rootID != "" {
+		if err := c.cacheRootID(rootID); err != nil {
 			return "", err
 		}
-		return result.Files[0].ID, nil
+		return rootID, nil
 	}
-	body, _ := json.Marshal(map[string]any{"name": "Subtitles AI", "mimeType": folderMIME})
-	var folder File
-	if err := c.doJSON(ctx, http.MethodPost, apiBase+"/files?supportsAllDrives=true&fields=id,name,mimeType,parents", bytes.NewReader(body), map[string]string{"Content-Type": "application/json"}, &folder); err != nil {
+	q = fmt.Sprintf("name = '%s' and mimeType = '%s' and trashed = false", rootFolderName, folderMIME)
+	values.Set("q", q)
+	result = FileList{}
+	if err := c.doJSON(ctx, http.MethodGet, apiBase+"/files?"+values.Encode(), nil, nil, &result); err != nil {
+		return "", fmt.Errorf("find Drive folder: %w", err)
+	}
+	if rootID := firstUsableFolderID(result.Files); rootID != "" {
+		if err := c.cacheRootID(rootID); err != nil {
+			return "", err
+		}
+		return rootID, nil
+	}
+	folder, err := c.createFolder(ctx, rootFolderName, "", map[string]string{rootPropertyKey: "true"})
+	if err != nil {
 		return "", fmt.Errorf("create Drive folder: %w", err)
 	}
 	if folder.ID == "" {
 		return "", errors.New("Drive folder response has no id")
 	}
-	if err := c.store.SetDriveFolderID(folder.ID); err != nil {
+	if c.store != nil {
+		if err := c.store.SetDriveFolderID(folder.ID); err != nil {
+			return "", err
+		}
+	}
+	return folder.ID, nil
+}
+
+func firstUsableFolderID(files []File) string {
+	for _, file := range files {
+		// The Drive query constrains mimeType and trashed. Keep the ID-only
+		// acceptance for older responses that omitted optional projections.
+		if file.ID != "" && !file.Trashed {
+			return file.ID
+		}
+	}
+	return ""
+}
+
+func (c *Client) cacheRootID(id string) error {
+	if c.store == nil {
+		return nil
+	}
+	return c.store.SetDriveFolderID(id)
+}
+
+// IsFolder reports whether metadata describes a Drive folder.
+func IsFolder(file *File) bool { return file != nil && file.MimeType == folderMIME }
+
+// CreateFolder creates a folder below parentID. An empty parentID means the
+// sidecar root; callers can therefore create nested folders without knowing
+// the configured root ID.
+func (c *Client) CreateFolder(ctx context.Context, name, parentID string, appProperties map[string]string) (*File, error) {
+	folderName, err := cleanDriveName(name)
+	if err != nil {
+		return nil, err
+	}
+	if parentID == "" {
+		parentID, err = c.ensureFolder(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return c.createFolder(ctx, folderName, parentID, appProperties)
+}
+
+func (c *Client) createFolder(ctx context.Context, name, parentID string, appProperties map[string]string) (*File, error) {
+	props := make(map[string]string, len(appProperties)+1)
+	for k, v := range appProperties {
+		props[k] = v
+	}
+	// Every folder/file created by this client remains identifiable as an
+	// application-owned object.  Callers may add their own properties, but may
+	// not turn off the ownership marker.
+	props[appPropertyKey] = "true"
+	metadata := map[string]any{"name": name, "mimeType": folderMIME, "appProperties": props}
+	if parentID != "" {
+		metadata["parents"] = []string{parentID}
+	}
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	var folder File
+	endpoint := apiBase + "/files?supportsAllDrives=true&fields=id,name,mimeType,parents,trashed,appProperties"
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, bytes.NewReader(body), map[string]string{"Content-Type": "application/json"}, &folder); err != nil {
+		return nil, err
+	}
+	if folder.ID == "" || !IsFolder(&folder) {
+		return nil, errors.New("Drive folder response is invalid")
+	}
+	return &folder, nil
+}
+
+// ValidateFolderUnderRoot resolves folderID and verifies it is a live folder
+// strictly below the sidecar root. It rejects the root itself and unrelated
+// Drive folders.
+func (c *Client) ValidateFolderUnderRoot(ctx context.Context, folderID string) (*File, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return nil, errors.New("Drive folder ID is empty")
+	}
+	rootID, err := c.ensureFolder(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if folderID == rootID {
+		return nil, errors.New("Drive root folder cannot be used as a target")
+	}
+	seen := map[string]bool{folderID: true}
+	queue := []string{folderID}
+	var target *File
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		file, err := c.Metadata(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if file == nil {
+			return nil, errors.New("Drive target metadata is empty")
+		}
+		if file.Trashed {
+			return nil, errors.New("Drive target folder is in the trash")
+		}
+		if !IsFolder(file) {
+			if id == folderID {
+				return nil, errors.New("Drive target is not a folder")
+			}
+			return nil, errors.New("Drive target has a non-folder parent")
+		}
+		if target == nil {
+			target = file
+		}
+		for _, parent := range file.Parents {
+			parent = strings.TrimSpace(parent)
+			if parent == rootID {
+				return target, nil
+			}
+			if parent != "" && !seen[parent] {
+				seen[parent] = true
+				queue = append(queue, parent)
+			}
+		}
+	}
+	return nil, errors.New("Drive target folder is outside the sidecar root")
+}
+
+// ResolveTargetFolder is an explicit alias for callers that need the
+// validated metadata rather than only a boolean check.
+func (c *Client) ResolveTargetFolder(ctx context.Context, folderID string) (*File, error) {
+	return c.ValidateFolderUnderRoot(ctx, folderID)
+}
+
+// ResolveTargetFolderID validates a target and returns its stable Drive ID.
+// It is useful to callers that do not need to expose the full metadata object.
+func (c *Client) ResolveTargetFolderID(ctx context.Context, folderID string) (string, error) {
+	folder, err := c.ValidateFolderUnderRoot(ctx, folderID)
+	if err != nil {
 		return "", err
 	}
 	return folder.ID, nil
 }
 
 // List 返回此 sidecar 应用目录下的文件。
-func (c *Client) List(ctx context.Context, pageToken string, pageSize int64) (*FileList, error) {
-	folderID, err := c.ensureFolder(ctx)
+func (c *Client) List(ctx context.Context, parentID, pageToken string, pageSize int64) (*FileList, error) {
+	rootID, err := c.ensureFolder(ctx)
 	if err != nil {
 		return nil, err
+	}
+	parentID = strings.TrimSpace(parentID)
+	var currentFolder *File
+	if parentID == "" || parentID == rootID {
+		parentID = rootID
+		currentFolder = &File{ID: rootID, Name: rootFolderName, MimeType: folderMIME}
+	} else {
+		currentFolder, err = c.ValidateFolderUnderRoot(ctx, parentID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if pageSize <= 0 || pageSize > 1000 {
 		pageSize = 100
 	}
-	q := fmt.Sprintf("'%s' in parents and trashed = false", escapeQueryLiteral(folderID))
+	q := fmt.Sprintf("'%s' in parents and trashed = false", escapeQueryLiteral(parentID))
 	values := url.Values{
 		"q": {q}, "spaces": {"drive"}, "pageSize": {strconv.FormatInt(pageSize, 10)},
 		"orderBy": {"modifiedTime desc"}, "supportsAllDrives": {"true"},
 		"includeItemsFromAllDrives": {"true"},
-		"fields":                    {"nextPageToken,files(id,name,mimeType,size,modifiedTime,md5Checksum,webContentLink,capabilities,parents,trashed)"},
+		"fields":                    {"nextPageToken,files(id,name,mimeType,size,modifiedTime,md5Checksum,webContentLink,capabilities,parents,trashed,appProperties)"},
 	}
 	if pageToken != "" {
 		values.Set("pageToken", pageToken)
@@ -129,13 +306,15 @@ func (c *Client) List(ctx context.Context, pageToken string, pageSize int64) (*F
 	if err := c.doJSON(ctx, http.MethodGet, apiBase+"/files?"+values.Encode(), nil, nil, &result); err != nil {
 		return nil, err
 	}
+	result.RootFolderID = rootID
+	result.CurrentFolder = currentFolder
 	return &result, nil
 }
 
 // Metadata 获取单个 Drive 文件的元数据。
 func (c *Client) Metadata(ctx context.Context, fileID string) (*File, error) {
 	values := url.Values{
-		"fields":            {"id,name,mimeType,size,modifiedTime,md5Checksum,capabilities,trashed,parents"},
+		"fields":            {"id,name,mimeType,size,modifiedTime,md5Checksum,capabilities,trashed,parents,appProperties"},
 		"supportsAllDrives": {"true"},
 	}
 	var result File
@@ -187,27 +366,41 @@ func (c *Client) DownloadRange(ctx context.Context, fileID, rangeHeader string) 
 // UploadSession 标识一个 Drive 断点上传会话。
 type UploadSession struct{ URL string }
 
-// StartUploadSession 创建断点上传会话并返回不透明的会话 URL。调用方可以安全地
-// 重试单个分片，而无需重复发送已经确认的字节。
+// StartUploadSession creates a resumable upload in the application root. It
+// preserves the original API for callers that do not need folder placement.
 func (c *Client) StartUploadSession(ctx context.Context, name, mime string, size int64) (UploadSession, error) {
+	return c.StartUploadSessionInFolder(ctx, name, mime, size, "", nil)
+}
+
+// StartUploadSessionInFolder 创建断点上传会话并返回不透明的会话 URL。调用方可以安全地
+// 重试单个分片，而无需重复发送已经确认的字节。
+func (c *Client) StartUploadSessionInFolder(ctx context.Context, name, mime string, size int64, parentID string, appProperties map[string]string) (UploadSession, error) {
 	if size <= 0 {
 		return UploadSession{}, errors.New("Drive upload size must be positive")
+	}
+	name, err := cleanDriveName(name)
+	if err != nil {
+		return UploadSession{}, err
 	}
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
-	folderID, err := c.ensureFolder(ctx)
-	if err != nil {
-		return UploadSession{}, err
+	if parentID == "" {
+		parentID, err = c.ensureFolder(ctx)
+		if err != nil {
+			return UploadSession{}, err
+		}
 	}
 	client, err := c.oauth.HTTPClient(ctx)
 	if err != nil {
 		return UploadSession{}, err
 	}
-	metadata := map[string]any{
-		"name": filepath.Base(name), "mimeType": mime, "parents": []string{folderID},
-		"appProperties": map[string]string{"subtitles_ai": "true"},
+	props := make(map[string]string, len(appProperties)+1)
+	for k, v := range appProperties {
+		props[k] = v
 	}
+	props[appPropertyKey] = "true"
+	metadata := map[string]any{"name": name, "mimeType": mime, "parents": []string{parentID}, "appProperties": props}
 	body, err := json.Marshal(metadata)
 	if err != nil {
 		return UploadSession{}, err
@@ -233,6 +426,20 @@ func (c *Client) StartUploadSession(ctx context.Context, name, mime string, size
 		return UploadSession{}, errors.New("Drive upload session response has no Location header")
 	}
 	return UploadSession{URL: location}, nil
+}
+
+// cleanDriveName normalizes names accepted by Drive file/folder creation and
+// rejects values that would otherwise become the current directory marker.
+func cleanDriveName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("Drive file name is empty")
+	}
+	name = filepath.Base(name)
+	if name == "" || name == "." || name == ".." || name == string(filepath.Separator) {
+		return "", errors.New("Drive file name is invalid")
+	}
+	return name, nil
 }
 
 // ChunkResult 表示 Drive 已确认的断点上传进度。
