@@ -13,7 +13,8 @@ app.db
 app.db-shm
 app.db-wal
 .ci
-
+.worktrees
 
 /README.yt-dlp.zh-CN.md
 /skill-todo.md
+drive-service/drive-data/**

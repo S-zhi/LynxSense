@@ -1,0 +1,5 @@
+config.local.json
+drive-data/
+oauth_client.json
+*.log
+*.tmp
