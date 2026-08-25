@@ -88,6 +88,7 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// mutate 在互斥锁内执行状态变更，并在成功后立即持久化整个状态文件。
 func (s *Store) mutate(fn func(*stateFile) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,6 +98,7 @@ func (s *Store) mutate(fn func(*stateFile) error) error {
 	return s.saveLocked()
 }
 
+// saveLocked 在调用方已持有互斥锁时，以临时文件加原子重命名保存完整状态。
 func (s *Store) saveLocked() error {
 	// 先写临时文件再重命名，避免进程在持久化过程中被中断时，读取方看到
 	// 不完整的 JSON 文档。
@@ -235,6 +237,7 @@ func (s *Store) RecoverableTransfers() []Transfer {
 	return result
 }
 
+// newID 生成随机十六进制 ID；系统随机源不可用时回退到时间戳。
 func newID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -243,4 +246,5 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+// now 返回统一使用 UTC 和 RFC3339Nano 格式的当前时间字符串。
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

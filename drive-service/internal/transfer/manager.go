@@ -155,6 +155,7 @@ func (m *Manager) Cancel(id string) error {
 	return nil
 }
 
+// start 为任务创建独立取消上下文，并保证同一任务不会并发启动多个 worker。
 func (m *Manager) start(id string) {
 	m.mu.Lock()
 	if _, exists := m.cancels[id]; exists {
@@ -193,6 +194,7 @@ func (m *Manager) start(id string) {
 	}()
 }
 
+// cancel 查找任务对应的取消函数，并终止其当前网络或磁盘操作。
 func (m *Manager) cancel(id string) {
 	m.mu.Lock()
 	if cancel, ok := m.cancels[id]; ok {
@@ -201,6 +203,7 @@ func (m *Manager) cancel(id string) {
 	m.mu.Unlock()
 }
 
+// runDriveUpload 校验本地暂存文件，通过 Drive resumable session 分片上传，并保存进度。
 func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateTransferring; return nil }); err != nil {
 		return err
@@ -284,6 +287,7 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 	}
 }
 
+// runPythonImport 下载 Drive 文件到本地，校验 MD5 后以 multipart 形式提交 Python API。
 func (m *Manager) runPythonImport(ctx context.Context, id string) error {
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateTransferring; return nil }); err != nil {
 		return err
@@ -357,6 +361,7 @@ func (m *Manager) runPythonImport(ctx context.Context, id string) error {
 	return err
 }
 
+// downloadToFile 从已存在的 .part 文件大小恢复 Range 下载，完成后原子改名为正式文件。
 func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPath, readyPath string, total int64) error {
 	file, err := os.OpenFile(partPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -464,6 +469,7 @@ func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPa
 	}
 }
 
+// cleanupImportFiles 删除指定导入任务产生的临时文件和已完成文件。
 func (m *Manager) cleanupImportFiles(transferID string) {
 	paths, err := filepath.Glob(filepath.Join(m.cfg.StagingDir(), transferID+"-*"))
 	if err != nil {
@@ -474,6 +480,7 @@ func (m *Manager) cleanupImportFiles(transferID string) {
 	}
 }
 
+// postPythonUpload 流式构造 multipart 请求，将已下载文件提交到 Python 上传接口。
 func (m *Manager) postPythonUpload(ctx context.Context, transferID, path, name string) error {
 	if m.cfg.PythonBaseURL == "" {
 		return errors.New("python_base_url 未配置")
@@ -532,6 +539,7 @@ func (m *Manager) postPythonUpload(ctx context.Context, transferID, path, name s
 	return nil
 }
 
+// md5File 流式计算文件的 MD5，用于与 Drive 元数据进行完整性校验。
 func md5File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -545,6 +553,7 @@ func md5File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// retrySleep 在下载失败后等待固定间隔，并响应任务取消。
 func retrySleep(ctx context.Context) error {
 	t := time.NewTimer(2 * time.Second)
 	defer t.Stop()

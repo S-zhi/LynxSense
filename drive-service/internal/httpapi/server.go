@@ -127,6 +127,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, errors.New("route not found"))
 }
 
+// handleListFiles 解析分页参数并返回 Drive 应用目录中的文件列表。
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	pageSize, _ := strconv.ParseInt(r.URL.Query().Get("pageSize"), 10, 64)
 	files, err := s.drive.List(r.Context(), r.URL.Query().Get("pageToken"), pageSize)
@@ -137,6 +138,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, files)
 }
 
+// handleDeleteFile 将指定 Drive 文件移入回收站并返回空响应。
 func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request, fileID string) {
 	if err := s.drive.Trash(r.Context(), fileID); err != nil {
 		writeDriveError(w, err)
@@ -145,6 +147,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request, fileID
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleDownload 将 Drive 媒体响应转发给客户端，并保留 Range 相关响应头。
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, fileID string) {
 	metadata, response, err := s.drive.DownloadRange(r.Context(), fileID, r.Header.Get("Range"))
 	if err != nil {
@@ -167,6 +170,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, fileID s
 	_, _ = io.Copy(w, response.Body)
 }
 
+// handleImport 创建一个异步 Drive 到 Python 流水线的导入任务。
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, fileID string) {
 	t, err := s.transfers.StartPythonImport(fileID)
 	if err != nil {
@@ -176,6 +180,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, fileID str
 	writeJSON(w, http.StatusAccepted, t)
 }
 
+// handleCreateUpload 创建本地暂存上传记录，并返回后续分片上传地址。
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	// 浏览器先将文件上传到本地磁盘，使请求协议不受 Drive 网络延迟影响，
 	// 并允许后台 worker 在重启后继续任务。
@@ -230,6 +235,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUploadChunk 处理 HEAD 进度查询和 PATCH 分片写入，并在完成后排队 Drive 上传。
 func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request, id string) {
 	u, ok := s.store.GetUpload(id)
 	if !ok {
@@ -307,6 +313,7 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request, id st
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleDeleteUpload 删除尚未进入 Drive worker 的本地暂存上传。
 func (s *Server) handleDeleteUpload(w http.ResponseWriter, id string) {
 	// 已完成的本地暂存上传已经交给 Drive worker，不能通过此接口删除；
 	// 如需终止，应取消对应的传输任务。
@@ -330,6 +337,7 @@ func (s *Server) handleDeleteUpload(w http.ResponseWriter, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleTransferGet 返回单个传输任务的当前状态和进度。
 func (s *Server) handleTransferGet(w http.ResponseWriter, id string) {
 	t, ok := s.store.GetTransfer(id)
 	if !ok {
@@ -339,6 +347,7 @@ func (s *Server) handleTransferGet(w http.ResponseWriter, id string) {
 	writeJSON(w, http.StatusOK, t)
 }
 
+// handleTransferAction 执行传输任务的暂停、恢复或取消操作。
 func (s *Server) handleTransferAction(w http.ResponseWriter, id, action string) {
 	var err error
 	switch action {
@@ -360,6 +369,7 @@ func (s *Server) handleTransferAction(w http.ResponseWriter, id, action string) 
 	writeJSON(w, http.StatusOK, t)
 }
 
+// setCommonHeaders 设置本地前端所需的 CORS、允许方法和可暴露响应头。
 func (s *Server) setCommonHeaders(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin == "http://127.0.0.1:8000" || origin == "http://localhost:8000" {
 		// sidecar 仅供本地使用，只允许 Python UI 使用的两个本地来源，
@@ -372,6 +382,7 @@ func (s *Server) setCommonHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", "Origin")
 }
 
+// writeDriveError 将 Drive/OAuth 错误映射为适合前端处理的 HTTP 状态码。
 func writeDriveError(w http.ResponseWriter, err error) {
 	status := http.StatusBadGateway
 	message := err.Error()
@@ -384,16 +395,19 @@ func writeDriveError(w http.ResponseWriter, err error) {
 	writeError(w, status, err)
 }
 
+// writeError 以统一 JSON 格式写入错误响应。
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]any{"error": err.Error()})
 }
 
+// writeJSON 设置 JSON 响应头并编码响应正文。
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+// copyHeader 将指定的非空响应头从源请求复制到目标响应。
 func copyHeader(dst, src http.Header, keys ...string) {
 	for _, key := range keys {
 		if value := src.Get(key); value != "" {
@@ -402,6 +416,7 @@ func copyHeader(dst, src http.Header, keys ...string) {
 	}
 }
 
+// splitPath 清理 URL 两端斜杠并拆分出非空路径片段。
 func splitPath(value string) []string {
 	parts := strings.Split(strings.Trim(value, "/"), "/")
 	result := make([]string, 0, len(parts))

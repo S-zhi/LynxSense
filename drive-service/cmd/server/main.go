@@ -17,6 +17,7 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/transfer"
 )
 
+// main 加载配置、组装单例服务、恢复任务并启动本地 HTTP 服务。
 func main() {
 	configPath := flag.String("config", "./config.local.json", "path to local JSON config")
 	flag.Parse()

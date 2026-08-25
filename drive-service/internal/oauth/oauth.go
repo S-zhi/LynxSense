@@ -58,6 +58,7 @@ type Manager struct {
 // NewManager 创建 OAuth 管理器，不执行网络 I/O。
 func NewManager(cfg *config.Config) *Manager { return &Manager{cfg: cfg} }
 
+// credentials 按“配置字段优先、客户端 JSON 兜底”的顺序加载 OAuth 应用凭据。
 func (m *Manager) credentials() (string, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -183,6 +184,7 @@ func (m *Manager) Callback(w http.ResponseWriter, r *http.Request) {
 	m.finishCallback(w, r, p)
 }
 
+// finishCallback 校验 OAuth state 和 PKCE 参数，兑换授权码并保存 Refresh Token。
 func (m *Manager) finishCallback(w http.ResponseWriter, r *http.Request, p *pendingAuth) {
 	if r.URL.Query().Get("state") != p.state {
 		http.Error(w, "OAuth state 校验失败", http.StatusBadRequest)
@@ -216,6 +218,7 @@ func (m *Manager) finishCallback(w http.ResponseWriter, r *http.Request, p *pend
 	_, _ = io.WriteString(w, "<html><body><h3>Google Drive 已连接</h3><p>可以关闭此页面返回应用。</p></body></html>")
 }
 
+// clearPending 清理当前授权流程，并关闭其临时 HTTP 服务或 loopback 监听器。
 func (m *Manager) clearPending(p *pendingAuth) {
 	m.mu.Lock()
 	if m.pending == p {
@@ -231,6 +234,7 @@ func (m *Manager) clearPending(p *pendingAuth) {
 	}
 }
 
+// saveToken 以受限权限原子写入 OAuth Token，避免留下半写入文件。
 func (m *Manager) saveToken(tok *oauth2.Token) error {
 	b, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
@@ -243,6 +247,7 @@ func (m *Manager) saveToken(tok *oauth2.Token) error {
 	return os.Rename(tmp, m.cfg.TokenPath())
 }
 
+// loadToken 从本地数据目录读取 OAuth Token；文件不存在表示尚未授权。
 func (m *Manager) loadToken() (*oauth2.Token, error) {
 	b, err := os.ReadFile(m.cfg.TokenPath())
 	if err != nil {
@@ -360,6 +365,7 @@ type persistingSource struct {
 	last  string
 }
 
+// Token 获取当前有效 Token，并仅在 Token 内容变化时持久化刷新结果。
 func (s *persistingSource) Token() (*oauth2.Token, error) {
 	tok, err := s.inner.Token()
 	if err != nil {
@@ -377,6 +383,7 @@ func (s *persistingSource) Token() (*oauth2.Token, error) {
 	return tok, nil
 }
 
+// randomString 使用密码学安全随机数生成 state 或 PKCE verifier。
 func randomString(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -385,6 +392,7 @@ func randomString(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// stringsReader 将字符串包装成 io.Reader，用于构造撤销 Token 的请求体。
 func stringsReader(value string) io.Reader { return &stringReader{value: value} }
 
 type stringReader struct {
@@ -392,6 +400,7 @@ type stringReader struct {
 	offset int
 }
 
+// Read 按顺序读取字符串内容，直到所有字节都被消费完毕。
 func (r *stringReader) Read(p []byte) (int, error) {
 	if r.offset >= len(r.value) {
 		return 0, io.EOF

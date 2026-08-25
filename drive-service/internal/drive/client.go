@@ -68,6 +68,7 @@ func NewClient(cfg *config.Config, auth *oauth.Manager, state *store.Store) *Cli
 	return &Client{cfg: cfg, oauth: auth, store: state}
 }
 
+// ensureFolder 获取或创建 sidecar 专用的 Drive 文件夹，并将其 ID 缓存到状态仓库。
 func (c *Client) ensureFolder(ctx context.Context) (string, error) {
 	if c.cfg.DriveFolderID != "" {
 		return c.cfg.DriveFolderID, nil
@@ -313,6 +314,7 @@ func (c *Client) UploadChunk(ctx context.Context, sessionURL string, file *os.Fi
 	return ChunkResult{}, errors.New("Drive upload chunk retry limit exceeded")
 }
 
+// doJSON 执行已认证的 JSON Drive 请求，统一处理响应读取、状态码和反序列化。
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Reader, headers map[string]string, output any) error {
 	client, err := c.oauth.HTTPClient(ctx)
 	if err != nil {
@@ -342,6 +344,7 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Re
 	return nil
 }
 
+// parseDriveRange 将 Drive 返回的 Range 末尾位置转换为下一个字节偏移量。
 func parseDriveRange(value string) int64 {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -358,6 +361,7 @@ func parseDriveRange(value string) int64 {
 	return last + 1
 }
 
+// backoff 按指数退避等待下一次 Drive 请求，并在上下文取消时立即返回。
 func backoff(ctx context.Context, attempt int) error {
 	d := time.Duration(1<<min(attempt, 5)) * time.Second
 	t := time.NewTimer(d)
@@ -370,6 +374,7 @@ func backoff(ctx context.Context, attempt int) error {
 	}
 }
 
+// min 返回两个整数中的较小值，用于限制重试退避的最大指数。
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -377,4 +382,5 @@ func min(a, b int) int {
 	return b
 }
 
+// escapeQueryLiteral 转义 Drive 查询字符串中的单引号，避免破坏查询表达式。
 func escapeQueryLiteral(value string) string { return strings.ReplaceAll(value, "'", "\\'") }
