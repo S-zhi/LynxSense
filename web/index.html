@@ -504,12 +504,18 @@
                 </div>
                 <span class="drive__microcopy">16 MiB chunks · 可中断</span>
               </div>
-              <label class="drive-dropzone" id="driveDropzone" for="driveFileInput" tabindex="0">
+              <div class="drive-dropzone" id="driveDropzone" tabindex="0" role="button" aria-label="选择文件或文件夹上传">
                 <input id="driveFileInput" type="file" hidden />
+                <input id="driveFolderInput" type="file" webkitdirectory="" multiple hidden />
                 <span class="drive-dropzone__icon" aria-hidden="true"><i class="ph ph-upload-simple"></i></span>
-                <span class="drive-dropzone__title">选择文件，或拖到这里</span>
+                <span class="drive-dropzone__title">选择文件或文件夹，或拖到这里</span>
                 <span class="drive-dropzone__hint">文件先分片写入本地，再由 sidecar 可靠上传到 Google Drive</span>
-              </label>
+                <span class="drive-dropzone__actions">
+                  <button class="btn btn--primary btn--sm" id="driveChooseFile" type="button">选择文件</button>
+                  <button class="btn btn--ghost btn--sm" id="driveChooseFolder" type="button">选择文件夹</button>
+                </span>
+              </div>
+              <p class="drive-folder-upload__hint" id="driveFolderUploadHint">空目录不会上传；目录结构会按相对路径在 Drive 中重建。</p>
               <div class="drive-upload-progress" id="driveUploadProgress" hidden aria-live="polite">
                 <div class="drive-upload-progress__top">
                   <div class="drive-upload-progress__name" id="driveUploadName">—</div>
@@ -521,6 +527,18 @@
                   <button class="btn btn--ghost btn--sm" id="driveUploadCancel" type="button">取消</button>
                 </div>
               </div>
+              <div class="drive-folder-upload-progress" id="driveFolderUploadProgress" hidden aria-live="polite">
+                <div class="drive-upload-progress__top">
+                  <div class="drive-upload-progress__name" id="driveFolderUploadName">文件夹上传</div>
+                  <div class="drive-upload-progress__value" id="driveFolderUploadValue">0%</div>
+                </div>
+                <div class="drive-progress"><span id="driveFolderUploadBar"></span></div>
+                <div class="drive-upload-progress__bottom">
+                  <span id="driveFolderUploadBytes">等待上传</span>
+                  <button class="btn btn--ghost btn--sm" id="driveFolderUploadCancel" data-action="cancel-folder" type="button">取消</button>
+                </div>
+                <div class="drive-folder-upload__entries" id="driveFolderUploadEntries"></div>
+              </div>
             </section>
 
             <div class="drive__grid">
@@ -529,12 +547,14 @@
                   <div>
                     <span class="eyebrow">REMOTE FILES</span>
                     <h3 id="driveFilesTitle">文件列表</h3>
+                    <nav class="drive-breadcrumbs" id="driveBreadcrumbs" aria-label="Drive 文件夹路径"></nav>
                   </div>
                   <span class="drive-card__count" id="driveFileCount">—</span>
                 </header>
                 <div class="drive-files" id="driveFiles" aria-live="polite">
                   <div class="drive-empty"><i class="ph ph-spinner-gap ph-spin" aria-hidden="true"></i><span>正在读取文件…</span></div>
                 </div>
+                <nav class="drive-files__pagination" id="driveFilesPagination" aria-label="Drive 文件分页"></nav>
               </section>
 
               <section class="drive-card" aria-labelledby="driveTransfersTitle">

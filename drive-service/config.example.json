@@ -11,6 +11,12 @@
   ],
   "drive_folder_id": "",
   "max_upload_bytes": 2147483648,
+  "max_folder_entries": 1000,
+  "max_folder_bytes": 2147483648,
+  "max_manifest_bytes": 8388608,
+  "max_folder_depth": 64,
+  "max_folder_directories": 5000,
+  "max_concurrent_transfers": 3,
   "chunk_size_bytes": 16777216,
   "request_timeout_seconds": 600
 }
