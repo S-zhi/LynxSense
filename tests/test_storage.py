@@ -229,6 +229,32 @@ def test_cleanup_respects_kind_filter_and_keeps_task(client):
     assert not d.exists()
 
 
+def test_cleanup_preserve_task_records_deletes_all_artifacts(client):
+    """保留任务记录模式会删除全部产物，但不会删除任务行。"""
+    store = client._store
+    cid = _seed_task(
+        client, store, title="retention_keep_record",
+        status="SUCCESS", source_bytes=200, audio_bytes=300, srt_bytes=40, output_bytes=800,
+    )
+    d = client._tmp / cid
+    (d / "extra.json").write_bytes(b"{}")
+
+    res = _post_cleanup(client, taskIds=[cid], preserveTaskRecords=True)
+
+    assert res["deletedTasks"] == 0
+    assert res["deletedBytes"] > 0
+    assert len(res["partial"]) == 1
+    assert "任务记录已保留" in res["note"]
+    assert store.get(cid) is not None
+    assert not d.exists()
+
+    rec = store.get(cid)
+    assert rec is not None
+    assert rec.status == "SUCCESS"
+    assert rec.resource_status == "MISSING"
+    assert rec.downgrade_reason == "USER_CLEANED"
+
+
 def test_cleanup_partial_downgrades_resource_status(client):
     """部分清理删除成品 output 后，任务联动降级为 MISSING 且 outputs 置空。"""
     store = client._store
@@ -359,7 +385,7 @@ def test_cleanup_re_validates_status_before_delete(client, monkeypatch):
 
 def test_retention_roundtrip(client):
     """保留策略的 get / put 闭环。"""
-    assert client.get("/api/storage/retention").json() == {"days": None, "updatedAt": None, "lastRunAt": None}
+    assert client.get("/api/storage/retention").json() == {"days": 30, "updatedAt": None, "lastRunAt": None}
 
     r = client.put("/api/storage/retention", json={"days": 7})
     assert r.status_code == 200
@@ -370,6 +396,11 @@ def test_retention_roundtrip(client):
     got = client.get("/api/storage/retention").json()
     assert got["days"] == 7
     assert got["updatedAt"] == out["updatedAt"]
+
+    # None 仍表示用户明确选择不限，而不是默认值。
+    unlimited = client.put("/api/storage/retention", json={"days": None})
+    assert unlimited.status_code == 200
+    assert unlimited.json()["days"] is None
 
 
 def test_cleanup_preview_older_than_days_filter(client):

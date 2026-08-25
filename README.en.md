@@ -178,7 +178,7 @@ Highlights:
 - **Job center** — batch queue, live stages, and failed-job retries.
 - **Video preview** — inspect the finished result in the browser.
 - **Subtitle editor** — review and adjust recognized or translated subtitles.
-- **Local resources** — inspect disk usage, retention, and cleanup previews.
+- **Local resources** — inspect disk usage, retention, and cleanup previews; artifacts are retained for 30 days by default, and automatic cleanup preserves job records.
 - **Flexible output** — download-only, translated or bilingual, hard or soft subtitles.
 
 ## 🧩 Command Line

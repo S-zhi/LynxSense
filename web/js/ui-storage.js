@@ -12,6 +12,7 @@ const RUNNING = new Set([
   "TRANSCRIBING", "TRANSLATING", "BURNING",
 ]);
 const STORAGE_REFRESH_INTERVAL_MS = 8000;
+const DEFAULT_RETENTION_DAYS = 30;
 
 const KIND_LABEL = {
   source: "源视频",
@@ -38,7 +39,7 @@ const local = {
   stats: null,
   selected: new Set(),   // 当前选中的 taskId
   preview: null,         // 最近一次预览结果
-  retentionDays: 0,
+  retentionDays: DEFAULT_RETENTION_DAYS,
   kindFilter: "",
   loading: false,
   refreshTimer: null,
@@ -135,19 +136,21 @@ async function refresh(showToast = false) {
         if (showToast) toast(e.message, "ph-warning-circle");
         return null;
       }),
-      Api.getRetention().catch(() => ({ days: null, updatedAt: null })),
+      Api.getRetention().catch(() => ({ days: DEFAULT_RETENTION_DAYS, updatedAt: null })),
     ]);
-    if (stats) {
-      local.stats = stats;
-      renderCards();
-      renderTable();
-    }
+    if (stats) local.stats = stats;
     if (retention && retention.days !== undefined) {
-      local.retentionDays = retention.days || 0;
+      local.retentionDays = retention.days === null || retention.days === 0
+        ? 0
+        : (retention.days || DEFAULT_RETENTION_DAYS);
       // 仅在未初始化时同步 select
       if (els.retentionSelect.value !== String(local.retentionDays)) {
         els.retentionSelect.value = String(local.retentionDays);
       }
+    }
+    if (stats) {
+      renderCards();
+      renderTable();
     }
     if (showToast) toast("已刷新", "ph-arrow-clockwise");
   } finally {
@@ -160,7 +163,12 @@ async function saveRetention() {
     const v = local.retentionDays > 0 ? local.retentionDays : null;
     await Api.putRetention(v);
     renderCards();
-    toast(v ? `保留策略：${v} 天以上` : "保留策略：不限", "ph-check");
+    toast(
+      v
+        ? `产物保留期：${v} 天以上，任务记录保留`
+        : "产物保留期：不限，任务记录保留",
+      "ph-check",
+    );
   } catch (e) {
     toast(e.message || "保存保留策略失败", "ph-warning-circle");
   }
