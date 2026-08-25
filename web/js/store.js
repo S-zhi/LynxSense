@@ -7,7 +7,7 @@ import { createNotifications } from "./notifications.js";
 export const state = {
   tasks: [],
   filter: "all",       // all | active | done | failed
-  view: "tasks",       // tasks | preview | editor | probe | storage | translation-settings
+  view: "tasks",       // tasks | preview | editor | probe | storage | drive | translation-settings
   previewId: null,
   loading: true,
   loadError: null,

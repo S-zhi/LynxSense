@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="styles/editor.css" />
     <link rel="stylesheet" href="styles/probe.css" />
     <link rel="stylesheet" href="styles/storage.css" />
+    <link rel="stylesheet" href="styles/drive.css" />
     <link rel="stylesheet" href="styles/translation-settings.css" />
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
   </head>
@@ -44,6 +45,9 @@
           </button>
           <button class="nav__item" type="button" data-view="storage">
             <i class="ph ph-hard-drives" aria-hidden="true"></i><span>本地资源</span>
+          </button>
+          <button class="nav__item" type="button" data-view="drive">
+            <i class="ph ph-cloud-arrow-up" aria-hidden="true"></i><span>Google Drive</span>
           </button>
           <button class="nav__item" type="button" data-view="translation-settings">
             <i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>高级设置</span>
@@ -450,6 +454,101 @@
                 <i class="ph ph-tray" aria-hidden="true"></i>
                 <div>暂无任务产物</div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ Google Drive ============ -->
+        <section class="view" data-view="drive" id="view-drive">
+          <div class="drive" id="drivePanel">
+            <header class="drive__head">
+              <div>
+                <span class="eyebrow">CLOUD / GOOGLE DRIVE</span>
+                <h2>Google Drive</h2>
+                <p>动态 loopback 授权 · 大文件断点传输 · 本地单用户空间</p>
+              </div>
+              <div class="drive__head-actions">
+                <span class="drive-status drive-status--offline" id="driveStatus" aria-live="polite">
+                  <span class="drive-status__dot" aria-hidden="true"></span><span id="driveStatusText">正在检查</span>
+                </span>
+                <button class="btn btn--ghost btn--sm" id="driveRefresh" type="button">
+                  <i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span>刷新</span>
+                </button>
+              </div>
+            </header>
+
+            <section class="drive__hero" aria-labelledby="driveConnectionTitle">
+              <div class="drive__hero-copy">
+                <div class="drive__orb" aria-hidden="true"><i class="ph ph-cloud-check"></i></div>
+                <div>
+                  <span class="eyebrow">AUTHENTICATION</span>
+                  <h3 id="driveConnectionTitle">连接你的 Google Drive</h3>
+                  <p id="driveAuthHint">授权后，文件只会进入 sidecar 管理的 Subtitles AI 文件夹。</p>
+                </div>
+              </div>
+              <div class="drive__auth-actions">
+                <button class="btn btn--primary" id="driveAuthAction" type="button">
+                  <i class="ph ph-arrow-square-out" aria-hidden="true"></i><span>连接 Google Drive</span>
+                </button>
+                <button class="btn btn--ghost btn--sm" id="driveDisconnect" type="button" hidden>
+                  <i class="ph ph-sign-out" aria-hidden="true"></i><span>断开连接</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="drive__upload" aria-labelledby="driveUploadTitle">
+              <div class="drive__section-head">
+                <div>
+                  <span class="eyebrow">INGEST / RESUMABLE</span>
+                  <h3 id="driveUploadTitle">上传到 Drive</h3>
+                </div>
+                <span class="drive__microcopy">16 MiB chunks · 可中断</span>
+              </div>
+              <label class="drive-dropzone" id="driveDropzone" for="driveFileInput" tabindex="0">
+                <input id="driveFileInput" type="file" hidden />
+                <span class="drive-dropzone__icon" aria-hidden="true"><i class="ph ph-upload-simple"></i></span>
+                <span class="drive-dropzone__title">选择文件，或拖到这里</span>
+                <span class="drive-dropzone__hint">文件先分片写入本地，再由 sidecar 可靠上传到 Google Drive</span>
+              </label>
+              <div class="drive-upload-progress" id="driveUploadProgress" hidden aria-live="polite">
+                <div class="drive-upload-progress__top">
+                  <div class="drive-upload-progress__name" id="driveUploadName">—</div>
+                  <div class="drive-upload-progress__value" id="driveUploadValue">0%</div>
+                </div>
+                <div class="drive-progress"><span id="driveUploadBar"></span></div>
+                <div class="drive-upload-progress__bottom">
+                  <span id="driveUploadBytes">等待上传</span>
+                  <button class="btn btn--ghost btn--sm" id="driveUploadCancel" type="button">取消</button>
+                </div>
+              </div>
+            </section>
+
+            <div class="drive__grid">
+              <section class="drive-card" aria-labelledby="driveFilesTitle">
+                <header class="drive-card__head">
+                  <div>
+                    <span class="eyebrow">REMOTE FILES</span>
+                    <h3 id="driveFilesTitle">文件列表</h3>
+                  </div>
+                  <span class="drive-card__count" id="driveFileCount">—</span>
+                </header>
+                <div class="drive-files" id="driveFiles" aria-live="polite">
+                  <div class="drive-empty"><i class="ph ph-spinner-gap ph-spin" aria-hidden="true"></i><span>正在读取文件…</span></div>
+                </div>
+              </section>
+
+              <section class="drive-card" aria-labelledby="driveTransfersTitle">
+                <header class="drive-card__head">
+                  <div>
+                    <span class="eyebrow">TRANSFER QUEUE</span>
+                    <h3 id="driveTransfersTitle">传输队列</h3>
+                  </div>
+                  <span class="drive-card__count" id="driveTransferCount">—</span>
+                </header>
+                <div class="drive-transfers" id="driveTransfers" aria-live="polite">
+                  <div class="drive-empty"><i class="ph ph-hourglass-simple" aria-hidden="true"></i><span>暂无传输任务</span></div>
+                </div>
+              </section>
             </div>
           </div>
         </section>

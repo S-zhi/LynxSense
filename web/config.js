@@ -10,6 +10,10 @@ window.APP_CONFIG = {
   // 请求超时（毫秒）
   API_TIMEOUT_MS: 15000,
 
+  // Google Drive sidecar 地址。大文件分片请求会使用更长的超时。
+  DRIVE_API_BASE_URL: "http://127.0.0.1:8787",
+  DRIVE_API_TIMEOUT_MS: 600000,
+
   // 高级设置中的引擎配置由后端动态加载；此项仅作为无后端时的兼容兜底
   TRANSLATION_ENGINES: [{ value: "deepseek", label: "DeepSeek（兼容旧配置）", enabled: true }],
 
