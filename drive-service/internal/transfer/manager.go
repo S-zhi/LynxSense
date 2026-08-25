@@ -36,20 +36,40 @@ const (
 	StateCancelled    = "CANCELLED"
 )
 
+// DriveClient is the subset of the Drive client used by the transfer worker.
+// Keeping this interface small makes the state machine testable without a
+// Google network connection while *drive.Client remains the production
+// implementation.
+type DriveClient interface {
+	StartUploadSessionInFolder(context.Context, string, string, int64, string, map[string]string) (driveclient.UploadSession, error)
+	UploadChunk(context.Context, string, *os.File, int64, int64, int64) (driveclient.ChunkResult, error)
+	Metadata(context.Context, string) (*driveclient.File, error)
+	DownloadRange(context.Context, string, string) (*driveclient.File, *http.Response, error)
+}
+
 // Manager 管理后台传输 worker 及其取消函数。每个对外可见步骤执行前，进度都会
 // 先写入 Store。
 type Manager struct {
 	cfg   *config.Config
 	store *store.Store
-	drive *driveclient.Client
+	drive DriveClient
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
+	slots   chan struct{}
 }
 
 // NewManager 创建进程级传输协调器。
-func NewManager(cfg *config.Config, state *store.Store, client *driveclient.Client) *Manager {
-	return &Manager{cfg: cfg, store: state, drive: client, cancels: map[string]context.CancelFunc{}}
+func NewManager(cfg *config.Config, state *store.Store, client DriveClient) *Manager {
+	if cfg == nil {
+		defaultConfig := config.Default()
+		cfg = &defaultConfig
+	}
+	limit := 3
+	if cfg.MaxConcurrentTransfers > 0 {
+		limit = cfg.MaxConcurrentTransfers
+	}
+	return &Manager{cfg: cfg, store: state, drive: client, cancels: map[string]context.CancelFunc{}, slots: make(chan struct{}, limit)}
 }
 
 // StartDriveUpload 创建一个从本地文件断点上传到 Drive 的任务。
@@ -57,17 +77,45 @@ func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) 
 	if !upload.Completed || upload.Length <= 0 || upload.Path == "" {
 		return store.Transfer{}, errors.New("upload staging file is incomplete")
 	}
+	properties := map[string]string{"subtitles_ai": "true"}
+	if upload.BatchID != "" {
+		properties["subtitles_ai_batch_id"] = upload.BatchID
+	}
+	if upload.EntryID != "" {
+		properties["subtitles_ai_entry_id"] = upload.EntryID
+	}
+	if upload.RelativePath != "" {
+		properties["subtitles_ai_relative_path"] = upload.RelativePath
+	}
 	t, err := m.store.CreateTransfer(store.Transfer{
-		Kind:       KindDriveUpload,
-		State:      StatePending,
-		UploadID:   upload.ID,
-		FileName:   upload.Name,
-		MIME:       upload.MIME,
-		LocalPath:  upload.Path,
-		TotalBytes: upload.Length,
+		Kind:          KindDriveUpload,
+		State:         StatePending,
+		UploadID:      upload.ID,
+		FileName:      upload.Name,
+		MIME:          upload.MIME,
+		LocalPath:     upload.Path,
+		TotalBytes:    upload.Length,
+		BatchID:       upload.BatchID,
+		EntryID:       upload.EntryID,
+		ParentID:      upload.ParentID,
+		RelativePath:  upload.RelativePath,
+		AppProperties: properties,
 	})
 	if err != nil {
 		return store.Transfer{}, err
+	}
+	if upload.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(upload.EntryID, func(entry *store.FolderEntry) error {
+			if entry.BatchID == "" {
+				entry.BatchID = upload.BatchID
+			}
+			entry.UploadID = upload.ID
+			entry.TransferID = t.ID
+			entry.State = StatePending
+			entry.Error = ""
+			return nil
+		})
+		m.updateBatchProgress(upload.BatchID)
 	}
 	m.start(t.ID)
 	return t, nil
@@ -77,6 +125,18 @@ func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) 
 func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	if fileID == "" {
 		return store.Transfer{}, errors.New("fileId 不能为空")
+	}
+	// Resolve metadata before creating a task. This keeps folder imports a
+	// synchronous 4xx operation instead of an asynchronously failing job.
+	metadata, err := m.drive.Metadata(context.Background(), fileID)
+	if err != nil {
+		return store.Transfer{}, err
+	}
+	if metadata == nil {
+		return store.Transfer{}, errors.New("Drive metadata response is empty")
+	}
+	if driveclient.IsFolder(metadata) {
+		return store.Transfer{}, errors.New("不能把 Drive 文件夹导入 Python 流水线")
 	}
 	t, err := m.store.CreateTransfer(store.Transfer{
 		Kind:   KindPythonImport,
@@ -109,6 +169,13 @@ func (m *Manager) Pause(id string) error {
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StatePaused; return nil }); err != nil {
 		return err
 	}
+	if t.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			entry.State = StatePaused
+			return nil
+		})
+		m.updateBatchProgress(t.BatchID)
+	}
 	m.cancel(id)
 	return nil
 }
@@ -124,6 +191,14 @@ func (m *Manager) Resume(id string) error {
 	}
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StatePending; t.Error = ""; return nil }); err != nil {
 		return err
+	}
+	if t.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			entry.State = StatePending
+			entry.Error = ""
+			return nil
+		})
+		m.updateBatchProgress(t.BatchID)
 	}
 	m.start(id)
 	return nil
@@ -142,6 +217,14 @@ func (m *Manager) Cancel(id string) error {
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateCancelled; return nil }); err != nil {
 		return err
 	}
+	if t.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			entry.State = StateCancelled
+			entry.Error = ""
+			return nil
+		})
+		m.updateBatchProgress(t.BatchID)
+	}
 	if t.LocalPath != "" {
 		_ = os.Remove(t.LocalPath)
 	}
@@ -155,13 +238,89 @@ func (m *Manager) Cancel(id string) error {
 	return nil
 }
 
+// CancelBatch cancels every active entry in a folder upload and marks entries
+// which have not started yet as cancelled. It is deliberately idempotent.
+func (m *Manager) CancelBatch(batchID string) error {
+	batch, ok := m.store.GetFolderBatch(batchID)
+	if !ok {
+		return os.ErrNotExist
+	}
+	if batch.State == StateSuccess || batch.State == StateCancelled {
+		return fmt.Errorf("folder upload is already %s", batch.State)
+	}
+	for _, entry := range m.store.ListFolderEntries(batchID) {
+		if entry.State == StateSuccess || entry.State == StateCancelled {
+			continue
+		}
+		if entry.TransferID != "" {
+			if err := m.Cancel(entry.TransferID); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			continue
+		}
+		if entry.UploadID != "" {
+			if upload, exists := m.store.GetUpload(entry.UploadID); exists {
+				_ = os.Remove(upload.Path)
+			}
+			_ = m.store.DeleteUpload(entry.UploadID)
+		}
+		_, _ = m.store.UpdateFolderEntry(entry.ID, func(current *store.FolderEntry) error {
+			if current.State != StateSuccess {
+				current.State = StateCancelled
+			}
+			return nil
+		})
+	}
+	m.updateBatchProgress(batchID)
+	return nil
+}
+
+// RetryBatchEntry resumes a failed transfer when its local staging upload is
+// still available. A client can then query the entry and continue PATCHing the
+// existing upload URL without re-sending already accepted bytes.
+func (m *Manager) RetryBatchEntry(batchID, entryID string) (store.FolderEntry, error) {
+	entry, ok := m.store.GetFolderEntry(entryID)
+	if !ok || entry.BatchID != batchID {
+		return store.FolderEntry{}, os.ErrNotExist
+	}
+	if entry.State == StateSuccess {
+		return entry, fmt.Errorf("folder entry is already %s", StateSuccess)
+	}
+	if entry.TransferID != "" {
+		if err := m.Resume(entry.TransferID); err != nil {
+			return entry, err
+		}
+		updated, _ := m.store.GetFolderEntry(entryID)
+		return updated, nil
+	}
+	if entry.UploadID == "" {
+		return entry, errors.New("folder entry has no resumable upload")
+	}
+	upload, ok := m.store.GetUpload(entry.UploadID)
+	if !ok || !upload.Completed {
+		return entry, errors.New("folder entry upload is incomplete")
+	}
+	if _, err := m.StartDriveUpload(upload); err != nil {
+		return entry, err
+	}
+	updated, _ := m.store.GetFolderEntry(entryID)
+	return updated, nil
+}
+
 // start 为任务创建独立取消上下文，并保证同一任务不会并发启动多个 worker。
 func (m *Manager) start(id string) {
 	m.mu.Lock()
+	if m.cancels == nil {
+		m.cancels = make(map[string]context.CancelFunc)
+	}
 	if _, exists := m.cancels[id]; exists {
 		m.mu.Unlock()
 		return
 	}
+	if m.slots == nil {
+		m.slots = make(chan struct{}, 3)
+	}
+	slots := m.slots
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancels[id] = cancel
 	m.mu.Unlock()
@@ -171,8 +330,17 @@ func (m *Manager) start(id string) {
 			delete(m.cancels, id)
 			m.mu.Unlock()
 		}()
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		case <-ctx.Done():
+			return
+		}
 		t, ok := m.store.GetTransfer(id)
 		if !ok {
+			return
+		}
+		if t.State == StatePaused || t.State == StateCancelled || t.State == StateSuccess {
 			return
 		}
 		var err error
@@ -185,11 +353,7 @@ func (m *Manager) start(id string) {
 			err = fmt.Errorf("unknown transfer kind %q", t.Kind)
 		}
 		if err != nil && ctx.Err() == nil {
-			_, _ = m.store.UpdateTransfer(id, func(t *store.Transfer) error {
-				t.State = StateFailed
-				t.Error = err.Error()
-				return nil
-			})
+			m.markTransferFailed(id, err)
 		}
 	}()
 }
@@ -203,9 +367,142 @@ func (m *Manager) cancel(id string) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) markTransferFailed(id string, transferErr error) {
+	t, ok := m.store.GetTransfer(id)
+	if !ok || t.State == StateCancelled || t.State == StatePaused {
+		return
+	}
+	updated, updateErr := m.store.UpdateTransfer(id, func(current *store.Transfer) error {
+		if current.State == StateCancelled || current.State == StatePaused {
+			return nil
+		}
+		current.State = StateFailed
+		current.Error = transferErr.Error()
+		return nil
+	})
+	if updateErr != nil || updated.State != StateFailed {
+		return
+	}
+	if t.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			entry.State = StateFailed
+			entry.Error = transferErr.Error()
+			return nil
+		})
+		m.updateBatchProgress(t.BatchID)
+	}
+}
+
+func (m *Manager) markTransferTransferring(id string) error {
+	t, ok := m.store.GetTransfer(id)
+	if !ok {
+		return os.ErrNotExist
+	}
+	if _, err := m.store.UpdateTransfer(id, func(current *store.Transfer) error {
+		current.State = StateTransferring
+		return nil
+	}); err != nil {
+		return err
+	}
+	if t.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			entry.State = StateTransferring
+			entry.Error = ""
+			return nil
+		})
+		m.updateBatchProgress(t.BatchID)
+	}
+	return nil
+}
+
+func (m *Manager) markTransferSuccess(id string, fileID string) error {
+	t, ok := m.store.GetTransfer(id)
+	if !ok {
+		return os.ErrNotExist
+	}
+	if _, err := m.store.UpdateTransfer(id, func(current *store.Transfer) error {
+		current.State = StateSuccess
+		if fileID != "" {
+			current.FileID = fileID
+		}
+		current.Transferred = current.TotalBytes
+		return nil
+	}); err != nil {
+		return err
+	}
+	if t.EntryID != "" {
+		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			entry.State = StateSuccess
+			entry.Error = ""
+			if fileID != "" {
+				entry.FileID = fileID
+			}
+			return nil
+		})
+		m.updateBatchProgress(t.BatchID)
+	}
+	return nil
+}
+
+// updateBatchProgress derives aggregate counters and state from durable entry
+// snapshots. It is safe to call after every entry state transition.
+func (m *Manager) updateBatchProgress(batchID string) {
+	if batchID == "" {
+		return
+	}
+	entries := m.store.ListFolderEntries(batchID)
+	if len(entries) == 0 {
+		return
+	}
+	completedEntries := 0
+	completedBytes := int64(0)
+	terminalEntries := 0
+	hasFailure := false
+	hasCancellation := false
+	hasActive := false
+	firstError := ""
+	for _, entry := range entries {
+		switch entry.State {
+		case StateSuccess:
+			completedEntries++
+			completedBytes += entry.Size
+			terminalEntries++
+		case StateFailed:
+			hasFailure = true
+			if firstError == "" {
+				firstError = entry.Error
+			}
+			terminalEntries++
+		case StateCancelled:
+			hasCancellation = true
+			terminalEntries++
+		case StateTransferring, StateRetrying, StateVerifying, StatePaused:
+			hasActive = true
+		}
+	}
+	_, _ = m.store.UpdateFolderBatch(batchID, func(batch *store.FolderBatch) error {
+		batch.CompletedEntries = completedEntries
+		batch.CompletedBytes = completedBytes
+		batch.Error = firstError
+		switch {
+		case batch.TotalEntries > 0 && completedEntries == batch.TotalEntries:
+			batch.State = StateSuccess
+		case hasFailure:
+			batch.State = StateFailed
+		case batch.TotalEntries > 0 && terminalEntries == batch.TotalEntries && hasCancellation:
+			batch.State = StateCancelled
+		case hasActive:
+			batch.State = StateTransferring
+		default:
+			batch.State = StatePending
+		}
+		return nil
+	})
+}
+
 // runDriveUpload 校验本地暂存文件，通过 Drive resumable session 分片上传，并保存进度。
 func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
-	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateTransferring; return nil }); err != nil {
+	if err := m.markTransferTransferring(id); err != nil {
 		return err
 	}
 	t, _ := m.store.GetTransfer(id)
@@ -238,7 +535,7 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 				}
 				t.Transferred = 0
 			}
-			session, sessionErr := m.drive.StartUploadSession(ctx, t.FileName, t.MIME, t.TotalBytes)
+			session, sessionErr := m.drive.StartUploadSessionInFolder(ctx, t.FileName, t.MIME, t.TotalBytes, t.ParentID, t.AppProperties)
 			if sessionErr != nil {
 				return sessionErr
 			}
@@ -277,7 +574,11 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			_, err = m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateSuccess; return nil })
+			fileID := ""
+			if result.File != nil {
+				fileID = result.File.ID
+			}
+			err = m.markTransferSuccess(id, fileID)
 			_ = os.Remove(t.LocalPath)
 			if t.UploadID != "" {
 				_ = m.store.DeleteUpload(t.UploadID)
@@ -289,7 +590,7 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 
 // runPythonImport 下载 Drive 文件到本地，校验 MD5 后以 multipart 形式提交 Python API。
 func (m *Manager) runPythonImport(ctx context.Context, id string) error {
-	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateTransferring; return nil }); err != nil {
+	if err := m.markTransferTransferring(id); err != nil {
 		return err
 	}
 	t, _ := m.store.GetTransfer(id)
@@ -297,7 +598,10 @@ func (m *Manager) runPythonImport(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if metadata.MimeType == "application/vnd.google-apps.folder" {
+	if metadata == nil {
+		return errors.New("Drive metadata response is empty")
+	}
+	if driveclient.IsFolder(metadata) {
 		return errors.New("不能把 Drive 文件夹导入 Python 流水线")
 	}
 	if metadata.Size <= 0 {
@@ -356,7 +660,7 @@ func (m *Manager) runPythonImport(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	_, err = m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateSuccess; return nil })
+	err = m.markTransferSuccess(id, "")
 	_ = os.Remove(readyPath)
 	return err
 }

@@ -39,3 +39,22 @@ func TestLoadAppliesSafeDefaultsAndDriveChunkAlignment(t *testing.T) {
 		t.Fatalf("state path should not be created by EnsureDataDir: %v", err)
 	}
 }
+
+func TestLoadAppliesFolderUploadResourceDefaults(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"max_folder_entries":0,"max_folder_bytes":-1,"max_manifest_bytes":0,"max_concurrent_transfers":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := Default()
+	if cfg.MaxFolderEntries != defaults.MaxFolderEntries || cfg.MaxFolderBytes != defaults.MaxFolderBytes ||
+		cfg.MaxManifestBytes != defaults.MaxManifestBytes || cfg.MaxFolderDepth != defaults.MaxFolderDepth ||
+		cfg.MaxFolderDirectories != defaults.MaxFolderDirectories || cfg.MaxConcurrentTransfers != defaults.MaxConcurrentTransfers {
+		t.Fatalf("folder defaults = %#v, want %#v", cfg, defaults)
+	}
+}
