@@ -91,11 +91,52 @@ export const DriveApi = {
   },
 
   /** 获取 sidecar 专属 Drive 文件夹中的一页文件。 */
-  async listFiles(pageToken = "", pageSize = 100) {
+  async listFiles(parentId = "", pageToken = "", pageSize = 100) {
+    // 兼容早期的 listFiles(pageToken, pageSize) 调用，避免旧页面在
+    // sidecar 更新期间把数字页大小误当成 parentId/pageToken。
+    if (arguments.length === 1 && parentId) {
+      pageToken = parentId;
+      parentId = "";
+    } else if (typeof pageToken === "number") {
+      pageSize = pageToken;
+      pageToken = parentId;
+      parentId = "";
+    }
+    if (typeof pageSize !== "number" || !Number.isFinite(pageSize)) pageSize = 100;
     const query = new URLSearchParams({ pageSize: String(pageSize) });
+    if (parentId) query.set("parentId", parentId);
     if (pageToken) query.set("pageToken", pageToken);
     const response = await request(`/api/drive/files?${query}`);
     await ensureOK(response, "读取 Google Drive 文件失败");
+    return readJSON(response);
+  },
+
+  async createFolderUpload(manifest, signal, clientRequestId = "", parentId = "") {
+    const body = { entries: manifest };
+    if (clientRequestId) body.clientRequestId = clientRequestId;
+    if (parentId) body.parentId = parentId;
+    const response = await request("/api/drive/folder-uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+    await ensureOK(response, "创建文件夹上传失败");
+    return readJSON(response);
+  },
+  async folderUploadStatus(id) {
+    const response = await request(`/api/drive/folder-uploads/${encodeURIComponent(id)}`);
+    await ensureOK(response, "读取文件夹上传进度失败");
+    return readJSON(response);
+  },
+  async folderUploadAction(id, action, signal) {
+    const response = await request(`/api/drive/folder-uploads/${encodeURIComponent(id)}/${encodeURIComponent(action)}`, { method: "POST", signal });
+    await ensureOK(response, `文件夹上传${action}失败`);
+    return readJSON(response);
+  },
+  async folderEntryAction(batchId, entryId, action, signal) {
+    const response = await request(`/api/drive/folder-uploads/${encodeURIComponent(batchId)}/entries/${encodeURIComponent(entryId)}/${encodeURIComponent(action)}`, { method: "POST", signal });
+    await ensureOK(response, `文件夹条目${action}失败`);
+    return readJSON(response);
+  },
+  async createFolderEntryUpload(batchId, entryId, file, signal) {
+    const response = await request(`/api/drive/folder-uploads/${encodeURIComponent(batchId)}/entries/${encodeURIComponent(entryId)}/upload`, { method: "POST", headers: { "X-Upload-Length": String(file.size), "X-File-Name": file.name, "X-File-Mime": file.type || "application/octet-stream" }, signal });
+    await ensureOK(response, "创建文件夹条目上传失败");
     return readJSON(response);
   },
 
