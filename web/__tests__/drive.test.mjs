@@ -84,3 +84,20 @@ test("DriveApi folder batch methods use the documented routes", async () => {
   });
   assert.equal(requests[1].url, "http://drive.test/api/drive/folder-uploads/batch-1/entries/entry-1/retry");
 });
+
+test("DriveApi encodes Unicode filenames into ASCII-safe headers", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 201, text: async () => JSON.stringify({ id: "upload-1" }) };
+  };
+  const file = { name: "AI学习 + 100%.mp4", type: "video/mp4", size: 12 };
+  await DriveApi.createUpload(file);
+  await DriveApi.createFolderEntryUpload("batch-1", "entry-1", file);
+
+  for (const { options } of requests) {
+    assert.equal(options.headers["X-File-Name"], undefined);
+    assert.equal(decodeURIComponent(options.headers["X-File-Name-Encoded"]), file.name);
+    assert.match(options.headers["X-File-Name-Encoded"], /^[\x00-\x7F]+$/);
+  }
+});
