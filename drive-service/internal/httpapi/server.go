@@ -75,6 +75,13 @@ type folderUploadResponse struct {
 	Entries []store.FolderEntry `json:"entries"`
 }
 
+// taskFolderRequest deliberately accepts only the unique task ID.  The Drive
+// folder name is derived from it so callers cannot accidentally key a folder
+// by a mutable/non-unique task title.
+type taskFolderRequest struct {
+	TaskID string `json:"taskId"`
+}
+
 var errFolderEntryUploadExists = errors.New("folder entry already has an upload")
 
 // New 将 HTTP 外观层与单用户服务依赖连接起来。
@@ -122,6 +129,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/drive/folder-uploads" && r.Method == http.MethodPost {
 		s.handleCreateFolderUpload(w, r)
+		return
+	}
+	if r.URL.Path == "/api/drive/task-folders" && r.Method == http.MethodPost {
+		s.handleCreateTaskFolder(w, r)
 		return
 	}
 	if r.URL.Path == "/api/drive/uploads" && r.Method == http.MethodPost {
@@ -180,6 +191,59 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeError(w, http.StatusNotFound, errors.New("route not found"))
+}
+
+// handleCreateTaskFolder gets or creates the task folder below the sidecar
+// root.  Lookup is by appProperties.subtitles_ai_task_id, never by the
+// display name, so a retry cannot create a second folder for the same task.
+func (s *Server) handleCreateTaskFolder(w http.ResponseWriter, r *http.Request) {
+	var request taskFolderRequest
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("解析 task folder 请求失败: %w", err))
+		return
+	}
+	taskID := strings.TrimSpace(request.TaskID)
+	if taskID == "" || filepath.Base(taskID) != taskID || strings.ContainsAny(taskID, "\\/\x00") {
+		writeError(w, http.StatusBadRequest, errors.New("taskId 必须是非空的安全唯一 ID"))
+		return
+	}
+
+	rootFiles, err := s.drive.List(r.Context(), "", "", 1000)
+	if err != nil {
+		writeDriveError(w, err)
+		return
+	}
+	var found *driveclient.File
+	for index := range rootFiles.Files {
+		file := rootFiles.Files[index]
+		if !driveclient.IsFolder(&file) || file.Trashed {
+			continue
+		}
+		if file.AppProperties["subtitles_ai_task_id"] != taskID {
+			continue
+		}
+		if found != nil {
+			writeError(w, http.StatusConflict, fmt.Errorf("taskId %q 对应多个 Drive 文件夹", taskID))
+			return
+		}
+		copy := file
+		found = &copy
+	}
+	if found != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"folder": found, "taskId": taskID, "created": false})
+		return
+	}
+
+	folder, err := s.drive.CreateFolder(r.Context(), taskID, "", map[string]string{
+		"subtitles_ai_task_id": taskID,
+		"subtitles_ai_kind":    "task_artifacts",
+	})
+	if err != nil {
+		writeDriveError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"folder": folder, "taskId": taskID, "created": true})
 }
 
 // handleFolderUploadRoute dispatches status and entry actions for a batch.

@@ -31,6 +31,11 @@ from src.config import (
 from src.handler.deps import get_probe_store, get_store, require_api_token
 from src.handler.subtitle_editor import release_lock
 from src.handler.tasks import _DELETED_MESSAGE, _mark_resource_missing, scan_missing_terminal
+from src.service.drive_sync import (
+    DriveSyncConflict,
+    DriveSyncError,
+    get_drive_sync_manager,
+)
 from src.store import DOWNGRADE_REASON_USER_CLEANED, ProbeStore, TaskStore, TaskRecord
 
 logger = logging.getLogger(__name__)
@@ -176,6 +181,12 @@ class RetentionOut(BaseModel):
     days: Optional[int] = DEFAULT_RETENTION_DAYS
     updatedAt: Optional[int] = None
     lastRunAt: Optional[int] = None
+
+
+class DriveSyncRequest(BaseModel):
+    """任务级 Drive 同步请求；任务 ID 位于 URL，避免使用任务标题。"""
+
+    artifactNames: Optional[List[str]] = None
 
 
 # ---------- 保留策略配置（轻量：落到本地 JSON） ----------
@@ -388,6 +399,109 @@ def _build_task_storage(
 
 
 # ---------- 端点 ----------
+
+
+def _require_drive_task(task_id: str, store: TaskStore) -> TaskRecord:
+    if not task_id or Path(task_id).name != task_id or "/" in task_id or "\\" in task_id:
+        raise HTTPException(status_code=400, detail="task_id 必须是安全的唯一任务 ID")
+    record = store.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if record.status in _RUNNING_STATUSES:
+        raise HTTPException(status_code=409, detail="运行中的任务不能同步本地产物")
+    return record
+
+
+def _drive_artifact_snapshot(task_id: str, body: DriveSyncRequest) -> list[dict[str, object]]:
+    artifacts = _scan_artifacts(task_id)
+    if body.artifactNames:
+        selected = set(body.artifactNames)
+        artifacts = [artifact for artifact in artifacts if artifact.name in selected]
+    return [artifact.model_dump() for artifact in artifacts]
+
+
+@router.post(
+    "/tasks/{task_id}/drive/upload",
+    status_code=202,
+    dependencies=[Depends(require_api_token)],
+)
+def start_drive_upload(
+    task_id: str,
+    body: DriveSyncRequest = DriveSyncRequest(),
+    store: TaskStore = Depends(get_store),
+) -> dict:
+    """异步、逐产物上传任务目录到 task_id 对应的 Drive 文件夹。"""
+    _require_drive_task(task_id, store)
+    snapshot = _drive_artifact_snapshot(task_id, body)
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="任务没有可上传的产物")
+    try:
+        batch = get_drive_sync_manager().start_upload(task_id, snapshot, store)
+    except DriveSyncConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DriveSyncError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return batch.to_payload()
+
+
+@router.post(
+    "/tasks/{task_id}/drive/download",
+    status_code=202,
+    dependencies=[Depends(require_api_token)],
+)
+def start_drive_download(
+    task_id: str,
+    _body: DriveSyncRequest = DriveSyncRequest(),
+    store: TaskStore = Depends(get_store),
+) -> dict:
+    """异步、逐产物从 task_id 对应的 Drive 文件夹恢复到本地任务目录。"""
+    _require_drive_task(task_id, store)
+    try:
+        batch = get_drive_sync_manager().start_download(task_id, store)
+    except DriveSyncConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DriveSyncError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return batch.to_payload()
+
+
+@router.get(
+    "/drive/batches/{batch_id}",
+    dependencies=[Depends(require_api_token)],
+)
+def get_drive_batch(batch_id: str) -> dict:
+    batch = get_drive_sync_manager().get(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Drive 同步批次不存在")
+    return batch.to_payload()
+
+
+@router.post(
+    "/drive/batches/{batch_id}/retry",
+    status_code=202,
+    dependencies=[Depends(require_api_token)],
+)
+def retry_drive_batch(
+    batch_id: str,
+    store: TaskStore = Depends(get_store),
+) -> dict:
+    try:
+        batch = get_drive_sync_manager().retry(batch_id, store)
+    except DriveSyncError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return batch.to_payload()
+
+
+@router.post(
+    "/drive/batches/{batch_id}/cancel",
+    dependencies=[Depends(require_api_token)],
+)
+def cancel_drive_batch(batch_id: str) -> dict:
+    try:
+        batch = get_drive_sync_manager().cancel(batch_id)
+    except DriveSyncError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return batch.to_payload()
 
 @router.get("/stats", response_model=StorageStats)
 def get_stats(store: TaskStore = Depends(get_store)) -> StorageStats:

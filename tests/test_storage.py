@@ -24,6 +24,7 @@ from src.handler import tasks as tasks_routes
 from src.handler.app import app
 from src.handler.deps import get_probe_store, get_store
 from src.store import ProbeStore, TaskStore
+from src.service.drive_sync import DriveBatch, SyncEntry
 
 
 # ---------- 工具 ----------
@@ -95,6 +96,64 @@ def _seed_task(
 
 def _post_cleanup(client, **payload) -> dict:
     return client.post("/api/storage/cleanup", json=payload).json()
+
+
+class _StubDriveSyncManager:
+    def __init__(self):
+        self.calls = []
+
+    def start_upload(self, task_id, artifacts, store):
+        artifacts = list(artifacts)
+        self.calls.append(("upload", task_id, artifacts))
+        return DriveBatch(
+            id="drive_batch_test",
+            task_id=task_id,
+            direction="UPLOAD",
+            folder_name=task_id,
+            entries=[SyncEntry(name=item["name"], size=item["size"], kind=item["kind"]) for item in artifacts],
+        )
+
+    def start_download(self, task_id, store):
+        self.calls.append(("download", task_id))
+        return DriveBatch(id="drive_batch_test", task_id=task_id, direction="DOWNLOAD", folder_name=task_id)
+
+    def get(self, _batch_id):
+        return DriveBatch(id="drive_batch_test", task_id="task_test", direction="UPLOAD")
+
+    def retry(self, _batch_id, _store):
+        return DriveBatch(id="drive_batch_test", task_id="task_test", direction="UPLOAD")
+
+    def cancel(self, _batch_id):
+        return DriveBatch(id="drive_batch_test", task_id="task_test", direction="UPLOAD", state="CANCELLED")
+
+
+def test_drive_upload_uses_task_id_and_selected_artifacts(client, monkeypatch):
+    task_id = _seed_task(client, client._store, title="mutable title")
+    manager = _StubDriveSyncManager()
+    monkeypatch.setattr(storage_routes, "get_drive_sync_manager", lambda: manager)
+
+    response = client.post(
+        f"/api/storage/tasks/{task_id}/drive/upload",
+        json={"artifactNames": ["output.mp4"]},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["taskId"] == task_id
+    assert response.json()["folderName"] == task_id
+    assert manager.calls[0][0:2] == ("upload", task_id)
+    assert [item["name"] for item in manager.calls[0][2]] == ["output.mp4"]
+
+
+def test_drive_sync_rejects_running_task(client, monkeypatch):
+    task_id = _seed_task(client, client._store, status="DOWNLOADING", progress=10)
+    manager = _StubDriveSyncManager()
+    monkeypatch.setattr(storage_routes, "get_drive_sync_manager", lambda: manager)
+
+    response = client.post(f"/api/storage/tasks/{task_id}/drive/upload", json={})
+
+    assert response.status_code == 409
+    assert "运行中" in response.json()["detail"]
+    assert manager.calls == []
 
 
 # ---------- stats ----------
