@@ -18,6 +18,14 @@
 
 ## 运行
 
+从仓库根目录启动前端、Python API 和 sidecar：
+
+```sh
+./scripts/start.sh
+```
+
+只调试 sidecar 时，也可以在本目录单独运行：
+
 ```sh
 cp config.example.json config.local.json
 go run ./cmd/server -config ./config.local.json
