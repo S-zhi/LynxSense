@@ -82,6 +82,57 @@ export function createFolderManifest(files) {
 // 便于其他前端模块和测试使用语义更直接的别名。
 export const buildFolderManifest = createFolderManifest;
 
+/** 为目录拖拽得到的 File 补充相对路径，同时保留分片上传所需的 File 接口。 */
+function droppedFileWithRelativePath(file, relativePath) {
+  return {
+    name: file.name,
+    size: file.size,
+    type: file.type,
+    lastModified: file.lastModified,
+    webkitRelativePath: relativePath,
+    slice: file.slice.bind(file),
+  };
+}
+
+/** Chrome 的目录 reader 每次只返回一批条目，必须读到空批次才算结束。 */
+async function readAllDirectoryEntries(reader) {
+  const entries = [];
+  while (true) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) return entries;
+    entries.push(...batch);
+  }
+}
+
+async function collectDroppedEntry(entry, parentPath = "") {
+  const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    return [droppedFileWithRelativePath(file, relativePath)];
+  }
+  if (!entry.isDirectory) return [];
+  const children = await readAllDirectoryEntries(entry.createReader());
+  const nested = await Promise.all(children.map((child) => collectDroppedEntry(child, relativePath)));
+  return nested.flat();
+}
+
+/**
+ * 展开拖入的文件系统条目。普通文件保持原始 File；目录则递归生成带相对路径的文件列表。
+ */
+export async function collectDroppedFiles(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []);
+  const entries = items
+    .filter((item) => item.kind === "file")
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter(Boolean);
+  const hasDirectory = entries.some((entry) => entry.isDirectory);
+  if (!hasDirectory) {
+    return { files: Array.from(dataTransfer?.files || []), hasDirectory: false };
+  }
+  const nested = await Promise.all(entries.map((entry) => collectDroppedEntry(entry)));
+  return { files: nested.flat(), hasDirectory: true };
+}
+
 /** 目录上传进度的纯计算，浏览器和 Node 测试都可复用。 */
 export function summarizeFolderProgress(upload) {
   const entries = Array.isArray(upload?.entries) ? upload.entries : [];
@@ -214,9 +265,13 @@ function bindDropzone() {
     });
   });
   dropzone.addEventListener("drop", (event) => {
-    const files = Array.from(event.dataTransfer?.files || []);
-    if (files.length > 1 || files.some((file) => file.webkitRelativePath)) void startFolderUpload(files);
-    else if (files[0]) void startUpload(files[0]);
+    void collectDroppedFiles(event.dataTransfer).then(({ files, hasDirectory }) => {
+      if (hasDirectory || files.length > 1 || files.some((file) => file.webkitRelativePath)) return startFolderUpload(files);
+      if (files[0]) return startUpload(files[0]);
+      return undefined;
+    }).catch((error) => {
+      toast(messageOf(error, "无法读取拖入的文件夹"), "ph-warning");
+    });
   });
   dropzone.addEventListener("click", (event) => {
     if (!event.target.closest("button")) input.click();

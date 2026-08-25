@@ -10,7 +10,7 @@ globalThis.window = {
   },
 };
 
-const { createFolderManifest, normalizeRelativePath, runWithConcurrency, summarizeFolderProgress } = await import("../js/ui-drive.js");
+const { collectDroppedFiles, createFolderManifest, normalizeRelativePath, runWithConcurrency, summarizeFolderProgress } = await import("../js/ui-drive.js");
 const { DriveApi } = await import("../js/drive-api.js");
 
 test("normalizeRelativePath removes traversal and keeps nested folder names", () => {
@@ -26,6 +26,49 @@ test("createFolderManifest uses webkitRelativePath and preserves file metadata",
     size: 12,
     mime: "video/mp4",
   }]);
+});
+
+function droppedFileEntry(name, size = 1) {
+  const file = { name, size, type: "text/plain", lastModified: 1, slice: () => ({}) };
+  return { name, isFile: true, isDirectory: false, file: (resolve) => resolve(file) };
+}
+
+function droppedDirectoryEntry(name, batches) {
+  return {
+    name,
+    isFile: false,
+    isDirectory: true,
+    createReader: () => ({
+      readEntries(resolve) {
+        resolve(batches.shift() || []);
+      },
+    }),
+  };
+}
+
+test("collectDroppedFiles recursively expands a dragged folder with relative paths", async () => {
+  const nested = droppedDirectoryEntry("Season 1", [[droppedFileEntry("episode.txt", 2)], []]);
+  const root = droppedDirectoryEntry("Show", [[droppedFileEntry("cover.txt", 1), nested], []]);
+  const result = await collectDroppedFiles({
+    items: [{ kind: "file", webkitGetAsEntry: () => root }],
+    files: [{ name: "Show", size: 0 }],
+  });
+
+  assert.equal(result.hasDirectory, true);
+  assert.deepEqual(createFolderManifest(result.files), [
+    { relativePath: "Show/cover.txt", name: "cover.txt", size: 1, mime: "text/plain" },
+    { relativePath: "Show/Season 1/episode.txt", name: "episode.txt", size: 2, mime: "text/plain" },
+  ]);
+});
+
+test("collectDroppedFiles reads every directory entry batch", async () => {
+  const root = droppedDirectoryEntry("Batch", [
+    [droppedFileEntry("one.txt")],
+    [droppedFileEntry("two.txt")],
+    [],
+  ]);
+  const result = await collectDroppedFiles({ items: [{ kind: "file", webkitGetAsEntry: () => root }] });
+  assert.deepEqual(result.files.map((file) => file.webkitRelativePath), ["Batch/one.txt", "Batch/two.txt"]);
 });
 
 test("summarizeFolderProgress calculates total bytes and failed entries", () => {
