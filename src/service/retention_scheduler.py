@@ -1,6 +1,6 @@
 """保留策略后台调度器服务。
 
-定期（默认每小时）或在修改保留配置时，自动执行离线产物与 Probe 记录的清理，
+定期（默认每小时）或在修改保留配置时，自动执行离线产物清理，
 并将上次清理执行时间 lastRunAt 回写到 .retention.json。
 """
 
@@ -41,7 +41,7 @@ def execute_retention_cleanup(
 
     req = CleanupPreviewRequest(
         olderThanDays=ret.days,
-        cleanupProbeRecordsOlderThanDays=ret.days,
+        preserveTaskRecords=True,
     )
     res = execute_cleanup(req, task_store, probe_store)
 
@@ -50,11 +50,10 @@ def execute_retention_cleanup(
     _save_retention(ret)
 
     logger.info(
-        "保留策略自动清理完成: days=%d, deleted_tasks=%d, deleted_bytes=%d, deleted_probes=%d",
+        "保留策略自动清理完成: days=%d, cleaned_task_artifacts=%d, deleted_bytes=%d",
         ret.days,
-        res.deletedTasks,
+        len(res.partial),
         res.deletedBytes,
-        res.deletedProbeRecords,
     )
     return res
 

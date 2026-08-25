@@ -2,7 +2,7 @@
 
 提供总占用 / 任务产物分布统计、按条件预览可清理内容、执行安全清理，
 以及简化的保留策略配置。清理动作复用 delete_task 路径，强制跳过 RUNNING
-任务并在执行前再次校验状态，避免误删。
+任务并在执行前再次校验状态，避免误删；保留策略可显式只清理产物并保留任务记录。
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from src.store import DOWNGRADE_REASON_USER_CLEANED, ProbeStore, TaskStore, Task
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/storage", tags=["storage"])
+DEFAULT_RETENTION_DAYS = 30
 
 
 class TokenBucketRateLimiter:
@@ -143,6 +144,7 @@ class CleanupPreviewRequest(BaseModel):
     kinds: Optional[List[str]] = None         # 产物类别（source/audio/.../other）
     olderThanDays: Optional[int] = Field(default=None, ge=0)  # 任务创建超过 N 天
     cleanupProbeRecordsOlderThanDays: Optional[int] = Field(default=None, ge=0)  # 清理 N 天前的 probe 记录
+    preserveTaskRecords: bool = False        # 仅清理产物，保留任务数据库记录
 
 
 class CleanupPreviewResponse(BaseModel):
@@ -165,13 +167,13 @@ class CleanupResponse(BaseModel):
 
 
 class RetentionIn(BaseModel):
-    """简化的保留策略。days = None 表示不限。"""
+    """产物保留策略。days = None 表示不限。"""
 
     days: Optional[int] = Field(default=None, ge=0)
 
 
 class RetentionOut(BaseModel):
-    days: Optional[int] = None
+    days: Optional[int] = DEFAULT_RETENTION_DAYS
     updatedAt: Optional[int] = None
     lastRunAt: Optional[int] = None
 
@@ -195,8 +197,11 @@ def _load_retention() -> RetentionOut:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return RetentionOut()
+    if not isinstance(data, dict):
+        return RetentionOut()
+    days = data["days"] if "days" in data else DEFAULT_RETENTION_DAYS
     return RetentionOut(
-        days=data.get("days"),
+        days=days,
         updatedAt=data.get("updatedAt"),
         lastRunAt=data.get("lastRunAt"),
     )
@@ -241,6 +246,7 @@ def _build_cleanup_note(
     deleted_tasks: int,
     partial_count: int,
     deleted_bytes: int,
+    preserve_task_records: bool = False,
 ) -> str:
     """构建清理结果桥接说明 note 字段。"""
     has_task_changes = deleted_tasks > 0 or partial_count > 0 or deleted_bytes > 0
@@ -262,6 +268,14 @@ def _build_cleanup_note(
     task_desc = "及".join(task_desc_parts)
 
     bytes_str = _format_bytes(deleted_bytes)
+
+    if preserve_task_records:
+        task_desc = f"{partial_count} 个任务的产物" if partial_count > 0 else "任务产物"
+        if not probe_requested:
+            return f"本次清理 {task_desc}（释放 {bytes_str}），任务记录已保留"
+        if deleted_probes > 0:
+            return f"本次清理 {task_desc}（释放 {bytes_str}）及 {deleted_probes} 条 probe 记录，任务记录已保留"
+        return f"本次清理 {task_desc}（释放 {bytes_str}），probe 记录未变动，任务记录已保留"
 
     if not probe_requested:
         return f"本次清理 {task_desc}（释放 {bytes_str}），未触发 probe 记录清理"
@@ -469,8 +483,9 @@ def execute_cleanup(
             if not artifacts:
                 continue
 
-        # 是否要求只删部分类别：kind 为空 = 整任务清理（删除目录 + 记录）
-        full_task_cleanup = not body.kinds
+        # kind 为空时默认是整任务清理（删除目录 + 记录）；自动保留策略
+        # 显式设置 preserveTaskRecords，确保只删产物并保留任务记录。
+        full_task_cleanup = not body.kinds and not body.preserveTaskRecords
         if full_task_cleanup:
             freed = _dir_size(d)
             # 联动降级：删除记录前先将 resource_status 设为 MISSING
@@ -502,6 +517,12 @@ def execute_cleanup(
                 task_id=rec.id,
                 downgrade_reason=DOWNGRADE_REASON_USER_CLEANED,
             )
+            # 产物全部清理后移除空目录；任务记录仍保留在数据库中。
+            try:
+                if d.exists() and not any(d.iterdir()):
+                    d.rmdir()
+            except OSError as e:
+                logger.debug("清理空任务目录失败 %s: %s", d, e)
             # 任务保留在 DB，仅记录 partial（剩余的产物可能已被清空），使用更新后的记录
             updated = store.get(rec.id) or current
             remaining = _scan_artifacts(rec.id)
@@ -519,6 +540,7 @@ def execute_cleanup(
         deleted_tasks=deleted_tasks,
         partial_count=len(partial),
         deleted_bytes=deleted_bytes,
+        preserve_task_records=body.preserveTaskRecords,
     )
 
     return CleanupResponse(
@@ -552,7 +574,7 @@ def cleanup(
 
 @router.get("/retention", response_model=RetentionOut)
 def get_retention() -> RetentionOut:
-    """读取保留策略（days=None 表示不限）。"""
+    """读取产物保留策略（days=None 表示不限，未配置时默认为 30 天）。"""
     return _load_retention()
 
 
@@ -562,7 +584,7 @@ def get_retention() -> RetentionOut:
     dependencies=[Depends(require_api_token)],
 )
 def put_retention(body: RetentionIn) -> RetentionOut:
-    """写入保留策略。若配置了有效天数，异步触发一次清理。"""
+    """写入产物保留策略。自动清理只删除产物并保留任务记录。"""
     current = _load_retention()
     out = RetentionOut(
         days=body.days,
