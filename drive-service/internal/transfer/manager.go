@@ -560,13 +560,15 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		_, err = m.store.UpdateTransfer(id, func(t *store.Transfer) error {
-			t.Transferred = result.NextOffset
-			if result.File != nil {
+		if result.File != nil {
+			_, err = m.store.UpdateTransfer(id, func(t *store.Transfer) error {
+				t.Transferred = result.NextOffset
 				t.FileID = result.File.ID
-			}
-			return nil
-		})
+				return nil
+			})
+		} else {
+			_, err = m.store.UpdateTransferProgress(id, result.NextOffset)
+		}
 		if err != nil {
 			return err
 		}
@@ -753,7 +755,7 @@ func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPa
 					return io.ErrShortWrite
 				}
 				newOffset := offset + int64(n)
-				_, _ = m.store.UpdateTransfer(transferID, func(t *store.Transfer) error { t.Transferred = newOffset; return nil })
+				_, _ = m.store.UpdateTransferProgress(transferID, newOffset)
 				offset = newOffset
 			}
 			if readErr != nil {
