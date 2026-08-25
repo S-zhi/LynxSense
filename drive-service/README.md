@@ -10,9 +10,9 @@
 4. 复制 `config.example.json` 为 `config.local.json`，将 `google_client_config_file` 指向下载的 JSON；也可以直接填写 `google_client_id` 与 `google_client_secret`。
 5. 启动服务后打开 `http://127.0.0.1:8787/api/oauth/google/start`，浏览器完成授权。
 
-当前提交中 `google_client_id`、`google_client_secret` 和 `google_redirect_uri` 都故意留空。若 `google_client_config_file` 也留空，服务会自动读取 `data_dir/oauth_client.json`。`google_redirect_uri` 为空时，sidecar 会为本次授权创建一个随机端口的 `127.0.0.1` loopback 回调，这是 Desktop app 的推荐方式；因此不需要把回调地址写死在代码里。OAuth 客户端 JSON 和 token 都是本地敏感文件，不应提交到 Git。
+当前提交中 `google_client_id` 和 `google_client_secret` 都故意留空。若 `google_client_config_file` 也留空，服务会自动读取 `data_dir/oauth_client.json`。sidecar 每次授权都会创建一个随机端口的 `127.0.0.1` loopback 回调，这是 Desktop app 的推荐方式；不支持固定回调地址，也不需要把回调地址写死在代码里。OAuth 客户端 JSON 和 token 都是本地敏感文件，不应提交到 Git。
 
-本地配置默认按 **Desktop app** OAuth Client 处理。如果在 Google Cloud 中创建的是 **Web application** 类型，需要把 `http://127.0.0.1:8787/api/oauth/google/callback` 登记为授权重定向 URI，并在本地配置中填写同一个地址。
+本地配置必须使用 **Desktop app** 类型的 OAuth Client，以支持动态 loopback 回调。
 
 默认权限是 `https://www.googleapis.com/auth/drive.file`：sidecar 创建的 `Subtitles AI` 文件夹及其文件可被读写，不申请整个 Drive 的权限。
 

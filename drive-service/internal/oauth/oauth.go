@@ -1,3 +1,5 @@
+// Package oauth 实现单用户 Google OAuth 流程，并将 Refresh Token 持久化到 sidecar
+// 数据目录中。用户 Token 不会写入受源码管理的配置。
 package oauth
 
 import (
@@ -33,14 +35,16 @@ type clientFile struct {
 	Web       *clientDetails `json:"web"`
 }
 
+// 用来保存“当前正在进行中的一次 Google OAuth 登录流程”的临时状态。
 type pendingAuth struct {
 	cfg      *oauth2.Config
-	state    string
-	verifier string
+	state    string // 鉴权状态机,当前值为机器凭证，用于验证回调是否正确
+	verifier string // PKCE 校验值，用于交换授权码
 	server   *http.Server
 	listener net.Listener
 }
 
+// Manager 管理一次浏览器授权流程，以及进程级 Drive 客户端后续的 Token 刷新。
 type Manager struct {
 	cfg *config.Config
 
@@ -52,8 +56,10 @@ type Manager struct {
 	clientLoaded bool
 }
 
+// NewManager 创建 OAuth 管理器，不执行网络 I/O。
 func NewManager(cfg *config.Config) *Manager { return &Manager{cfg: cfg} }
 
+// credentials 按“配置字段优先、客户端 JSON 兜底”的顺序加载 OAuth 应用凭据。
 func (m *Manager) credentials() (string, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -63,6 +69,7 @@ func (m *Manager) credentials() (string, string, error) {
 	m.clientLoaded = true
 	m.clientID = m.cfg.GoogleClientID
 	m.clientSecret = m.cfg.GoogleClientSecret
+	// 不缓存缺失配置；sidecar 运行期间用户仍可能补充 OAuth 客户端 JSON。
 	if m.clientID == "" || m.clientSecret == "" {
 		path := m.cfg.ClientConfigPath()
 		b, err := os.ReadFile(path)
@@ -88,14 +95,14 @@ func (m *Manager) credentials() (string, string, error) {
 		}
 	}
 	if m.clientID == "" || m.clientSecret == "" {
-		// Do not cache a missing configuration: the user may place the OAuth
-		// client JSON while the local sidecar is still running.
+		// 不缓存缺失配置；sidecar 运行期间用户仍可能补充 OAuth 客户端 JSON。
 		m.clientLoaded = false
 		return "", "", errors.New("Google OAuth ClientID/ClientSecret 尚未配置；请填写配置或导入 Desktop OAuth JSON")
 	}
 	return m.clientID, m.clientSecret, nil
 }
 
+// oauthConfig 为 loopback 回调或显式配置的回调地址构造 Google OAuth 配置。
 func (m *Manager) oauthConfig(redirect string) (*oauth2.Config, error) {
 	id, secret, err := m.credentials()
 	if err != nil {
@@ -113,25 +120,19 @@ func (m *Manager) oauthConfig(redirect string) (*oauth2.Config, error) {
 	}, nil
 }
 
-// Start starts a browser authorization flow. With an empty configured redirect
-// URI it creates a temporary loopback listener, which is the recommended flow
-// for a local Desktop OAuth client.
+// Start 启动浏览器授权流程，并始终创建随机端口的临时 loopback 监听器。
+// 这是本地 Desktop OAuth 客户端推荐的动态回调方式。
 func (m *Manager) Start() (string, error) {
-	redirect := m.cfg.GoogleRedirectURI
-	var listener net.Listener
-	var err error
-	if redirect == "" {
-		listener, err = net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return "", fmt.Errorf("start OAuth loopback listener: %w", err)
-		}
-		redirect = "http://" + listener.Addr().String()
+	// 绑定端口 0 让操作系统自动选择未占用的 loopback 端口，避免固定端口，
+	// 也降低与其他本地服务冲突的可能性。
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("start OAuth loopback listener: %w", err)
 	}
+	redirect := "http://" + listener.Addr().String()
 	ocfg, err := m.oauthConfig(redirect)
 	if err != nil {
-		if listener != nil {
-			_ = listener.Close()
-		}
+		_ = listener.Close()
 		return "", err
 	}
 	state, err := randomString(32)
@@ -142,6 +143,8 @@ func (m *Manager) Start() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// state 用于防止登录响应串线；verifier 启用 PKCE，即使授权码在到达回调前
+	// 被截获，也不能直接兑换 Token。
 	p := &pendingAuth{cfg: ocfg, state: state, verifier: verifier, listener: listener}
 	m.mu.Lock()
 	if m.pending != nil && m.pending.listener != nil {
@@ -150,28 +153,16 @@ func (m *Manager) Start() (string, error) {
 	m.pending = p
 	m.mu.Unlock()
 
-	if listener != nil {
-		p.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			m.finishCallback(w, r, p)
-		})}
-		go func() {
-			_ = p.server.Serve(listener)
-		}()
-	}
+	p.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.finishCallback(w, r, p)
+	})}
+	go func() {
+		_ = p.server.Serve(listener)
+	}()
 	return ocfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)), nil
 }
 
-func (m *Manager) Callback(w http.ResponseWriter, r *http.Request) {
-	m.mu.Lock()
-	p := m.pending
-	m.mu.Unlock()
-	if p == nil {
-		http.Error(w, "没有进行中的 Google OAuth 授权", http.StatusBadRequest)
-		return
-	}
-	m.finishCallback(w, r, p)
-}
-
+// finishCallback 校验 OAuth state 和 PKCE 参数，兑换授权码并保存 Refresh Token。
 func (m *Manager) finishCallback(w http.ResponseWriter, r *http.Request, p *pendingAuth) {
 	if r.URL.Query().Get("state") != p.state {
 		http.Error(w, "OAuth state 校验失败", http.StatusBadRequest)
@@ -205,6 +196,7 @@ func (m *Manager) finishCallback(w http.ResponseWriter, r *http.Request, p *pend
 	_, _ = io.WriteString(w, "<html><body><h3>Google Drive 已连接</h3><p>可以关闭此页面返回应用。</p></body></html>")
 }
 
+// clearPending 清理当前授权流程，并关闭其临时 HTTP 服务或 loopback 监听器。
 func (m *Manager) clearPending(p *pendingAuth) {
 	m.mu.Lock()
 	if m.pending == p {
@@ -220,6 +212,7 @@ func (m *Manager) clearPending(p *pendingAuth) {
 	}
 }
 
+// saveToken 以受限权限原子写入 OAuth Token，避免留下半写入文件。
 func (m *Manager) saveToken(tok *oauth2.Token) error {
 	b, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
@@ -232,6 +225,7 @@ func (m *Manager) saveToken(tok *oauth2.Token) error {
 	return os.Rename(tmp, m.cfg.TokenPath())
 }
 
+// loadToken 从本地数据目录读取 OAuth Token；文件不存在表示尚未授权。
 func (m *Manager) loadToken() (*oauth2.Token, error) {
 	b, err := os.ReadFile(m.cfg.TokenPath())
 	if err != nil {
@@ -247,6 +241,8 @@ func (m *Manager) loadToken() (*oauth2.Token, error) {
 	return &tok, nil
 }
 
+// TokenSource 返回由持久化 Token 支持的可刷新 TokenSource。刷新后的 Token 会
+// 写回磁盘，使后续上传和下载无需感知 Access Token 过期。
 func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	tok, err := m.loadToken()
 	if err != nil {
@@ -255,13 +251,9 @@ func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	if tok == nil || tok.RefreshToken == "" {
 		return nil, errors.New("尚未完成 Google Drive 授权")
 	}
-	redirect := m.cfg.GoogleRedirectURI
-	if redirect == "" {
-		// The redirect URI is only needed during the code exchange. The token
-		// endpoint accepts the same client credentials for refresh requests.
-		redirect = "http://127.0.0.1"
-	}
-	ocfg, err := m.oauthConfig(redirect)
+	// 刷新 Token 不会再次发送 redirect_uri；这里仅提供一个占位值构造
+	// oauth2.Config，真正的动态回调地址只在首次授权码兑换时使用。
+	ocfg, err := m.oauthConfig("http://127.0.0.1")
 	if err != nil {
 		return nil, err
 	}
@@ -269,6 +261,8 @@ func (m *Manager) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	return &persistingSource{inner: oauth2.ReuseTokenSource(tok, inner), save: m.saveToken}, nil
 }
 
+// HTTPClient 返回带认证信息且使用配置请求超时的 HTTP 客户端。请求取消仍优先于
+// 此超时生效。
 func (m *Manager) HTTPClient(ctx context.Context) (*http.Client, error) {
 	source, err := m.TokenSource(ctx)
 	if err != nil {
@@ -281,6 +275,8 @@ func (m *Manager) HTTPClient(ctx context.Context) (*http.Client, error) {
 	return client, nil
 }
 
+// Disconnect 尽可能撤销当前 Access Token，并删除本地 Refresh Token；下次使用时
+// 需要重新通过浏览器登录。
 func (m *Manager) Disconnect(ctx context.Context) error {
 	tok, err := m.loadToken()
 	if err != nil {
@@ -304,6 +300,7 @@ func (m *Manager) Disconnect(ctx context.Context) error {
 	return nil
 }
 
+// Status 返回配置和连接状态，但不会暴露任何 Token。
 func (m *Manager) Status() map[string]any {
 	id, _, credErr := m.credentials()
 	tok, tokErr := m.loadToken()
@@ -334,6 +331,7 @@ func (m *Manager) Status() map[string]any {
 	}
 }
 
+// persistingSource 在允许 oauth2 按需刷新 Access Token 的同时，去重 Token 写入。
 type persistingSource struct {
 	inner oauth2.TokenSource
 	save  func(*oauth2.Token) error
@@ -341,6 +339,7 @@ type persistingSource struct {
 	last  string
 }
 
+// Token 获取当前有效 Token，并仅在 Token 内容变化时持久化刷新结果。
 func (s *persistingSource) Token() (*oauth2.Token, error) {
 	tok, err := s.inner.Token()
 	if err != nil {
@@ -358,6 +357,7 @@ func (s *persistingSource) Token() (*oauth2.Token, error) {
 	return tok, nil
 }
 
+// randomString 使用密码学安全随机数生成 state 或 PKCE verifier。
 func randomString(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -366,6 +366,7 @@ func randomString(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// stringsReader 将字符串包装成 io.Reader，用于构造撤销 Token 的请求体。
 func stringsReader(value string) io.Reader { return &stringReader{value: value} }
 
 type stringReader struct {
@@ -373,6 +374,7 @@ type stringReader struct {
 	offset int
 }
 
+// Read 按顺序读取字符串内容，直到所有字节都被消费完毕。
 func (r *stringReader) Read(p []byte) (int, error) {
 	if r.offset >= len(r.value) {
 		return 0, io.EOF

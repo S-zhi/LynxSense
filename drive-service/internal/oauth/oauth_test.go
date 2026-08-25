@@ -9,6 +9,8 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/config"
 )
 
+// TestStatusCanPickUpOAuthClientJSONAfterInitialEmptyConfig 验证运行期间补充 OAuth
+// 客户端 JSON 后，状态接口可以重新识别配置。
 func TestStatusCanPickUpOAuthClientJSONAfterInitialEmptyConfig(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()

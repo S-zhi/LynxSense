@@ -15,6 +15,7 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/transfer"
 )
 
+// TestUploadEndpointSupportsOffsetChecks 验证分片上传的偏移校验、查询和删除流程。
 func TestUploadEndpointSupportsOffsetChecks(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()
@@ -87,6 +88,7 @@ func TestUploadEndpointSupportsOffsetChecks(t *testing.T) {
 	}
 }
 
+// TestLocalhostCORSOriginIsReflected 验证允许的本地前端来源会收到 CORS 响应头。
 func TestLocalhostCORSOriginIsReflected(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()

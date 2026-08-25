@@ -1,3 +1,5 @@
+// Package transfer 负责执行 sidecar 暴露的两条长任务流水线：本地暂存上传到
+// Drive，以及从 Drive 下载后提交到现有 Python API。
 package transfer
 
 import (
@@ -34,6 +36,8 @@ const (
 	StateCancelled    = "CANCELLED"
 )
 
+// Manager 管理后台传输 worker 及其取消函数。每个对外可见步骤执行前，进度都会
+// 先写入 Store。
 type Manager struct {
 	cfg   *config.Config
 	store *store.Store
@@ -43,10 +47,12 @@ type Manager struct {
 	cancels map[string]context.CancelFunc
 }
 
+// NewManager 创建进程级传输协调器。
 func NewManager(cfg *config.Config, state *store.Store, client *driveclient.Client) *Manager {
 	return &Manager{cfg: cfg, store: state, drive: client, cancels: map[string]context.CancelFunc{}}
 }
 
+// StartDriveUpload 创建一个从本地文件断点上传到 Drive 的任务。
 func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) {
 	if !upload.Completed || upload.Length <= 0 || upload.Path == "" {
 		return store.Transfer{}, errors.New("upload staging file is incomplete")
@@ -67,6 +73,7 @@ func (m *Manager) StartDriveUpload(upload store.Upload) (store.Transfer, error) 
 	return t, nil
 }
 
+// StartPythonImport 创建一个从 Drive 下载并导入 Python 的任务。
 func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	if fileID == "" {
 		return store.Transfer{}, errors.New("fileId 不能为空")
@@ -83,12 +90,14 @@ func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	return t, nil
 }
 
+// Recover 重新启动进程退出时遗留的非终态传输任务。
 func (m *Manager) Recover() {
 	for _, t := range m.store.RecoverableTransfers() {
 		m.start(t.ID)
 	}
 }
 
+// Pause 将任务标记为暂停，并取消当前 HTTP 请求。
 func (m *Manager) Pause(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -104,6 +113,7 @@ func (m *Manager) Pause(id string) error {
 	return nil
 }
 
+// Resume 使用已持久化的断点重启暂停或失败的任务。
 func (m *Manager) Resume(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -119,6 +129,7 @@ func (m *Manager) Resume(id string) error {
 	return nil
 }
 
+// Cancel 停止传输任务并删除本地暂存文件。
 func (m *Manager) Cancel(id string) error {
 	t, ok := m.store.GetTransfer(id)
 	if !ok {
@@ -144,6 +155,7 @@ func (m *Manager) Cancel(id string) error {
 	return nil
 }
 
+// start 为任务创建独立取消上下文，并保证同一任务不会并发启动多个 worker。
 func (m *Manager) start(id string) {
 	m.mu.Lock()
 	if _, exists := m.cancels[id]; exists {
@@ -182,6 +194,7 @@ func (m *Manager) start(id string) {
 	}()
 }
 
+// cancel 查找任务对应的取消函数，并终止其当前网络或磁盘操作。
 func (m *Manager) cancel(id string) {
 	m.mu.Lock()
 	if cancel, ok := m.cancels[id]; ok {
@@ -190,6 +203,7 @@ func (m *Manager) cancel(id string) {
 	m.mu.Unlock()
 }
 
+// runDriveUpload 校验本地暂存文件，通过 Drive resumable session 分片上传，并保存进度。
 func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateTransferring; return nil }); err != nil {
 		return err
@@ -216,6 +230,8 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 		}
 		t, _ = m.store.GetTransfer(id)
 		if t.SessionURL == "" {
+			// Drive 断点会话是不透明的，可能随时过期。重置 URL 和偏移量，
+			// 确保新会话不会跳过任何字节。
 			if t.Transferred != 0 {
 				if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.Transferred = 0; return nil }); err != nil {
 					return err
@@ -271,6 +287,7 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 	}
 }
 
+// runPythonImport 下载 Drive 文件到本地，校验 MD5 后以 multipart 形式提交 Python API。
 func (m *Manager) runPythonImport(ctx context.Context, id string) error {
 	if _, err := m.store.UpdateTransfer(id, func(t *store.Transfer) error { t.State = StateTransferring; return nil }); err != nil {
 		return err
@@ -344,6 +361,7 @@ func (m *Manager) runPythonImport(ctx context.Context, id string) error {
 	return err
 }
 
+// downloadToFile 从已存在的 .part 文件大小恢复 Range 下载，完成后原子改名为正式文件。
 func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPath, readyPath string, total int64) error {
 	file, err := os.OpenFile(partPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -401,9 +419,8 @@ func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPa
 			return fmt.Errorf("Drive range download returned %s", response.Status)
 		}
 		if offset > 0 && response.StatusCode == http.StatusOK {
-			// A server that ignores Range would otherwise append the full file to
-			// the partial file. Restart from zero so the local artifact remains
-			// verifiable instead of silently corrupting it.
+			// 如果服务端忽略 Range，直接追加会把完整文件接到残缺文件后面。
+			// 从零开始重新下载，避免本地文件静默损坏且无法校验。
 			_ = response.Body.Close()
 			if err := file.Truncate(0); err != nil {
 				return err
@@ -452,6 +469,7 @@ func (m *Manager) downloadToFile(ctx context.Context, transferID, fileID, partPa
 	}
 }
 
+// cleanupImportFiles 删除指定导入任务产生的临时文件和已完成文件。
 func (m *Manager) cleanupImportFiles(transferID string) {
 	paths, err := filepath.Glob(filepath.Join(m.cfg.StagingDir(), transferID+"-*"))
 	if err != nil {
@@ -462,6 +480,7 @@ func (m *Manager) cleanupImportFiles(transferID string) {
 	}
 }
 
+// postPythonUpload 流式构造 multipart 请求，将已下载文件提交到 Python 上传接口。
 func (m *Manager) postPythonUpload(ctx context.Context, transferID, path, name string) error {
 	if m.cfg.PythonBaseURL == "" {
 		return errors.New("python_base_url 未配置")
@@ -520,6 +539,7 @@ func (m *Manager) postPythonUpload(ctx context.Context, transferID, path, name s
 	return nil
 }
 
+// md5File 流式计算文件的 MD5，用于与 Drive 元数据进行完整性校验。
 func md5File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -533,6 +553,7 @@ func md5File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// retrySleep 在下载失败后等待固定间隔，并响应任务取消。
 func retrySleep(ctx context.Context) error {
 	t := time.NewTimer(2 * time.Second)
 	defer t.Stop()

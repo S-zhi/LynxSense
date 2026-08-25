@@ -5,7 +5,6 @@
   "python_api_token": "",
   "google_client_id": "",
   "google_client_secret": "",
-  "google_redirect_uri": "",
   "google_client_config_file": "",
   "google_scopes": [
     "https://www.googleapis.com/auth/drive.file"

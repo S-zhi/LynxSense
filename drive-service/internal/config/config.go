@@ -1,3 +1,5 @@
+// Package config 负责加载并规范化 Drive sidecar 的本地配置。
+// OAuth 凭据和 Token 始终置于源码之外，同时为单用户部署提供稳定默认值。
 package config
 
 import (
@@ -12,9 +14,8 @@ const defaultScope = "https://www.googleapis.com/auth/drive.file"
 
 const driveChunkMultiple = int64(256 * 1024)
 
-// Config contains the small amount of process configuration needed by the
-// single-user Drive sidecar. Credentials are intentionally empty in the
-// example config and can be supplied through a local OAuth client JSON file.
+// Config 保存单用户 Drive sidecar 所需的进程配置。示例配置中的凭据特意留空，
+// 可通过本地 OAuth 客户端 JSON 文件提供。
 type Config struct {
 	ListenAddr             string   `json:"listen_addr"`
 	DataDir                string   `json:"data_dir"`
@@ -22,7 +23,6 @@ type Config struct {
 	PythonAPIToken         string   `json:"python_api_token"`
 	GoogleClientID         string   `json:"google_client_id"`
 	GoogleClientSecret     string   `json:"google_client_secret"`
-	GoogleRedirectURI      string   `json:"google_redirect_uri"`
 	GoogleClientConfigFile string   `json:"google_client_config_file"`
 	GoogleScopes           []string `json:"google_scopes"`
 	DriveFolderID          string   `json:"drive_folder_id"`
@@ -31,6 +31,7 @@ type Config struct {
 	RequestTimeoutSeconds  int      `json:"request_timeout_seconds"`
 }
 
+// Default 返回适合本地开发的 sidecar 安全默认配置。
 func Default() Config {
 	return Config{
 		ListenAddr:            "127.0.0.1:8787",
@@ -43,6 +44,8 @@ func Default() Config {
 	}
 }
 
+// Load 从 path 读取 JSON 配置，并为缺失或无效的非敏感字段应用默认值。
+// path 为空时直接返回 Default，不执行文件 I/O。
 func Load(path string) (Config, error) {
 	cfg := Default()
 	if path == "" {
@@ -73,10 +76,9 @@ func Load(path string) (Config, error) {
 	if cfg.ChunkSizeBytes <= 0 {
 		cfg.ChunkSizeBytes = Default().ChunkSizeBytes
 	}
-	// Drive resumable uploads require every non-final chunk to be a multiple
-	// of 256 KiB. Normalize an accidental smaller/non-aligned local setting so
-	// a config typo cannot turn into a remote 400 response halfway through a
-	// large upload.
+	// Drive 断点上传要求除最后一块外，每个分片大小必须是 256 KiB 的倍数。
+	// 这里统一修正过小或未对齐的配置，避免配置笔误导致大文件上传到一半
+	// 才收到远端 400 错误。
 	if cfg.ChunkSizeBytes < driveChunkMultiple {
 		cfg.ChunkSizeBytes = driveChunkMultiple
 	} else {
@@ -91,6 +93,7 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+// EnsureDataDir 创建用于保存 OAuth 状态、传输状态和临时分片文件的私有目录。
 func (c Config) EnsureDataDir() error {
 	if c.DataDir == "" {
 		return errors.New("data_dir is empty")
@@ -98,18 +101,23 @@ func (c Config) EnsureDataDir() error {
 	return os.MkdirAll(filepath.Clean(c.DataDir), 0o700)
 }
 
+// StatePath 返回持久化传输状态文件的路径。
 func (c Config) StatePath() string {
 	return filepath.Join(c.DataDir, "state.json")
 }
 
+// TokenPath 返回本地持久化 Refresh Token 的路径。
 func (c Config) TokenPath() string {
 	return filepath.Join(c.DataDir, "oauth_token.json")
 }
 
+// StagingDir 返回 Drive 断点下载使用的临时目录。
 func (c Config) StagingDir() string {
 	return filepath.Join(c.DataDir, "staging")
 }
 
+// ClientConfigPath 返回配置的 OAuth 客户端 JSON 路径；未配置时回退到
+// 私有数据目录下的 oauth_client.json。
 func (c Config) ClientConfigPath() string {
 	if c.GoogleClientConfigFile != "" {
 		return c.GoogleClientConfigFile

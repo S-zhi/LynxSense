@@ -2,6 +2,7 @@ package drive
 
 import "testing"
 
+// TestParseDriveRange 验证 Drive Range 响应头到下一个偏移量的解析结果。
 func TestParseDriveRange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -21,6 +22,7 @@ func TestParseDriveRange(t *testing.T) {
 	}
 }
 
+// TestEscapeQueryLiteral 验证 Drive 查询字面量中的单引号转义。
 func TestEscapeQueryLiteral(t *testing.T) {
 	if got := escapeQueryLiteral("a'b"); got != "a\\'b" {
 		t.Fatalf("escaped query literal = %q", got)

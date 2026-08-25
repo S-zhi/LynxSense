@@ -1,3 +1,5 @@
+// server 命令启动供 Python Web 应用使用的本地 Google Drive sidecar。
+// 进程内的各项服务依赖均以单例方式创建。
 package main
 
 import (
@@ -15,6 +17,7 @@ import (
 	"github.com/s-zhi/subtitles-ai-drive/internal/transfer"
 )
 
+// main 加载配置、组装单例服务、恢复任务并启动本地 HTTP 服务。
 func main() {
 	configPath := flag.String("config", "./config.local.json", "path to local JSON config")
 	flag.Parse()
@@ -37,8 +40,12 @@ func main() {
 	auth := oauth.NewManager(&cfg)
 	drive := driveclient.NewClient(&cfg, auth, state)
 	transfers := transfer.NewManager(&cfg, state, drive)
+	// 在接收新请求前，重新调度持久化记录中尚未结束的传输任务。
 	transfers.Recover()
 
+	// ReadHeaderTimeout 只限制请求头解析时间。请求体的持续传输由请求上下文
+	// 和传输流水线控制；IdleTimeout 作用于 keep-alive 请求之间的空闲时间，
+	// 不会限制上传数据本身的持续时间。
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           httpapi.New(&cfg, auth, drive, transfers, state),

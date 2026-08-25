@@ -11,6 +11,7 @@ const RUNNING = new Set([
   "PENDING", "DOWNLOADING", "EXTRACTING",
   "TRANSCRIBING", "TRANSLATING", "BURNING",
 ]);
+const STORAGE_REFRESH_INTERVAL_MS = 8000;
 
 const KIND_LABEL = {
   source: "源视频",
@@ -41,6 +42,7 @@ const local = {
   kindFilter: "",
   loading: false,
   refreshTimer: null,
+  visibilityRefreshRegistered: false,
 };
 
 let els = {};
@@ -100,12 +102,27 @@ export function initStorage() {
   startAutoRefresh();
 }
 
-/* ---------- 自动刷新：仅在 Tab 可见时每 8s 拉一次统计 ---------- */
+/* ---------- 自动刷新：Tab 可见时轮询，页面回到前台后立即重新扫描 ---------- */
 function startAutoRefresh() {
   clearInterval(local.refreshTimer);
   local.refreshTimer = setInterval(() => {
     if (state.view === "storage" && !local.loading) refresh();
-  }, 8000);
+  }, STORAGE_REFRESH_INTERVAL_MS);
+
+  // 浏览器标签页在后台时会降低定时器频率；重新回到前台立即刷新，
+  // 避免外部文件变化后用户仍看到离开页面前的产物列表。
+  if (!local.visibilityRefreshRegistered) {
+    document.addEventListener("visibilitychange", () => {
+      if (
+        document.visibilityState === "visible"
+        && state.view === "storage"
+        && !local.loading
+      ) {
+        refresh();
+      }
+    });
+    local.visibilityRefreshRegistered = true;
+  }
 }
 
 /* ---------- 数据加载 ---------- */

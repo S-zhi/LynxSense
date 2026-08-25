@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestLoadAppliesSafeDefaultsAndDriveChunkAlignment 验证配置默认值和 Drive 分片对齐规则。
 func TestLoadAppliesSafeDefaultsAndDriveChunkAlignment(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()

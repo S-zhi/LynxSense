@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestStorePersistsUploadsAndTransfers 验证上传、传输状态以及可恢复任务的持久化。
 func TestStorePersistsUploadsAndTransfers(t *testing.T) {
 	t.Parallel()
 	statePath := filepath.Join(t.TempDir(), "nested", "state.json")
