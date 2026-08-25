@@ -134,7 +134,7 @@ class SubtitleDocument(BaseModel):
     """PUT 请求体：一条 locale 的全部字幕。"""
 
     locale: _Locale
-    entries: List[SubtitleEntry] = Field(min_length=0)
+    entries: List[SubtitleEntry] = Field(min_length=1)
     # 可选：写入版本文件而不是覆盖。例 "v2" -> original.v2.srt
     version: Optional[str] = None
 
