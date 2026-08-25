@@ -10,7 +10,7 @@ globalThis.window = {
   },
 };
 
-const { collectDroppedFiles, createFolderManifest, normalizeRelativePath, runWithConcurrency, summarizeFolderProgress } = await import("../js/ui-drive.js");
+const { collectDroppedFiles, createFolderManifest, mergeFolderEntries, normalizeRelativePath, runWithConcurrency, summarizeFolderProgress } = await import("../js/ui-drive.js");
 const { DriveApi } = await import("../js/drive-api.js");
 
 test("normalizeRelativePath removes traversal and keeps nested folder names", () => {
@@ -69,6 +69,31 @@ test("collectDroppedFiles reads every directory entry batch", async () => {
   ]);
   const result = await collectDroppedFiles({ items: [{ kind: "file", webkitGetAsEntry: () => root }] });
   assert.deepEqual(result.files.map((file) => file.webkitRelativePath), ["Batch/one.txt", "Batch/two.txt"]);
+});
+
+test("mergeFolderEntries matches remote entries by path when the response order changes", () => {
+  const files = [
+    { name: "z.png", size: 102126, webkitRelativePath: "AI学习/z.png" },
+    { name: "a.png", size: 33690, webkitRelativePath: "AI学习/a.png" },
+  ];
+  const manifest = createFolderManifest(files);
+  const entries = mergeFolderEntries(manifest, files, [
+    { id: "entry-a", relativePath: "AI学习/a.png", size: 33690, state: "PENDING" },
+    { id: "entry-z", relativePath: "AI学习/z.png", size: 102126, state: "PENDING" },
+  ]);
+
+  assert.equal(entries[0].id, "entry-z");
+  assert.equal(entries[0].file, files[0]);
+  assert.equal(entries[1].id, "entry-a");
+  assert.equal(entries[1].file, files[1]);
+});
+
+test("mergeFolderEntries rejects a response that is missing a manifest path", () => {
+  const files = [{ name: "a.png", size: 1, webkitRelativePath: "Root/a.png" }];
+  assert.throws(
+    () => mergeFolderEntries(createFolderManifest(files), files, [{ id: "wrong", relativePath: "Root/b.png" }]),
+    /sidecar 未返回文件夹条目：Root\/a\.png/,
+  );
 });
 
 test("summarizeFolderProgress calculates total bytes and failed entries", () => {

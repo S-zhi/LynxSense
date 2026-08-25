@@ -516,16 +516,18 @@ async function startUpload(file) {
   }
 }
 
-/** 将服务端批次响应与浏览器 File 对齐，兼容不同版本的字段命名。 */
-function mergeFolderEntries(manifest, files, remoteEntries) {
-  const used = new Set();
+/** 将服务端批次响应与浏览器 File 按相对路径严格对齐。 */
+export function mergeFolderEntries(manifest, files, remoteEntries) {
+  const remoteByPath = new Map();
+  for (const remote of remoteEntries) {
+    const relativePath = entryPath(remote);
+    if (!relativePath) throw new Error("sidecar 返回了缺少相对路径的文件夹条目");
+    if (remoteByPath.has(relativePath)) throw new Error(`sidecar 返回了重复的文件夹条目：${relativePath}`);
+    remoteByPath.set(relativePath, remote);
+  }
   return manifest.map((item, index) => {
-    const matchIndex = remoteEntries.findIndex((entry, candidateIndex) => {
-      if (used.has(candidateIndex)) return false;
-      return entryPath(entry) === item.relativePath || candidateIndex === index;
-    });
-    const remote = matchIndex >= 0 ? remoteEntries[matchIndex] : {};
-    if (matchIndex >= 0) used.add(matchIndex);
+    const remote = remoteByPath.get(item.relativePath);
+    if (!remote) throw new Error(`sidecar 未返回文件夹条目：${item.relativePath}`);
     return {
       ...item,
       file: files[index],
