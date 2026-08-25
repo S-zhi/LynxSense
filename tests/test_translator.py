@@ -49,9 +49,18 @@ def test_parse_code_fenced_json():
     assert _parse_translation_response(content, 2) == ["x", "y"]
 
 
-def test_parse_truncated_json_array():
+def test_parse_truncated_json_array_returns_error():
     content = '["hello", "world", "partial'
-    assert _parse_translation_response(content, 3) == ["hello", "world"]
+    with pytest.raises(TranslateError) as exc_info:
+        _parse_translation_response(content, 3)
+    assert exc_info.value.code == "invalid_response"
+    assert "JSON 截断，只恢复了 2/3 条" in str(exc_info.value)
+
+
+def test_parse_truncated_json_array_exact_match():
+    # If the JSON array was truncated at closing bracket but all expected elements were recovered
+    content = '["hello", "world"'
+    assert _parse_translation_response(content, 2) == ["hello", "world"]
 
 
 def test_parse_numbered_fallback():
