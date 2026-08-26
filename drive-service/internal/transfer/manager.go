@@ -398,14 +398,24 @@ func (m *Manager) markTransferTransferring(id string) error {
 	if !ok {
 		return os.ErrNotExist
 	}
-	if _, err := m.store.UpdateTransfer(id, func(current *store.Transfer) error {
+	if t.State == StateCancelled || t.State == StatePaused || t.State == StateSuccess {
+		return nil
+	}
+	updated, updateErr := m.store.UpdateTransfer(id, func(current *store.Transfer) error {
+		if current.State == StateCancelled || current.State == StatePaused || current.State == StateSuccess {
+			return nil
+		}
 		current.State = StateTransferring
 		return nil
-	}); err != nil {
-		return err
+	})
+	if updateErr != nil || updated.State != StateTransferring {
+		return updateErr
 	}
 	if t.EntryID != "" {
 		_, _ = m.store.UpdateFolderEntry(t.EntryID, func(entry *store.FolderEntry) error {
+			if entry.State == StateCancelled || entry.State == StatePaused || entry.State == StateSuccess {
+				return nil
+			}
 			entry.State = StateTransferring
 			entry.Error = ""
 			return nil
@@ -525,7 +535,13 @@ func (m *Manager) runDriveUpload(ctx context.Context, id string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		t, _ = m.store.GetTransfer(id)
+		t, ok := m.store.GetTransfer(id)
+		if !ok {
+			return os.ErrNotExist
+		}
+		if t.State == StatePaused || t.State == StateCancelled || t.State == StateSuccess {
+			return nil
+		}
 		if t.SessionURL == "" {
 			// Drive 断点会话是不透明的，可能随时过期。重置 URL 和偏移量，
 			// 确保新会话不会跳过任何字节。
