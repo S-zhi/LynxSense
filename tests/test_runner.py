@@ -113,6 +113,33 @@ def test_run_failure_fallback_when_no_event(store, monkeypatch):
     assert rec.status == "FAILED"
 
 
+
+def test_run_cancelled_resource_error_marks_resources_missing(store, monkeypatch):
+    tid = _make_task(store)
+
+    def cancelled_resource_error(params, on_event, *, api_key=None):
+        runner.set_cancelled_signal(tid)
+        raise runner.ResourceError("源文件缺失", runner.ResourceState.DELETED)
+
+    monkeypatch.setattr(runner, "run_pipeline", cancelled_resource_error)
+    runner._run(tid)
+
+    assert store.get(tid).resource_status == "MISSING"
+
+
+def test_run_cancelled_exception_marks_resources_missing(store, monkeypatch):
+    tid = _make_task(store)
+
+    def cancelled_exception(params, on_event, *, api_key=None):
+        runner.set_cancelled_signal(tid)
+        raise RuntimeError("取消时异常")
+
+    monkeypatch.setattr(runner, "run_pipeline", cancelled_exception)
+    runner._run(tid)
+
+    assert store.get(tid).resource_status == "MISSING"
+
+
 def test_run_missing_task_skips(store, monkeypatch):
     called = []
     monkeypatch.setattr(runner, "run_pipeline", lambda *a, **k: called.append(1))
