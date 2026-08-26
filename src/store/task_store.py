@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import time
 import uuid
@@ -55,6 +56,7 @@ class TaskRecord:
     burn: str          # hard | soft
     model: str         # whisper 模型
     engine: str        # 翻译引擎配置 ID；deepseek 为旧版兼容值
+    url_hash: Optional[str] = None
     source_type: str = "url"  # url=在线链接下载 upload=本地上传视频
     need_subtitle: int = 1  # 1=需要字幕(完整流水线) 0=仅下载视频
     status: str = "PENDING"
@@ -82,6 +84,10 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _calc_url_hash(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+
+
 class TaskStore:
     """任务表的增删改查。每次操作开一个短连接，交给 SQLite 处理文件锁。"""
 
@@ -104,6 +110,7 @@ class TaskStore:
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
                     url TEXT NOT NULL,
+                    url_hash TEXT,
                     source_lang TEXT NOT NULL,
                     target_lang TEXT NOT NULL,
                     mode TEXT NOT NULL,
@@ -130,6 +137,13 @@ class TaskStore:
             )
             # 轻量迁移：给旧库补上后加的列
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+            if "url_hash" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN url_hash TEXT")
+                rows = conn.execute("SELECT id, url FROM tasks WHERE url_hash IS NULL").fetchall()
+                conn.executemany(
+                    "UPDATE tasks SET url_hash = ? WHERE id = ?",
+                    [(_calc_url_hash(row["url"]), row["id"]) for row in rows],
+                )
             if "need_subtitle" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN need_subtitle INTEGER NOT NULL DEFAULT 1")
             if "source_type" not in cols:
@@ -148,6 +162,10 @@ class TaskStore:
                 "CREATE INDEX IF NOT EXISTS idx_tasks_created_at "
                 "ON tasks (created_at DESC, id DESC)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_url_hash_status_created_at "
+                "ON tasks (url_hash, status, created_at DESC)"
+            )
 
     # ---------- 增 ----------
     def create(
@@ -164,31 +182,68 @@ class TaskStore:
         need_subtitle: bool = True,
         title: Optional[str] = None,
     ) -> TaskRecord:
+        with self._connect() as conn:
+            return self._insert(
+                conn,
+                url=url,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                mode=mode,
+                burn=burn,
+                model=model,
+                engine=engine,
+                source_type=source_type,
+                need_subtitle=need_subtitle,
+                title=title,
+            )
+
+    def create_if_no_recent_active(
+        self,
+        *,
+        window_min: int = 10,
+        **kwargs,
+    ) -> tuple[TaskRecord, bool]:
+        """Atomically create a URL task unless a recent active one exists."""
+        url = kwargs["url"]
+        url_hash = _calc_url_hash(url)
+        cutoff = _now_ms() - window_min * 60 * 1000
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM tasks WHERE url_hash = ? AND created_at >= ? "
+                "AND status IN ('PENDING', 'DOWNLOADING', 'EXTRACTING', 'TRANSCRIBING', 'TRANSLATING', 'BURNING') "
+                "ORDER BY created_at DESC LIMIT 1",
+                (url_hash, cutoff),
+            ).fetchone()
+            if row:
+                return _row_to_record(row), False
+            return self._insert(conn, **kwargs), True
+
+    def _insert(self, conn: sqlite3.Connection, **kwargs) -> TaskRecord:
         now = _now_ms()
         rec = TaskRecord(
             id="task_" + uuid.uuid4().hex[:8],
-            url=url,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            mode=mode,
-            burn=burn,
-            model=model,
-            engine=engine,
-            source_type=source_type,
-            need_subtitle=int(need_subtitle),
-            title=title,
+            url=kwargs["url"],
+            source_lang=kwargs["source_lang"],
+            target_lang=kwargs["target_lang"],
+            mode=kwargs["mode"],
+            burn=kwargs["burn"],
+            model=kwargs["model"],
+            engine=kwargs["engine"],
+            url_hash=_calc_url_hash(kwargs["url"]),
+            source_type=kwargs.get("source_type", "url"),
+            need_subtitle=int(kwargs.get("need_subtitle", True)),
+            title=kwargs.get("title"),
             status="PENDING",
             progress=0,
             created_at=now,
             updated_at=now,
         )
         placeholders = ", ".join(["?"] * len(_COLUMNS))
-        values = [getattr(rec, c) for c in _COLUMNS]
-        with self._connect() as conn:
-            conn.execute(
-                f"INSERT INTO tasks ({', '.join(_COLUMNS)}) VALUES ({placeholders})",
-                values,
-            )
+        conn.execute(
+            f"INSERT INTO tasks ({', '.join(_COLUMNS)}) VALUES ({placeholders})",
+            [getattr(rec, c) for c in _COLUMNS],
+        )
         return rec
 
     # ---------- 查 ----------

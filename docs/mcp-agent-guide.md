@@ -66,6 +66,7 @@ Agent 不得：
 - `FAILED`：展示错误信息，只有用户确认后才调用 `retry_task`；
 - `RESOURCE_MISSING`：产物已经不存在，提示用户重新运行任务；
 - `TASK_NOT_READY`：不要把结果当作可下载产物，继续等待或先确认任务状态。
+- `TASK_ALREADY_RUNNING`：同一 URL 已有近 10 分钟内的运行中任务；复用返回的 `task_id` 调用 `get_task_status`，不要再次创建。
 
 ## 常见错误与下一步
 

@@ -219,7 +219,7 @@ def create_task(
     engines: TranslationEngineStore = Depends(get_translation_engine_store),
 ) -> TaskOut:
     _ensure_translation_engine(body.engine, body.needSubtitle, engines)
-    rec = store.create(
+    rec, created = store.create_if_no_recent_active(
         url=body.url,
         source_lang=body.sourceLang,
         target_lang=body.targetLang,
@@ -229,6 +229,15 @@ def create_task(
         engine=body.engine,
         need_subtitle=body.needSubtitle,
     )
+    if not created:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TASK_ALREADY_RUNNING",
+                "message": "该 URL 已有任务正在处理，请复用现有 task_id",
+                "taskId": rec.id,
+            },
+        )
     enqueue_pipeline(rec.id)  # 第 2 步接入真正执行
     return to_out(rec)
 

@@ -101,7 +101,7 @@ def test_api_token_auth_when_token_configured(client, monkeypatch):
     assert r_bearer.status_code == 201
 
     # X-API-Token 正确 Token -> 201
-    r_header = client.post("/api/tasks", json=_payload(), headers={"X-API-Token": "secret-token-123"})
+    r_header = client.post("/api/tasks", json=_payload(url="https://example.com/header-token"), headers={"X-API-Token": "secret-token-123"})
     assert r_header.status_code == 201
 
 
@@ -292,8 +292,8 @@ def test_delete_task(client):
 def test_delete_running_task_returns_409(client):
     """运行中状态（非 SUCCESS/FAILED）的任务禁止删除，返回 409。"""
     running_statuses = ["PENDING", "DOWNLOADING", "EXTRACTING", "TRANSCRIBING", "TRANSLATING", "BURNING"]
-    for status in running_statuses:
-        cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    for index, status in enumerate(running_statuses):
+        cid = client.post("/api/tasks", json=_payload(url=f"https://example.com/running-{index}")).json()["id"]
         client._store.update(cid, status=status)
         d = client._tmp / cid
         d.mkdir(parents=True, exist_ok=True)
@@ -1419,3 +1419,12 @@ def test_sse_stream_keepalive(client, monkeypatch):
 
     assert res.status_code == 200
     assert ":keepalive" in lines
+
+
+def test_create_task_duplicate_url_returns_existing_task_id(client):
+    first = client.post("/api/tasks", json=_payload())
+    duplicate = client.post("/api/tasks", json=_payload())
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "TASK_ALREADY_RUNNING"
+    assert duplicate.json()["detail"]["taskId"] == first.json()["id"]
