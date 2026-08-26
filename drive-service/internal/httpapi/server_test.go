@@ -279,3 +279,87 @@ func TestTaskFolderEndpointUsesUniqueTaskIDAndIsIdempotent(t *testing.T) {
 		t.Fatalf("unsafe task id status = %d body=%s", unsafeResp.Code, unsafeResp.Body.String())
 	}
 }
+
+type cleanupDriveStub struct {
+	taskFolderDriveStub
+	failOnPath  string
+	createdDirs []string
+	trashed     []string
+}
+
+func (d *cleanupDriveStub) CreateFolder(_ context.Context, name, parentID string, properties map[string]string) (*driveclient.File, error) {
+	relPath := properties["subtitles_ai_relative_path"]
+	if relPath == d.failOnPath {
+		return nil, errorDriveStub{msg: "failed to create folder " + relPath}
+	}
+	id := "folder-id-" + name
+	d.createdDirs = append(d.createdDirs, id)
+	return &driveclient.File{
+		ID:            id,
+		Name:          name,
+		MimeType:      "application/vnd.google-apps.folder",
+		AppProperties: properties,
+	}, nil
+}
+
+func (d *cleanupDriveStub) Trash(_ context.Context, fileID string) error {
+	d.trashed = append(d.trashed, fileID)
+	return nil
+}
+
+type errorDriveStub struct {
+	msg string
+}
+
+func (e errorDriveStub) Error() string { return e.msg }
+
+func (d *cleanupDriveStub) createErr(path string) error {
+	return errorDriveStub{msg: "failed to create folder " + path}
+}
+
+func TestFolderUploadCleansUpCreatedFoldersOnFailure(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	state, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := oauth.NewManager(&cfg)
+
+	stub := &cleanupDriveStub{failOnPath: "season-1/episode-2"}
+	server := New(&cfg, auth, stub, nil, state)
+
+	body := `{"entries":[
+		{"relativePath":"season-1/episode-1/v1.mp4","size":10},
+		{"relativePath":"season-1/episode-2/v2.mp4","size":10}
+	]}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/drive/folder-uploads", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	server.ServeHTTP(resp, req)
+
+	if resp.Code == http.StatusCreated {
+		t.Fatalf("expected folder creation failure, got %d", resp.Code)
+	}
+
+	// Paths sorted by depth/alphabetical: season-1 (depth 0), season-1/episode-1 (depth 1), season-1/episode-2 (depth 1 fails)
+	// Created dirs should be season-1 and episode-1.
+	if len(stub.createdDirs) != 2 {
+		t.Fatalf("expected 2 created dirs before failure, got %v", stub.createdDirs)
+	}
+
+	// Trashed should be in reverse order (episode-1 then season-1)
+	if len(stub.trashed) != 2 {
+		t.Fatalf("expected 2 trashed dirs on cleanup, got %v", stub.trashed)
+	}
+	if stub.trashed[0] != "folder-id-episode-1" || stub.trashed[1] != "folder-id-season-1" {
+		t.Fatalf("unexpected trash order: %v", stub.trashed)
+	}
+
+	batches := state.ListFolderBatches()
+	if len(batches) != 1 || batches[0].State != transfer.StateFailed {
+		t.Fatalf("expected 1 failed batch, got %#v", batches)
+	}
+}
