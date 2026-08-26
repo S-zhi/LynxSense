@@ -233,6 +233,7 @@ def run_pipeline(
                 on_progress=step_cb("TRANSLATING"),
                 api_key=api_key,
                 engine_config=engine_config,
+                cancel_check=lambda: _check_cancelled(tid),
             )
             translated_srt_path = AssetResolver.require_translated_srt(tid)
 
