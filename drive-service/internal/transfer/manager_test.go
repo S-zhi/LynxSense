@@ -148,3 +148,111 @@ func TestCancelBatchKeepsSuccessfulEntriesAndCancelsRemaining(t *testing.T) {
 		t.Fatalf("batch = %#v", gotBatch)
 	}
 }
+
+func TestMarkTransferTransferringGuardsTerminalAndPausedStates(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	state, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(&cfg, state, &fakeDrive{})
+
+	guardedStates := []string{StatePaused, StateCancelled, StateSuccess}
+	for _, st := range guardedStates {
+		tr, err := state.CreateTransfer(store.Transfer{
+			Kind:  KindDriveUpload,
+			State: st,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.markTransferTransferring(tr.ID); err != nil {
+			t.Fatalf("markTransferTransferring error: %v", err)
+		}
+		updated, ok := state.GetTransfer(tr.ID)
+		if !ok || updated.State != st {
+			t.Fatalf("state for %s changed to %s, want %s", st, updated.State, st)
+		}
+	}
+}
+
+type blockingDrive struct {
+	fakeDrive
+	uploadChunkStarted chan struct{}
+	allowUploadChunk   chan struct{}
+}
+
+func (b *blockingDrive) UploadChunk(ctx context.Context, url string, f *os.File, off, total, chunk int64) (driveclient.ChunkResult, error) {
+	select {
+	case b.uploadChunkStarted <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.allowUploadChunk:
+	case <-ctx.Done():
+		return driveclient.ChunkResult{}, ctx.Err()
+	}
+	return b.fakeDrive.UploadChunk(ctx, url, f, off, total, chunk)
+}
+
+func TestPauseDuringUploadDoesNotGetOverwrittenByWorker(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	state, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	drive := &blockingDrive{
+		uploadChunkStarted: make(chan struct{}, 1),
+		allowUploadChunk:   make(chan struct{}),
+	}
+	manager := NewManager(&cfg, state, drive)
+
+	staging := filepath.Join(cfg.DataDir, "file.part")
+	if err := os.WriteFile(staging, []byte("test bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	upload, err := state.CreateUpload(staging, "file.bin", "application/octet-stream", int64(len("test bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, err = state.UpdateUpload(upload.ID, func(u *store.Upload) error { u.Completed = true; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tr, err := manager.StartDriveUpload(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait until worker enters UploadChunk
+	select {
+	case <-drive.uploadChunkStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for UploadChunk to start")
+	}
+
+	// User pauses the transfer while chunk upload is blocked
+	if err := manager.Pause(tr.ID); err != nil {
+		t.Fatalf("Pause failed: %v", err)
+	}
+
+	// Allow chunk upload to proceed/finish context cancellation
+	close(drive.allowUploadChunk)
+
+	// Wait briefly for worker goroutine to exit
+	time.Sleep(50 * time.Millisecond)
+
+	finalTr, ok := state.GetTransfer(tr.ID)
+	if !ok {
+		t.Fatal("transfer not found")
+	}
+	if finalTr.State != StatePaused {
+		t.Fatalf("expected transfer state %s, got %s", StatePaused, finalTr.State)
+	}
+}
