@@ -164,12 +164,10 @@ def scan_missing_terminal(
         recs = store.list()
 
     success_count = sum(1 for rec in recs if rec.status == "SUCCESS")
-    data_root_unavailable = not data_path.exists()
-    if not data_root_unavailable:
-        try:
-            data_root_unavailable = not any(data_path.iterdir())
-        except OSError:
-            data_root_unavailable = True
+    try:
+        data_root_unavailable = not data_path.exists()
+    except OSError:
+        data_root_unavailable = True
 
     for rec in recs:
         if rec.status != "SUCCESS":

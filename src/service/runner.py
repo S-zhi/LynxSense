@@ -315,6 +315,7 @@ def _run(task_id: str) -> None:
                 current_step=rec.current_step if rec else None,
                 source_type=rec.source_type if rec else "url",
             )
+            _store.update(task_id, resource_status="MISSING")
             return
         logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         if last_state["status"] != "FAILED":
@@ -328,6 +329,7 @@ def _run(task_id: str) -> None:
                 current_step=rec.current_step if rec else None,
                 source_type=rec.source_type if rec else "url",
             )
+            _store.update(task_id, resource_status="MISSING")
             return
         logger.exception("流水线执行失败: %s", task_id)
         if last_state["status"] != "FAILED":
