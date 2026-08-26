@@ -31,19 +31,42 @@ fi
 api_pid=""
 drive_pid=""
 
+get_descendant_pids() {
+  local pid="$1"
+  local children
+  children="$(pgrep -P "${pid}" 2>/dev/null || true)"
+  for child in ${children}; do
+    get_descendant_pids "${child}"
+    echo "${child}"
+  done
+}
+
 stop_process() {
   local pid="$1"
   [[ -z "${pid}" ]] && return 0
   if kill -0 "${pid}" 2>/dev/null; then
-    kill "${pid}" 2>/dev/null || true
-    # go run 可能额外派生一个编译后的 sidecar 进程；只清理这个 PID 的直接子进程。
+    local pids_to_kill=()
     if command -v pgrep >/dev/null 2>&1; then
-      local child
-      child="$(pgrep -P "${pid}" 2>/dev/null || true)"
-      for child_pid in ${child}; do
-        kill "${child_pid}" 2>/dev/null || true
-      done
+      # 先递归收集所有子孙进程 PID，防止父进程退出后子进程变为孤儿
+      local descendants
+      descendants="$(get_descendant_pids "${pid}")"
+      if [[ -n "${descendants}" ]]; then
+        pids_to_kill=(${descendants})
+      fi
     fi
+    pids_to_kill+=("${pid}")
+
+    for p in "${pids_to_kill[@]}"; do
+      kill "${p}" 2>/dev/null || true
+    done
+
+    # 给进程平滑退出的时间，超时后强制清理
+    sleep 0.5
+    for p in "${pids_to_kill[@]}"; do
+      if kill -0 "${p}" 2>/dev/null; then
+        kill -9 "${p}" 2>/dev/null || true
+      fi
+    done
   fi
 }
 
@@ -56,13 +79,19 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+echo "编译 Google Drive sidecar..."
+(
+  cd "${ROOT_DIR}/drive-service"
+  go build -o ./bin/drive-server ./cmd/server
+)
+
 echo "Subtitles AI API      → http://127.0.0.1:${API_PORT}"
 echo "Google Drive sidecar  → ${DRIVE_CONFIG}"
 echo "按 Ctrl-C 同时停止两个服务。"
 
 (
   cd "${ROOT_DIR}/drive-service"
-  exec go run ./cmd/server -config "${DRIVE_CONFIG}"
+  exec ./bin/drive-server -config "${DRIVE_CONFIG}"
 ) &
 drive_pid=$!
 

@@ -1,0 +1,242 @@
+name: Automated patch release
+
+on:
+  schedule:
+    # Check every two days at 02:17 UTC. The gate below enforces the release cadence.
+    - cron: "17 2 */2 * *"
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: Release immediately when unreleased commits exist
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: automated-patch-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.RELEASE_NOTES_MODEL || 'gpt-5-mini' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Evaluate release gate
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_RELEASE: ${{ inputs.force_release || false }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_release_json="$(gh api "/repos/${REPOSITORY}/releases/latest" 2>/dev/null || true)"
+          latest_tag="$(jq -r '.tag_name // empty' <<<"${latest_release_json}")"
+          published_at="$(jq -r '.published_at // empty' <<<"${latest_release_json}")"
+
+          if [[ -z "${latest_tag}" ]]; then
+            latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' 'subtitles-ai-v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+            if [[ -n "${latest_tag}" ]]; then
+              published_at="$(git log -1 --format=%cI "${latest_tag}")"
+            else
+              published_at="$(git log --reverse --format=%cI | head -n 1)"
+            fi
+          fi
+
+          if [[ -n "${latest_tag}" ]]; then
+            commit_count="$(git rev-list --count "${latest_tag}..${TARGET_SHA}")"
+            version="${latest_tag#subtitles-ai-v}"
+            version="${version#v}"
+          else
+            commit_count="$(git rev-list --count "${TARGET_SHA}")"
+            version="0.0.0"
+          fi
+
+          if [[ ! "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Latest version tag is not semantic: ${latest_tag}" >&2
+            exit 1
+          fi
+          next_tag="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+
+          now_epoch="$(date -u +%s)"
+          published_epoch="$(date -u -d "${published_at}" +%s)"
+          age_seconds="$((now_epoch - published_epoch))"
+          age_days="$((age_seconds / 86400))"
+
+          search_date="$(date -u -d "${published_at}" +%F)"
+          gh pr list \
+            --repo "${REPOSITORY}" \
+            --state merged \
+            --base "${DEFAULT_BRANCH}" \
+            --search "merged:>=${search_date}" \
+            --limit 100 \
+            --json number,title,body,author,labels,mergedAt,url \
+            > merged-pr-candidates.json
+          jq --arg published_at "${published_at}" \
+            '[.[] | select(.mergedAt > $published_at)]' \
+            merged-pr-candidates.json > merged-prs.json
+          pr_count="$(jq 'length' merged-prs.json)"
+
+          should_release=false
+          reason="No release condition was met"
+          if [[ "${commit_count}" -eq 0 ]]; then
+            reason="No commits since the latest release"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" && "${FORCE_RELEASE}" == "true" ]]; then
+            should_release=true
+            reason="Manual release requested"
+          elif [[ "${pr_count}" -ge 5 && "${age_seconds}" -ge 172800 ]]; then
+            should_release=true
+            reason="${pr_count} PRs merged since the latest release"
+          elif [[ "${EVENT_NAME}" == "schedule" && "${age_seconds}" -ge 604800 ]]; then
+            should_release=true
+            reason="Weekly release window reached"
+          fi
+
+          {
+            echo "should_release=${should_release}"
+            echo "latest_tag=${latest_tag}"
+            echo "next_tag=${next_tag}"
+            echo "commit_count=${commit_count}"
+            echo "pr_count=${pr_count}"
+            echo "age_days=${age_days}"
+            echo "reason=${reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+          printf '%s\n' \
+            "### Automated release gate" \
+            "- Decision: **${should_release}**" \
+            "- Reason: ${reason}" \
+            "- Latest tag: ${latest_tag:-none}" \
+            "- Next tag: ${next_tag}" \
+            "- Unreleased commits: ${commit_count}" \
+            "- Merged PRs: ${pr_count}" \
+            "- Days since release: ${age_days}" \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Set up Python
+        if: steps.gate.outputs.should_release == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install test dependencies
+        if: steps.gate.outputs.should_release == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pytest
+
+      - name: Run tests
+        if: steps.gate.outputs.should_release == 'true'
+        run: python -m pytest -q
+
+      - name: Generate baseline release notes
+        if: steps.gate.outputs.should_release == 'true'
+        env:
+          REPOSITORY: ${{ github.repository }}
+          NEXT_TAG: ${{ steps.gate.outputs.next_tag }}
+          LATEST_TAG: ${{ steps.gate.outputs.latest_tag }}
+          TARGET_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -n \
+            --arg tag_name "${NEXT_TAG}" \
+            --arg target_commitish "${TARGET_SHA}" \
+            --arg previous_tag_name "${LATEST_TAG}" \
+            '{tag_name: $tag_name, target_commitish: $target_commitish}
+             + if $previous_tag_name == "" then {} else {previous_tag_name: $previous_tag_name} end' \
+            > generate-notes-request.json
+
+          gh api "/repos/${REPOSITORY}/releases/generate-notes" \
+            --method POST \
+            --input generate-notes-request.json \
+            --jq '.body' \
+            > release-notes.md
+
+      - name: Improve release notes with AI
+        if: steps.gate.outputs.should_release == 'true'
+        continue-on-error: true
+        env:
+          NEXT_TAG: ${{ steps.gate.outputs.next_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${OPENAI_API_KEY}" ]]; then
+            echo "OPENAI_API_KEY is not configured; keeping GitHub-generated notes."
+            exit 0
+          fi
+
+          jq -n \
+            --arg version "${NEXT_TAG}" \
+            --rawfile baseline release-notes.md \
+            --slurpfile prs merged-prs.json \
+            '{version: $version, baseline_release_notes: $baseline, merged_pull_requests: $prs[0]}' \
+            > release-context.json
+
+          jq -n \
+            --arg model "${OPENAI_MODEL}" \
+            --rawfile context release-context.json \
+            '{
+              model: $model,
+              store: false,
+              max_output_tokens: 2000,
+              instructions: "Write concise Markdown release notes for end users. Use only the supplied facts. Organize meaningful changes under Features, Fixes, and Maintenance when applicable. Mention breaking changes explicitly. Preserve contributor attribution and comparison links from the baseline. Do not add a title or code fence.",
+              input: $context
+            }' > openai-request.json
+
+          http_code="$(curl --silent --show-error \
+            --output openai-response.json \
+            --write-out '%{http_code}' \
+            https://api.openai.com/v1/responses \
+            -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data-binary @openai-request.json)"
+          if [[ "${http_code}" -lt 200 || "${http_code}" -ge 300 ]]; then
+            jq -r '.error.message // "OpenAI request failed"' openai-response.json >&2
+            exit 1
+          fi
+
+          jq -r '[.output[]?.content[]? | select(.type == "output_text") | .text] | join("\n")' \
+            openai-response.json > ai-release-notes.md
+          if [[ ! -s ai-release-notes.md ]]; then
+            echo "OpenAI response did not contain release notes." >&2
+            exit 1
+          fi
+          mv ai-release-notes.md release-notes.md
+
+      - name: Publish GitHub release
+        if: steps.gate.outputs.should_release == 'true'
+        env:
+          NEXT_TAG: ${{ steps.gate.outputs.next_tag }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          gh release create "${NEXT_TAG}" \
+            --target "${TARGET_SHA}" \
+            --title "${NEXT_TAG}" \
+            --notes-file release-notes.md
