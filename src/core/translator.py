@@ -286,6 +286,32 @@ def _translate_batch(batch: List[str], source_lang: str, target_lang: str, api_k
     return _parse_translation_response(content, len(batch))
 
 
+def _parse_array_elements(text: str) -> List[str]:
+    """尝试从包含 '[' 的文本中逐个解析顶层 JSON 数组元素。"""
+    start = text.find("[")
+    if start == -1:
+        return []
+
+    decoder = json.JSONDecoder()
+    pos = start + 1
+    recovered: List[str] = []
+
+    while pos < len(text):
+        while pos < len(text) and text[pos] in " \t\n\r,":
+            pos += 1
+        if pos >= len(text) or text[pos] == "]":
+            break
+
+        try:
+            val, end_idx = decoder.raw_decode(text, pos)
+            recovered.append(str(val) if not isinstance(val, str) else val)
+            pos = end_idx
+        except json.JSONDecodeError:
+            break
+
+    return recovered
+
+
 def _parse_translation_response(content: str, expected: int) -> List[str]:
     """解析模型回复：优先 JSON 数组，回退到按行去编号。"""
     text = content.strip()
@@ -301,19 +327,16 @@ def _parse_translation_response(content: str, expected: int) -> List[str]:
     except json.JSONDecodeError:
         pass
 
-    # 若 JSON 解析失败，但包含 '['，尝试从截断的 JSON 数组中提取已完整闭合的字符串
+    # 若 JSON 解析失败，但包含 '['，尝试从截断的 JSON 数组中提取已完整闭合的字符串元素
     if "[" in text:
-        raw_strings = re.findall(r'"((?:[^"\\]|\\.)*)"', text)
-        if raw_strings:
-            recovered = []
-            for s in raw_strings:
-                try:
-                    decoded = json.loads(f'"{s}"', strict=False)
-                    recovered.append(str(decoded))
-                except Exception:
-                    recovered.append(s)
-            if recovered:
-                return recovered
+        recovered = _parse_array_elements(text)
+        if recovered:
+            if len(recovered) != expected:
+                raise TranslateError(
+                    f"JSON 截断，只恢复了 {len(recovered)}/{expected} 条",
+                    code="invalid_response",
+                )
+            return recovered
 
     # 回退：按非空行拆，去掉行首 "1. " / "1) " 编号
     lines = [ln for ln in text.splitlines() if ln.strip()]
