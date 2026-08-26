@@ -542,6 +542,23 @@ def test_scan_missing_terminal_records_volume_migration(client, tmp_path):
     assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"VOLUME_MIGRATED"}
 
 
+def test_scan_missing_terminal_empty_data_dir_does_not_mark_volume_migration(client, tmp_path):
+    """数据目录存在但为空（新装系统/空挂载）时，有多条 SUCCESS 任务不应被误标记为 VOLUME_MIGRATED。"""
+    ids = [
+        client.post("/api/tasks", json=_payload(url=f"https://x/{i}")).json()["id"]
+        for i in range(2)
+    ]
+    for task_id in ids:
+        client._store.update(task_id, status="SUCCESS", progress=100)
+
+    empty_dir = tmp_path / "empty_data"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=empty_dir)
+    assert set(marked) == set(ids)
+    assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"UNKNOWN"}
+
+
 def test_success_download_only_task_with_missing_source_hides_outputs(client):
     """needSubtitle=False 的"仅下载"任务丢失 source.* 也算资源已丢失。"""
     cid = client.post("/api/tasks", json=_payload(needSubtitle=False)).json()["id"]
