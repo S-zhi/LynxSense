@@ -420,8 +420,9 @@ func (s *Server) handleCreateFolderUpload(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, folderUploadResponse{Batch: batch, Entries: s.store.ListFolderEntries(batch.ID)})
 		return
 	}
-	folders, err := s.createFolderTree(r.Context(), batch.ID, parentID, items)
+	folders, paths, err := s.createFolderTree(r.Context(), batch.ID, parentID, items)
 	if err != nil {
+		s.cleanupCreatedFolders(r.Context(), folders, paths)
 		_, _ = s.store.UpdateFolderBatch(batch.ID, func(current *store.FolderBatch) error {
 			current.State = transfer.StateFailed
 			current.Error = err.Error()
@@ -442,6 +443,7 @@ func (s *Server) handleCreateFolderUpload(w http.ResponseWriter, r *http.Request
 			FolderID: entryParent, State: transfer.StatePending,
 		})
 		if createErr != nil {
+			s.cleanupCreatedFolders(r.Context(), folders, paths)
 			_, _ = s.store.UpdateFolderBatch(batch.ID, func(current *store.FolderBatch) error {
 				current.State = transfer.StateFailed
 				current.Error = createErr.Error()
@@ -606,7 +608,7 @@ func normalizeRelativePath(raw string) (string, error) {
 	return path.Clean(strings.Join(parts, "/")), nil
 }
 
-func (s *Server) createFolderTree(ctx context.Context, batchID, rootParentID string, items []folderManifestItem) (map[string]string, error) {
+func (s *Server) createFolderTree(ctx context.Context, batchID, rootParentID string, items []folderManifestItem) (map[string]string, []string, error) {
 	directories := make(map[string]struct{})
 	for _, item := range items {
 		parts := strings.Split(item.Path, "/")
@@ -637,14 +639,31 @@ func (s *Server) createFolderTree(ctx context.Context, batchID, rootParentID str
 			"subtitles_ai_relative_path": directory,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("创建目录 %q 失败: %w", directory, err)
+			return folders, paths, fmt.Errorf("创建目录 %q 失败: %w", directory, err)
 		}
 		if folder == nil || folder.ID == "" {
-			return nil, fmt.Errorf("创建目录 %q 返回空 ID", directory)
+			return folders, paths, fmt.Errorf("创建目录 %q 返回空 ID", directory)
 		}
 		folders[directory] = folder.ID
 	}
-	return folders, nil
+	return folders, paths, nil
+}
+
+func (s *Server) cleanupCreatedFolders(ctx context.Context, folders map[string]string, paths []string) {
+	if len(folders) == 0 {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
+	for i := len(paths) - 1; i >= 0; i-- {
+		dir := paths[i]
+		folderID, ok := folders[dir]
+		if !ok || folderID == "" {
+			continue
+		}
+		_ = s.drive.Trash(cleanupCtx, folderID)
+	}
 }
 
 func folderDir(relativePath string) string {
