@@ -517,3 +517,62 @@ def test_transcribe_resumes_persisted_prediction_after_restart(monkeypatch, tmp_
 
     assert result.segment_count == 1
     assert calls == {"create": 0, "get": ["pred_saved"]}
+
+
+def test_cancel_failure_preserves_prediction_for_next_run(monkeypatch, tmp_path):
+    """远端取消失败时保留 ID，并在下一次运行启动时重试清理。"""
+    cancel_calls = []
+    checks = {"count": 0}
+
+    class FirstPredictions:
+        def create(self, **kwargs):
+            return _prediction(status="starting", prediction_id="pred_pending")
+
+        def cancel(self, prediction_id):
+            cancel_calls.append(prediction_id)
+            raise RuntimeError("temporary cancel failure")
+
+    class FirstClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = FirstPredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", FirstClient)
+    monkeypatch.setattr(transcriber.time, "sleep", lambda seconds: None)
+
+    def cancel_check():
+        checks["count"] += 1
+        if checks["count"] >= 4:
+            raise TranscribeCancelledError("cancelled")
+
+    with pytest.raises(TranscribeCancelledError):
+        transcriber._run_replicate_with_retry(
+            "model", lambda: {}, timeout=30, retries=1, retry_interval=0,
+            poll_interval=0, state_dir=tmp_path, cancel_check=cancel_check,
+        )
+
+    state = (tmp_path / "replicate_prediction.json").read_text(encoding="utf-8")
+    assert '"prediction_id": "pred_pending"' in state
+    assert '"status": "cancel_pending"' in state
+
+    class RetryPredictions:
+        def cancel(self, prediction_id):
+            cancel_calls.append(prediction_id)
+
+        def create(self, **kwargs):
+            return _prediction(output="result", prediction_id="pred_new")
+
+    class RetryClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = RetryPredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", RetryClient)
+    result = transcriber._run_replicate_with_retry(
+        "model", lambda: {}, timeout=30, retries=1, retry_interval=0,
+        poll_interval=0, state_dir=tmp_path,
+    )
+
+    assert result == "result"
+    assert cancel_calls == ["pred_pending", "pred_pending"]
+    state = (tmp_path / "replicate_prediction.json").read_text(encoding="utf-8")
+    assert '"prediction_id": "pred_new"' in state
+    assert '"status": "succeeded"' in state
