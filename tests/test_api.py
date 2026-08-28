@@ -37,11 +37,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda task_id: None)
     # 默认 mock probe_duration 返回 10 秒，避免单元测试依赖系统 ffprobe 命令
     monkeypatch.setattr(tasks_routes, "probe_duration", lambda path, bin_path: 10.0)
-    # 默认 mock 提供 DeepSeek Key，确保其它 Task 创建测试不受影响
+    # 默认 mock 提供 DeepSeek Key 及临时 data_dir，确保其它 Task 创建测试不受影响
     monkeypatch.setattr(
         tasks_routes,
         "settings",
-        dataclasses.replace(tasks_routes.settings, deepseek_api_key="sk-mock-key"),
+        dataclasses.replace(tasks_routes.settings, deepseek_api_key="sk-mock-key", data_dir=tmp_path),
     )
     with TestClient(app) as c:
         c._store = store
@@ -540,6 +540,23 @@ def test_scan_missing_terminal_records_volume_migration(client, tmp_path):
     marked = tasks_routes.scan_missing_terminal(client._store, data_dir=missing_root)
     assert set(marked) == set(ids)
     assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"VOLUME_MIGRATED"}
+
+
+def test_scan_missing_terminal_empty_data_dir_does_not_mark_volume_migration(client, tmp_path):
+    """数据目录存在但为空（新装系统/空挂载）时，有多条 SUCCESS 任务不应被误标记为 VOLUME_MIGRATED。"""
+    ids = [
+        client.post("/api/tasks", json=_payload(url=f"https://x/{i}")).json()["id"]
+        for i in range(2)
+    ]
+    for task_id in ids:
+        client._store.update(task_id, status="SUCCESS", progress=100)
+
+    empty_dir = tmp_path / "empty_data"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+
+    marked = tasks_routes.scan_missing_terminal(client._store, data_dir=empty_dir)
+    assert set(marked) == set(ids)
+    assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"UNKNOWN"}
 
 
 def test_success_download_only_task_with_missing_source_hides_outputs(client):
@@ -1280,6 +1297,71 @@ def test_success_task_outputs_skip_subtitle_when_need_subtitle_false(client):
     data = client.get(f"/api/tasks/{cid}").json()
     assert data["outputs"] == {"video": f"/api/tasks/{cid}/download"}
     assert "subtitle" not in data["outputs"]
+
+
+# ---------- POST /api/tasks/{id}/folder 端点安全测试 ----------
+
+def test_open_task_folder_succeeds(client, monkeypatch):
+    """合法 task_id 且目录存在时，调用 _open_folder 成功打开。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+
+    opened = []
+    monkeypatch.setattr(tasks_routes.subprocess, "Popen", lambda cmd, **kw: opened.append(cmd))
+
+    r = client.post(f"/api/tasks/{cid}/folder")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert len(opened) == 1
+    assert str(d.resolve()) in opened[0]
+
+
+def test_open_task_folder_invalid_task_id_400(client):
+    """非 task_ 前缀或含非法字符的 task_id 应返回 400。"""
+    invalid_ids = [
+        "invalid_id",
+        "task_123\\sub",
+        "task_123;rm",
+        "task_123&calc",
+        "task_123|calc",
+    ]
+    for bad_id in invalid_ids:
+        r = client.post(f"/api/tasks/{bad_id}/folder")
+        assert r.status_code == 400
+        assert "task_id 格式不符合规范" in r.json()["detail"]
+
+
+def test_open_task_folder_not_found_404(client):
+    """不存在的任务返回 404。"""
+    r = client.post("/api/tasks/task_12345678/folder")
+    assert r.status_code == 404
+
+
+def test_open_task_folder_dir_not_generated_409(client):
+    """任务存在但磁盘目录尚未生成时返回 409。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    # 保证目录不存在
+    d = client._tmp / cid
+    if d.exists():
+        d.rmdir()
+
+    r = client.post(f"/api/tasks/{cid}/folder")
+    assert r.status_code == 409
+    assert "任务目录尚未生成" in r.json()["detail"]
+
+
+def test_open_task_folder_path_traversal_400(client, monkeypatch):
+    """即便通过 DB 校验，若 task_dir 解出的路径在 data_dir 之外，应返回 400 拒绝。"""
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    outside_dir = client._tmp.parent / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(tasks_routes, "task_dir", lambda tid: outside_dir)
+
+    r = client.post(f"/api/tasks/{cid}/folder")
+    assert r.status_code == 400
+    assert "任务目录路径非法" in r.json()["detail"]
 
 
 # ---------- SSE 进度流端点与事件 ----------
