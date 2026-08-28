@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.core.translation_engines import TranslationEngineError, make_engine_client
@@ -78,13 +78,19 @@ def list_engines(store: TranslationEngineStore = Depends(get_translation_engine_
 
 
 @router.post("", response_model=EngineOut, status_code=201, dependencies=[Depends(require_api_token)])
-def create_engine(body: EngineIn, store: TranslationEngineStore = Depends(get_translation_engine_store)) -> EngineOut:
+def create_engine(
+    body: EngineIn,
+    background_tasks: BackgroundTasks,
+    store: TranslationEngineStore = Depends(get_translation_engine_store),
+) -> EngineOut:
     _validate_type(body.apiType)
     key = body.apiKey.strip() if body.apiKey and body.apiKey.strip() else None
-    return _out(store.create(
+    rec = store.create(
         name=body.name, api_type=body.apiType, base_url=body.baseUrl,
         model=body.model, api_key=key, enabled=body.enabled,
-    ))
+    )
+    background_tasks.add_task(_validate_engine, rec.id, store)
+    return _out(rec)
 
 
 @router.put("/{engine_id}", response_model=EngineOut, dependencies=[Depends(require_api_token)])
@@ -109,11 +115,7 @@ def delete_engine(engine_id: str, store: TranslationEngineStore = Depends(get_tr
     store.delete(engine_id)
 
 
-@router.post("/{engine_id}/validate", response_model=EngineCheckOut, dependencies=[Depends(require_api_token)])
-def validate_engine(
-    engine_id: str,
-    store: TranslationEngineStore = Depends(get_translation_engine_store),
-) -> EngineCheckOut:
+def _validate_engine(engine_id: str, store: TranslationEngineStore) -> EngineCheckOut:
     rec = _require(store, engine_id)
     checked_at = int(time.time() * 1000)
     if not (rec.api_key and rec.api_key.strip()):
@@ -127,6 +129,17 @@ def validate_engine(
     except TranslationEngineError as exc:
         store.update(engine_id, availability="UNAVAILABLE", last_checked_at=checked_at, last_error=str(exc))
         return EngineCheckOut(id=engine_id, availability="UNAVAILABLE", available=False, checkedAt=checked_at, errorCode=exc.code, message=str(exc))
+    except Exception as exc:
+        store.update(engine_id, availability="UNAVAILABLE", last_checked_at=checked_at, last_error=str(exc))
+        return EngineCheckOut(id=engine_id, availability="UNAVAILABLE", available=False, checkedAt=checked_at, errorCode="validation_error", message=str(exc))
 
     store.update(engine_id, availability="AVAILABLE", last_checked_at=checked_at, last_error=None)
     return EngineCheckOut(id=engine_id, availability="AVAILABLE", available=True, checkedAt=checked_at)
+
+
+@router.post("/{engine_id}/validate", response_model=EngineCheckOut, dependencies=[Depends(require_api_token)])
+def validate_engine(
+    engine_id: str,
+    store: TranslationEngineStore = Depends(get_translation_engine_store),
+) -> EngineCheckOut:
+    return _validate_engine(engine_id, store)

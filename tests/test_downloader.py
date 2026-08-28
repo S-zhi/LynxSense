@@ -691,6 +691,45 @@ def test_probe_video_ttl_expiry(monkeypatch):
     assert len(calls) == 2
 
 
+def test_probe_cache_evicts_oldest_entry_when_full(monkeypatch):
+    """探测缓存超过容量时淘汰最旧条目，避免模块级字典无界增长。"""
+    calls = []
+
+    def on_extract(url, download, opts):
+        calls.append(url)
+        return {"title": url, "formats": [{}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    monkeypatch.setattr(downloader, "_PROBE_CACHE_MAX_SIZE", 2)
+
+    probe_video("https://example.com/old", ttl_sec=60)
+    probe_video("https://example.com/hot", ttl_sec=60)
+    assert probe_video("https://example.com/hot", ttl_sec=60).cached is True
+    probe_video("https://example.com/new", ttl_sec=60)
+
+    assert len(downloader._probe_cache) == 2
+    assert probe_video("https://example.com/old", ttl_sec=60).cached is False
+    assert len(calls) == 4
+
+
+def test_probe_cache_removes_expired_entry_before_inserting(monkeypatch):
+    """过期 key 在重新探测前移除，确保容量由有效访问持续维护。"""
+    def on_extract(url, download, opts):
+        return {"title": url, "formats": [{}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    monkeypatch.setattr(downloader, "_PROBE_CACHE_MAX_SIZE", 2)
+    current_time = iter((1000.0, 1002.0, 1002.0))
+    monkeypatch.setattr(time, "time", lambda: next(current_time))
+
+    probe_video("https://example.com/expired", ttl_sec=1)
+    probe_video("https://example.com/other", ttl_sec=60)
+    probe_video("https://example.com/expired", ttl_sec=1)
+
+    assert len(downloader._probe_cache) == 2
+    assert any(key[0] == "https://example.com/expired" for key in downloader._probe_cache)
+
+
 def test_probe_sniffs_language_from_metadata(monkeypatch):
     def on_extract(url, download, opts):
         return {"title": "Japanese", "language": "ja-JP", "formats": [{}]}

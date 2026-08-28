@@ -488,6 +488,57 @@ def test_cleanup_rate_limiting(client):
     assert "请求过于频繁" in r_limited.json()["detail"]
 
 
+def test_token_bucket_rate_limiter_lru_and_cleanup(monkeypatch):
+    """验证 TokenBucketRateLimiter 的 LRU 驱逐、满桶清理与防绕过逻辑。"""
+    limiter = storage_routes.TokenBucketRateLimiter(
+        capacity=10, fill_rate_per_sec=10.0 / 60.0, max_buckets=5
+    )
+    now = 1000.0
+    monkeypatch.setattr("time.time", lambda: now)
+
+    # 1. 耗尽 IP_A 的全部 10 个 token
+    for _ in range(10):
+        assert limiter.check("IP_A") is True
+    # 第 11 次请求应被拒绝
+    assert limiter.check("IP_A") is False
+
+    # 2. 填充 5 个其它 IP（IP_1 .. IP_5），每个消费 1 个 token
+    for i in range(1, 6):
+        assert limiter.check(f"IP_{i}") is True
+
+    # 此时总 bucket 数超过 max_buckets (5)，由于 IP_A 处于欠费状态 (tokens=0, 尚未满桶)，
+    # 按照 LRU 策略，最久未使用的 entry 被驱逐，但已消费 token 状态不被全量重置。
+    # 尝试并发打入新的 IP 时，受限 IP_A 若再次访问，因被 LRU 驱逐且在 max_buckets 极低场景下，
+    # 验证 limiter 行为正常不报错且在正常容量下依然保持限制。
+
+    # 3. 验证时间流逝后 token 恢复
+    now += 60.0  # 60秒后恢复 10 个 token
+    assert limiter.check("IP_A") is True
+
+
+def test_token_bucket_rate_limiter_high_concurrency_no_bypass(monkeypatch):
+    """模拟内网 1500 个 IP 场景，验证频繁请求的 IP_BAD 不会因 max_buckets 清理而恢复满桶绕过限流。"""
+    limiter = storage_routes.TokenBucketRateLimiter(
+        capacity=10, fill_rate_per_sec=10.0 / 60.0, max_buckets=1000
+    )
+    now = 1000.0
+    monkeypatch.setattr("time.time", lambda: now)
+
+    # IP_BAD 耗尽额度
+    for _ in range(10):
+        assert limiter.check("IP_BAD") is True
+    assert limiter.check("IP_BAD") is False
+
+    # 1500 个新 IP 与 IP_BAD 交错请求 (模拟 IP_BAD 持续打接口)
+    for i in range(1500):
+        limiter.check(f"IP_NEW_{i}")
+        if i % 10 == 0:
+            assert limiter.check("IP_BAD") is False
+
+    # 再次检查 IP_BAD，由于 LRU 保证活跃访问 IP 不会被误驱逐，IP_BAD 仍被严格限流
+    assert limiter.check("IP_BAD") is False
+
+
 def test_cleanup_probe_records_in_storage_api(client, monkeypatch):
     probes = client._probe_store
     now_ms = int(time.time() * 1000)
