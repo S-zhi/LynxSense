@@ -230,10 +230,23 @@ def test_save_subtitles_rejects_unsafe_version(client):
     assert r.status_code == 422
 
 
+def test_save_subtitles_rejects_empty_entries(client):
+    """空字幕不能保存，避免下游生成无字幕的假成功任务。"""
+    original = (client._tmp / client._tid / "translated.srt").read_text(encoding="utf-8")
+
+    r = client.put(
+        f"/api/tasks/{client._tid}/subtitles",
+        json={"locale": "translated", "entries": []},
+    )
+
+    assert r.status_code == 422
+    assert (client._tmp / client._tid / "translated.srt").read_text(encoding="utf-8") == original
+
+
 def test_save_subtitles_404(client):
     r = client.put(
         "/api/tasks/nope/subtitles",
-        json={"locale": "translated", "entries": []},
+        json={"locale": "translated", "entries": [{"id": "1", "index": 1, "start": 0.0, "end": 1.0, "text": "x"}]},
     )
     assert r.status_code == 404
 
