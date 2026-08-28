@@ -1,0 +1,45 @@
+name: Jules Review
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: jules-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Fork PRs are intentionally excluded so repository secrets never reach
+    # code or prompts controlled by an external fork.
+    if: >-
+      github.event.label.name == 'jules-review' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Review PR with Jules
+        uses: sanjay3290/jules-pr-reviewer@66c23eff45e2103fb3d2d6873ba073e6e281ef31 # v1
+        with:
+          jules_api_key: ${{ secrets.JULES_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          fail_on: blocking
+          skip_forks: true
+          extra_instructions: |
+            只审核当前 PR 相对目标分支的变更。
+            不修改代码，不创建新分支。
+
+            重点检查：
+            - 明确的功能错误和回归
+            - 安全问题
+            - 边界条件
+            - 并发和资源泄漏
+            - 缺失的关键测试
+
+            每条问题必须注明文件和代码位置。
