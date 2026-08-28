@@ -51,18 +51,23 @@ class BusinessApiError(RuntimeError):
         message: str,
         *,
         status_code: int | None = None,
+        task_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.task_id = task_id
 
     def to_result(self) -> dict[str, Any]:
-        return {
+        result = {
             "ok": False,
             "error_code": self.code,
             "message": self.message,
         }
+        if self.task_id:
+            result["task_id"] = self.task_id
+        return result
 
 
 class BusinessApiClient:
@@ -132,6 +137,15 @@ class BusinessApiClient:
 
         if response.is_error:
             detail = data.get("detail") if isinstance(data, dict) else None
+            if response.status_code == 409 and isinstance(detail, dict):
+                task_id = detail.get("taskId")
+                if task_id:
+                    raise BusinessApiError(
+                        "TASK_ALREADY_RUNNING",
+                        f"{detail.get('message', '该 URL 已有任务正在处理')}（task_id: {task_id}）",
+                        status_code=response.status_code,
+                        task_id=task_id,
+                    )
             message = str(detail or "业务服务返回错误")[:500]
             if response.status_code == 404:
                 code = "TASK_NOT_FOUND" if "/tasks/" in path else "BUSINESS_NOT_FOUND"
