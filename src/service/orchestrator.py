@@ -101,6 +101,25 @@ _BANDS = {
     "BURNING": (85, 100),
 }
 
+_EXCEPTION_CODE_MAP: tuple[tuple[type[Exception], str], ...] = (
+    (KeyError, "invalid_input"),
+    (ValueError, "invalid_input"),
+    (AttributeError, "internal_error"),
+    (TypeError, "internal_error"),
+    (OSError, "io_error"),
+)
+
+
+def _error_code_for_exception(exc: Exception) -> str:
+    """返回异常的稳定错误码，自定义非空 code 优先于类型映射。"""
+    custom_code = getattr(exc, "code", None)
+    if custom_code:
+        return custom_code
+    for exception_type, code in _EXCEPTION_CODE_MAP:
+        if isinstance(exc, exception_type):
+            return code
+    return "internal_error"
+
 
 def _scale(lo: int, hi: int, pct: Optional[float]) -> int:
     if pct is None:
@@ -292,7 +311,7 @@ def run_pipeline(
             )
             raise PipelineCancelledError("任务已被用户取消") from e
         logger.exception("流水线失败: task=%s step=%s", tid, state["step"])
-        err_code = getattr(e, "code", None)
+        err_code = _error_code_for_exception(e)
         on_event(PipelineEvent(
             status="FAILED",
             progress=state["progress"],
