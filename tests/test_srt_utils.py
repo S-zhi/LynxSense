@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from src.core.srt_utils import (
     Subtitle,
     decode_srt_bytes,
@@ -51,6 +53,14 @@ def test_write_reindexes(tmp_path):
     content = p.read_text(encoding="utf-8-sig")
     assert content.startswith("1\n")
     assert "\n2\n" in content
+
+
+
+
+def test_write_rejects_non_positive_duration(tmp_path):
+    p = tmp_path / "invalid.srt"
+    with pytest.raises(ValueError, match="结束时间必须大于开始时间"):
+        write_srt([Subtitle(1, 2.0, 2.0, "invalid")], p)
 
 
 def test_parse_multiline_text(tmp_path):
