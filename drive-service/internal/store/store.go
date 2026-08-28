@@ -475,7 +475,8 @@ func (s *Store) UpdateFolderEntry(id string, fn func(*FolderEntry) error) (Folde
 	return out, err
 }
 
-// RecoverableTransfers 筛选非终态任务，以便进程启动时安全恢复。
+// RecoverableTransfers 筛选处于活跃中且可恢复状态的任务（PENDING、TRANSFERRING、RETRYING、VERIFYING），
+// 排除 PAUSED 以及终态任务（SUCCESS、FAILED、CANCELLED），以便进程启动时安全恢复。
 func (s *Store) RecoverableTransfers() []Transfer {
 	all := s.ListTransfers()
 	result := make([]Transfer, 0, len(all))
