@@ -98,6 +98,9 @@ def write_srt(
     subs: List[Subtitle], path: Union[Path, str], encoding: str = "utf-8-sig"
 ) -> None:
     """把字幕列表写成 SRT 文件（默认 UTF-8 with BOM 兼容 Windows）。序号按顺序重排。"""
+    if any(not sub.end > sub.start for sub in subs):
+        raise ValueError("结束时间必须大于开始时间")
+
     path = Path(path)
     blocks: List[str] = []
     for i, sub in enumerate(subs, start=1):

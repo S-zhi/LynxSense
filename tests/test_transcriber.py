@@ -101,9 +101,20 @@ def test_extract_from_segments_list():
     assert len(_extract_segments([{"text": "a", "start": 0.0, "end": 1.0}])) == 1
 
 
+def test_extract_rejects_unstructured_list():
+    with pytest.raises(TranscribeError, match="结构无法解析") as exc_info:
+        _extract_segments(["a", "b"])
+    assert exc_info.value.code == "invalid_response"
+
+
+def test_extract_rejects_invalid_segment_shape():
+    with pytest.raises(TranscribeError, match="结构无法解析") as exc_info:
+        _extract_segments({"segments": [{"text": "a"}]})
+    assert exc_info.value.code == "invalid_response"
+
+
 def test_extract_from_empty():
-    assert _extract_segments(None) == []
-    assert _extract_segments({}) == []
+    assert _extract_segments([]) == []
 
 
 # ---------- transcribe ----------
@@ -111,6 +122,20 @@ def test_extract_from_empty():
 def test_transcribe_missing_audio():
     with pytest.raises(TranscribeError, match="不存在"):
         transcribe(Path("/nonexistent/audio.wav"), "t1")
+
+
+def test_transcribe_rejects_empty_response(monkeypatch, tmp_path):
+    _mock_replicate(monkeypatch, [])
+    with pytest.raises(TranscribeError, match="空字幕列表") as exc_info:
+        transcribe("https://example.com/audio.wav", "t1")
+    assert exc_info.value.code == "empty_response"
+
+
+def test_transcribe_rejects_zero_duration_segment(monkeypatch, tmp_path):
+    _mock_replicate(monkeypatch, [{"text": "Hello", "start": 1.0, "end": 1.0}])
+    with pytest.raises(TranscribeError, match="结束时间必须大于开始时间") as exc_info:
+        transcribe("https://example.com/audio.wav", "t1")
+    assert exc_info.value.code == "invalid_response"
 
 
 def test_transcribe_with_remote_url(monkeypatch, tmp_path):

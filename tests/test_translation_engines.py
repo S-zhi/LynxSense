@@ -347,3 +347,65 @@ def test_whitespace_api_key_endpoints(tmp_path):
 
     app.dependency_overrides.clear()
     reset_singletons()
+
+
+def test_create_engine_automatically_validates(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.handler.app import app
+    from src.handler.deps import get_translation_engine_store, reset_singletons
+
+    store = TranslationEngineStore(tmp_path / "engines.db")
+    reset_singletons()
+    app.dependency_overrides[get_translation_engine_store] = lambda: store
+    calls = []
+
+    def fake_make_engine_client(config, timeout=None):
+        calls.append(timeout)
+        class FakeClient:
+            def complete(self, system, user, max_tokens=4):
+                return "OK"
+        return FakeClient()
+
+    monkeypatch.setattr("src.handler.translation_engines.make_engine_client", fake_make_engine_client)
+    with TestClient(app) as client:
+        response = client.post("/api/settings/translation-engines", json={
+            "name": "Automatic Gateway", "apiType": "openai_compatible",
+            "baseUrl": "https://gateway.test", "model": "m1", "apiKey": "sk-test",
+        })
+
+    assert response.status_code == 201
+    checked = store.get(response.json()["id"])
+    assert checked.availability == "AVAILABLE"
+    assert checked.last_checked_at is not None
+    assert checked.last_error is None
+    assert calls == [10]
+    app.dependency_overrides.clear()
+    reset_singletons()
+
+
+def test_create_engine_records_automatic_validation_failure(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.handler.app import app
+    from src.handler.deps import get_translation_engine_store, reset_singletons
+    from src.core.translation_engines import TranslationEngineError
+
+    store = TranslationEngineStore(tmp_path / "engines.db")
+    reset_singletons()
+    app.dependency_overrides[get_translation_engine_store] = lambda: store
+
+    def fake_make_engine_client(config, timeout=None):
+        raise TranslationEngineError("bad credentials", code="unauthorized")
+
+    monkeypatch.setattr("src.handler.translation_engines.make_engine_client", fake_make_engine_client)
+    with TestClient(app) as client:
+        response = client.post("/api/settings/translation-engines", json={
+            "name": "Invalid Gateway", "apiType": "openai_compatible",
+            "baseUrl": "https://gateway.test", "model": "m1", "apiKey": "sk-test",
+        })
+
+    assert response.status_code == 201
+    checked = store.get(response.json()["id"])
+    assert checked.availability == "UNAVAILABLE"
+    assert checked.last_error == "bad credentials"
+    app.dependency_overrides.clear()
+    reset_singletons()
