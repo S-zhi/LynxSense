@@ -150,7 +150,7 @@ func (m *Manager) StartPythonImport(fileID string) (store.Transfer, error) {
 	return t, nil
 }
 
-// Recover 重新启动进程退出时遗留的非终态传输任务。
+// Recover 重新启动进程退出时遗留的活跃传输任务（PENDING、TRANSFERRING、RETRYING、VERIFYING），排除 PAUSED 及终态任务。
 func (m *Manager) Recover() {
 	for _, t := range m.store.RecoverableTransfers() {
 		m.start(t.ID)
