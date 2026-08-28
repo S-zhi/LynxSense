@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -364,14 +365,23 @@ def transcribe(
     for i, seg in enumerate(segments, start=1):
         text = (seg.get("text") or "").strip()
         if text:
-            subs.append(Subtitle(
-                index=i,
-                start=float(seg.get("start", 0.0)),
-                end=float(seg.get("end", 0.0)),
-                text=text,
-            ))
+            try:
+                start = float(seg["start"])
+                end = float(seg["end"])
+            except (KeyError, TypeError, ValueError):
+                raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response") from None
+            if not math.isfinite(start) or not math.isfinite(end):
+                raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
+            if end <= start:
+                raise TranscribeError("结束时间必须大于开始时间", code="invalid_response")
+            subs.append(Subtitle(index=i, start=start, end=end, text=text))
 
-    write_srt(subs, srt_path)
+    if not subs:
+        raise TranscribeError("Replicate 返回空字幕列表", code="empty_response")
+    try:
+        write_srt(subs, srt_path)
+    except ValueError as exc:
+        raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response") from exc
     _clear_prediction_state(out_dir)
     if on_progress is not None:
         _safe_callback(on_progress, 100.0, "succeeded")
@@ -399,7 +409,13 @@ def _extract_segments(output) -> List[dict]:
             srt_text = _download_text(srt_url)
             return _parse_srt_segments(srt_text)
         if "segments" in output:
-            return output["segments"]
+            segments = output["segments"]
+            if not isinstance(segments, list) or any(
+                not isinstance(seg, dict) or "text" not in seg or "start" not in seg or "end" not in seg
+                for seg in segments
+            ):
+                raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
+            return segments
         if "srt" in output:
             return _parse_srt_segments(output["srt"])
         if "text" in output:
@@ -407,11 +423,16 @@ def _extract_segments(output) -> List[dict]:
 
     # 格式 2: output 直接是 segments 列表
     if isinstance(output, list):
-        if output and isinstance(output[0], dict) and "text" in output[0]:
+        if not output:
+            return []
+        if all(
+            isinstance(seg, dict) and "text" in seg and "start" in seg and "end" in seg
+            for seg in output
+        ):
             return output
-        return [{"text": str(x), "start": 0.0, "end": 0.0} for x in output if x]
+        raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
 
-    return []
+    raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
 
 
 def _download_text(url: str) -> str:

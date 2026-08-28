@@ -357,7 +357,30 @@ def test_transient_error_continues_to_halve(fake_settings, monkeypatch):
     assert exc_info.value.code == "upstream_error"
     # 5xx 只在原批次上做有限退避重试，不再拆分成单条请求。
     assert called_count == 4
-    assert sleeps == [5, 15, 60]
+    assert sleeps == [0.5] * 10 + [0.5] * 30 + [0.5] * 120
+
+
+def test_upstream_retry_sleep_honors_cancellation(fake_settings, monkeypatch):
+    def fake_batch(*args, **kwargs):
+        raise TranslateError("Transient upstream error", code="upstream_error")
+
+    monkeypatch.setattr(translator, "_translate_batch", fake_batch)
+    sleeps = []
+    monkeypatch.setattr(translator.time, "sleep", sleeps.append)
+    checks = 0
+
+    def cancel_check():
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise RuntimeError("cancelled")
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        translator._translate_batch_with_retry(
+            ["a"], "en", "zh-CN", "test-key", cancel_check=cancel_check,
+        )
+    assert sleeps == [0.5]
+    assert checks == 2
 
 
 def test_network_error_retries_without_batch_fallback(fake_settings, monkeypatch):

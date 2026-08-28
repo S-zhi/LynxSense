@@ -61,6 +61,18 @@ _NETWORK_RETRY_COUNT = 3
 _RETRYABLE_ERROR_CODES = {"upstream_error", "network_error"}
 
 
+def _sleep_with_cancel(seconds: float, cancel_check: Optional[Callable[[], None]]) -> None:
+    elapsed = 0.0
+    while elapsed < seconds:
+        if cancel_check is not None:
+            cancel_check()
+        sleep_time = min(0.5, seconds - elapsed)
+        time.sleep(sleep_time)
+        elapsed += sleep_time
+    if cancel_check is not None:
+        cancel_check()
+
+
 def _lang_name(code: str) -> str:
     names = getattr(settings, "lang_names", {})
     return names.get(code, code)
@@ -108,6 +120,7 @@ def translate_texts(
     api_key: Optional[str] = None,
     on_batch: Optional[BatchHook] = None,
     engine_config=None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> List[str]:
     """翻译一批文本，保持顺序与数量一致。
 
@@ -134,6 +147,7 @@ def translate_texts(
             on_batch=on_batch,
             total_count=len(texts),
             completed_offset=len(out),
+            cancel_check=cancel_check,
         )
         out.extend(translated)
     return out
@@ -152,6 +166,7 @@ def _translate_with_fallback(
     total_count: int = 0,
     completed_offset: int = 0,
     last_error: Optional[Exception] = None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> List[str]:
     """翻译一个批次，数量不匹配时自动减半拆分重试（对已成功部分做 dedup 去重）。"""
     size = len(batch)
@@ -169,7 +184,8 @@ def _translate_with_fallback(
     current_error = last_error
     try:
         translated = _translate_batch_with_retry(
-            sub_batch, source_lang, target_lang, api_key, engine_config=engine_config,
+            sub_batch, source_lang, target_lang, api_key,
+            engine_config=engine_config, cancel_check=cancel_check,
         )
         if 0 < len(translated) <= len(missing_indices):
             new_added = False
@@ -221,13 +237,13 @@ def _translate_with_fallback(
         batch[:half], source_lang, target_lang, api_key,
         engine_config=engine_config, partial=partial, indices=indices[:half],
         on_batch=on_batch, total_count=total_count, completed_offset=completed_offset,
-        last_error=current_error,
+        last_error=current_error, cancel_check=cancel_check,
     )
     right = _translate_with_fallback(
         batch[half:], source_lang, target_lang, api_key,
         engine_config=engine_config, partial=partial, indices=indices[half:],
         on_batch=on_batch, total_count=total_count, completed_offset=completed_offset,
-        last_error=current_error,
+        last_error=current_error, cancel_check=cancel_check,
     )
     return left + right
 
@@ -239,6 +255,7 @@ def _translate_batch_with_retry(
     api_key: str,
     *,
     engine_config=None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> List[str]:
     """对暂时性接口错误做有限重试，避免触发批量减半递归。
 
@@ -256,7 +273,7 @@ def _translate_batch_with_retry(
                 delay = _UPSTREAM_RETRY_DELAYS[upstream_attempt]
                 upstream_attempt += 1
                 logger.warning("翻译上游错误，%d 秒后重试（第 %d/%d 次）", delay, upstream_attempt, len(_UPSTREAM_RETRY_DELAYS))
-                time.sleep(delay)
+                _sleep_with_cancel(delay, cancel_check)
                 continue
             if code == "network_error" and network_attempt < _NETWORK_RETRY_COUNT:
                 network_attempt += 1
@@ -362,6 +379,7 @@ def translate_srt(
     on_progress: Optional[ProgressHook] = None,
     api_key: Optional[str] = None,
     engine_config=None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> TranslateResult:
     """翻译 SRT 文件到 data/{task_id}/translated.srt，时间轴保持不变。
 
@@ -396,6 +414,7 @@ def translate_srt(
     translated = translate_texts(
         [s.text for s in subs], source_lang, target_lang,
         api_key=api_key, on_batch=_on_batch, engine_config=engine_config,
+        cancel_check=cancel_check,
     )
 
     out_subs = [
