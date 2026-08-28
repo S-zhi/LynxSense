@@ -15,6 +15,7 @@ import dataclasses
 import logging
 import threading
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,8 +75,9 @@ class ProbeResult:
     cached: bool = False
     language: Optional[str] = None
 
+_PROBE_CACHE_MAX_SIZE = 1000
 _probe_cache_lock = threading.Lock()
-_probe_cache: dict[tuple[str, str, str], tuple[float, ProbeResult]] = {}
+_probe_cache: OrderedDict[tuple[str, str, str], tuple[float, ProbeResult]] = OrderedDict()
 
 
 def clear_probe_cache() -> None:
@@ -305,10 +307,14 @@ def probe_video(
 
     if not force_refresh and effective_ttl > 0:
         with _probe_cache_lock:
-            if cache_key in _probe_cache:
-                ts, cached_res = _probe_cache[cache_key]
+            cached = _probe_cache.get(cache_key)
+            if cached is not None:
+                ts, cached_res = cached
                 if now - ts < effective_ttl:
+                    _probe_cache.move_to_end(cache_key)
                     return dataclasses.replace(cached_res, cached=True)
+                # 删除当前过期项，避免它继续占用有界缓存空间。
+                del _probe_cache[cache_key]
 
     ydl_opts: dict = {
         "format": effective_format,
@@ -371,6 +377,9 @@ def probe_video(
     if effective_ttl > 0:
         with _probe_cache_lock:
             _probe_cache[cache_key] = (now, res)
+            _probe_cache.move_to_end(cache_key)
+            while len(_probe_cache) > _PROBE_CACHE_MAX_SIZE:
+                _probe_cache.popitem(last=False)
 
     return res
 
