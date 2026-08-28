@@ -150,6 +150,37 @@ def test_translate_texts_dedup_partial_hit(fake_settings, monkeypatch):
     assert len(called_items[1]) == 2
 
 
+def test_translate_texts_partial_response_falls_back_without_losing_results(fake_settings, monkeypatch):
+    """截断批次留下空槽时，保留已翻译项并回填原文。"""
+    called_batches = []
+
+    def fake(messages, **kw):
+        user = messages[1]["content"]
+        items = re.findall(r"^\d+\.\s*(.*)$", user, re.M)
+        called_batches.append(items)
+        if len(items) == 4:
+            return json.dumps(["translated-1", "translated-2"])
+        if len(items) == 2:
+            return json.dumps(["translated-3"])
+        return json.dumps([])
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake)
+    monkeypatch.setattr(translator.settings, "translate_batch_size", 4)
+    progress = []
+
+    result = translate_texts(
+        ["item1", "item2", "item3", "item4"],
+        "auto",
+        "zh-CN",
+        on_batch=lambda done, total: progress.append((done, total)),
+    )
+
+    assert result == ["translated-1", "translated-2", "translated-3", "item4"]
+    assert progress == [(2, 4), (3, 4), (4, 4)]
+    assert called_batches == [["item1", "item2", "item3", "item4"], ["item3", "item4"], ["item4"]]
+
+
+
 # ---------- translate_srt ----------
 
 def _make_srt(tmp_path):

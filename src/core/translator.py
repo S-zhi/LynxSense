@@ -209,6 +209,15 @@ def _translate_with_fallback(
         current_error = exc
 
     if size <= 1:
+        if partial:
+            # A partial response may leave this slot without a translation. Keep
+            # the subtitle in the output rather than discarding successful slots.
+            idx = indices[0]
+            partial[idx] = batch[0]
+            if on_batch is not None and total_count > 0:
+                on_batch(completed_offset + len(partial), total_count)
+            return [partial[item_idx] for item_idx in indices]
+
         line_num = completed_offset + indices[0] + 1
         if current_error:
             err_msg = str(current_error)
