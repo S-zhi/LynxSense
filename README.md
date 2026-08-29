@@ -94,8 +94,16 @@ cp drive-service/config.example.json drive-service/config.local.json
 
 ### 4. 启动业务服务和 Drive sidecar
 
+`./scripts/start.sh` 会同时启动 Python 业务服务和 Google Drive sidecar，因此即使暂时不用 Google Drive，也必须先准备 `drive-service/config.local.json`。
+
 ```bash
 ./scripts/start.sh
+```
+
+如果只需要业务 API（例如不使用 Google Drive），可单独启动：
+
+```bash
+uv run uvicorn src.handler.app:app --port 8000
 ```
 
 如需指定其他 Drive 配置文件，可使用：
@@ -199,30 +207,15 @@ Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务；Goo
 - **本地资源**：查看磁盘占用、保留策略和清理预览；默认保留产物 30 天，自动清理只删除产物并保留任务记录。
 - **灵活输出**：仅下载视频、单语 / 双语字幕、硬烧录 / 软字幕。
 
-## 🧩 命令行使用
+## 🧩 无页面使用
 
-不启动 Web 页面也可以直接运行完整流水线：
-
-```bash
-uv run python main.py "<视频 URL>"
-uv run python main.py "<视频 URL>" \
-  --target zh-CN --source auto --mode bilingual --burn soft --model small
-```
-
-| 参数 | 默认值 | 说明 |
-| --- | --- | --- |
-| `url` | 必填 | 视频页面地址 |
-| `--target` | `zh-CN` | 目标语言 |
-| `--source` | `auto` | 源语言，默认自动检测 |
-| `--mode` | `mono` | `mono` 仅译文，`bilingual` 双语 |
-| `--burn` | `hard` | `hard` 硬字幕，`soft` 软字幕 |
-| `--model` | `small` | Whisper 模型权重 |
+仓库当前没有独立的 `main.py` 命令行入口。不打开 Web 页面时，请启动 API，并通过 MCP 客户端调用 `start_subtitle_pipeline`；完整的 stdio 配置和调用顺序见上方 [MCP 接入](#-mcp-接入)。
 
 ## 🏗️ 工作原理
 
 ```mermaid
 flowchart LR
-    Client["Web / CLI / MCP"] --> API["FastAPI"]
+    Client["Web / MCP"] --> API["FastAPI"]
     API --> Runner["后台任务队列"]
     Runner --> Download["yt-dlp 下载"]
     Download --> Audio["FFmpeg 提取音频"]
@@ -255,6 +248,9 @@ PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
 | `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | 翻译模型 |
 | `SUBTRANS_API_BASE_URL` | `http://127.0.0.1:8000` | MCP 访问的业务 API 地址 |
 | `SUBTRANS_MCP_TRANSPORT` | `stdio` | `stdio` 或 `streamable-http` |
+| `SUBTRANS_MCP_HOST` | `127.0.0.1` | Streamable HTTP 监听地址 |
+| `SUBTRANS_MCP_PORT` | `3001` | Streamable HTTP 监听端口 |
+| `SUBTRANS_MCP_PATH` | `/mcp` | Streamable HTTP 路径 |
 
 完整配置项见 [.env.example](./.env.example) 与 [mcp.env.example](./mcp.env.example)。启动后可访问 <http://localhost:8000/docs> 查看 API 文档。
 
@@ -286,7 +282,7 @@ tests/             Python 测试
 | --- | --- |
 | 硬字幕提示缺少 `subtitles` filter | 安装 `ffmpeg-full`，或改用 `--burn soft` |
 | 下载失败或网站要求登录 | 检查 URL，并通过 `SUBTRANS_COOKIES` 指定 cookies 文件 |
-| MCP 返回 `BUSINESS_UNAVAILABLE` | 先运行 `./scripts/start.sh`，确认 8000 和 8787 端口都已启动 |
+| MCP 返回 `BUSINESS_UNAVAILABLE` | 启动业务 API（`./scripts/start.sh` 或 API-only 命令），确认 8000 端口可访问；使用 Google Drive 时再确认 8787 端口 |
 | MCP 返回 `NOT_INITIALIZED` | 补齐 `.env` 中的密钥并重启业务服务 |
 | 前端无法连接后端 | 确认 <http://localhost:8000/api/health> 可访问 |
 | Google Drive 页面显示 sidecar 离线 | 确认 `./scripts/start.sh` 已启动，并检查 <http://127.0.0.1:8787/healthz> |

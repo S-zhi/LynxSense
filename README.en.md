@@ -94,8 +94,16 @@ Fill in `google_client_id` and `google_client_secret` in `drive-service/config.l
 
 ### 4. Start the business service and Drive sidecar
 
+`./scripts/start.sh` starts both the Python business service and the Google Drive sidecar, so `drive-service/config.local.json` is required even when you do not plan to use Google Drive immediately.
+
 ```bash
 ./scripts/start.sh
+```
+
+To run only the business API (for example, without Google Drive), start it separately:
+
+```bash
+uv run uvicorn src.handler.app:app --port 8000
 ```
 
 To use another Drive configuration file:
@@ -199,30 +207,15 @@ Highlights:
 - **Local resources** — inspect disk usage, retention, and cleanup previews; artifacts are retained for 30 days by default, and automatic cleanup preserves job records.
 - **Flexible output** — download-only, translated or bilingual, hard or soft subtitles.
 
-## 🧩 Command Line
+## 🧩 Headless usage
 
-Run the full pipeline without opening the Web UI:
-
-```bash
-uv run python main.py "<video URL>"
-uv run python main.py "<video URL>" \
-  --target zh-CN --source auto --mode bilingual --burn soft --model small
-```
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `url` | Required | Video page URL |
-| `--target` | `zh-CN` | Target language |
-| `--source` | `auto` | Source language, detected by default |
-| `--mode` | `mono` | `mono` translated-only, `bilingual` bilingual |
-| `--burn` | `hard` | `hard` burned in, `soft` subtitle track |
-| `--model` | `small` | Whisper model weight |
+The repository currently has no standalone `main.py` command-line entry point. To work without the Web UI, start the API and call `start_subtitle_pipeline` through an MCP client; see the [MCP Integration](#-mcp-integration) section for the stdio configuration and call sequence.
 
 ## 🏗️ How It Works
 
 ```mermaid
 flowchart LR
-    Client["Web / CLI / MCP"] --> API["FastAPI"]
+    Client["Web / MCP"] --> API["FastAPI"]
     API --> Runner["Background job queue"]
     Runner --> Download["yt-dlp download"]
     Download --> Audio["FFmpeg audio extraction"]
@@ -255,6 +248,9 @@ A failed step moves the job to `FAILED` and records the failing stage and error.
 | `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | Translation model |
 | `SUBTRANS_API_BASE_URL` | `http://127.0.0.1:8000` | Business API used by MCP |
 | `SUBTRANS_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |
+| `SUBTRANS_MCP_HOST` | `127.0.0.1` | Streamable HTTP bind address |
+| `SUBTRANS_MCP_PORT` | `3001` | Streamable HTTP port |
+| `SUBTRANS_MCP_PATH` | `/mcp` | Streamable HTTP path |
 
 See [.env.example](./.env.example) and [mcp.env.example](./mcp.env.example) for all options. Once started, API documentation is available at <http://localhost:8000/docs>.
 
@@ -286,7 +282,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before contributing. Report security i
 | --- | --- |
 | Hard subtitles report a missing `subtitles` filter | Install `ffmpeg-full`, or use `--burn soft` |
 | Download fails or the site requires authentication | Check the URL and set `SUBTRANS_COOKIES` to a cookies file |
-| MCP returns `BUSINESS_UNAVAILABLE` | Run `./scripts/start.sh` and confirm both ports 8000 and 8787 are running |
+| MCP returns `BUSINESS_UNAVAILABLE` | Start the business API (`./scripts/start.sh` or the API-only command) and confirm port 8000 is reachable; confirm port 8787 as well when using Google Drive |
 | MCP returns `NOT_INITIALIZED` | Complete `.env` credentials and restart the business service |
 | Frontend cannot reach the backend | Confirm <http://localhost:8000/api/health> is available |
 | Google Drive page reports sidecar offline | Confirm `./scripts/start.sh` is running and check <http://127.0.0.1:8787/healthz> |
