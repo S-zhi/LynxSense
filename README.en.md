@@ -166,6 +166,12 @@ check_subtitle_setup → probe_video → start_subtitle_pipeline
 → get_task_status (poll) → get_task_artifacts (after success)
 ```
 
+Before the first call, start the business API and check `/api/health/ready`. `check_subtitle_setup` returns `initialized`, `missing`, `config_file`, `agent_action`, and `restart_required`: when configuration is missing, complete the business service's `.env` at the returned path, restart FastAPI, and check again. Never pass business credentials as MCP arguments. `start_subtitle_pipeline` only means that a job was queued; save its `task_id` and poll it instead of reading artifacts early.
+
+When a job reaches `FAILED`, show the stage and error to the user and call `retry_task` only after confirmation. If the result is `TASK_ALREADY_RUNNING`, reuse its returned `task_id`. Call `get_task_artifacts` only for `SUCCESS`. `RESOURCE_MISSING` means that artifacts were cleaned up and the job must be run again. For `HARD_BURN_UNAVAILABLE`, ask whether to use `burn=soft` or install FFmpeg with libass; never silently change an explicitly requested hard-subtitle mode.
+
+The defaults for `start_subtitle_pipeline` are `source_lang=auto`, `target_lang=zh-CN`, `mode=mono`, `burn=hard`, `model=small`, and `need_subtitle=true`. Common error codes include `BUSINESS_UNAVAILABLE`, `NOT_INITIALIZED`, `INVALID_URL`, `PROBE_FAILED`, `INVALID_ARGUMENT`, `TASK_NOT_READY`, `TASK_NOT_FOUND`, and `RESOURCE_MISSING`.
+
 ### Streamable HTTP: connect a remote or shared host
 
 ```bash
