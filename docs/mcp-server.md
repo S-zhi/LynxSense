@@ -45,7 +45,17 @@ SUBTRANS_MCP_TRANSPORT=streamable-http \
   uv run python -m src.mcp_server.server
 ```
 
-默认地址为 `http://127.0.0.1:3001/mcp`。
+默认地址为 `http://127.0.0.1:3001/mcp`。如需让远程 Host 访问，可通过环境变量调整监听地址、端口和路径：
+
+```bash
+SUBTRANS_MCP_TRANSPORT=streamable-http \
+SUBTRANS_MCP_HOST=0.0.0.0 \
+SUBTRANS_MCP_PORT=3001 \
+SUBTRANS_MCP_PATH=/mcp \
+uv run python -m src.mcp_server.server
+```
+
+`SUBTRANS_MCP_HOST` 只控制 MCP Server 的监听地址；`SUBTRANS_API_BASE_URL` 仍必须指向业务 FastAPI，而不是 MCP 地址。生产环境请在受控网络中暴露 MCP，并按部署环境配置认证和 TLS。
 
 ## MCP 工具
 
@@ -55,7 +65,9 @@ SUBTRANS_MCP_TRANSPORT=streamable-http \
 - `get_task_status`：查询任务状态和进度。
 - `get_task_artifacts`：获取成功任务的视频和字幕下载地址。
 - `list_tasks`：查看最近任务。
-- `retry_task`：重试失败任务。
+- `retry_task`：在用户确认后重试失败任务。
+
+常见错误码及处理方式：`BUSINESS_UNAVAILABLE` 表示业务 API 未启动，`NOT_INITIALIZED` 表示业务 `.env` 缺少配置，`INVALID_URL`/`PROBE_FAILED` 表示需要修正视频地址，`HARD_BURN_UNAVAILABLE` 表示应改用软字幕或安装带 libass 的 FFmpeg，`TASK_NOT_READY` 表示继续轮询，`RESOURCE_MISSING` 表示重新运行任务。`TASK_ALREADY_RUNNING` 返回已有任务 ID 时应复用该任务，不要重复创建。
 
 ## Agent 自主发现与执行
 

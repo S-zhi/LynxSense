@@ -166,6 +166,12 @@ check_subtitle_setup → probe_video → start_subtitle_pipeline
 → get_task_status（轮询）→ get_task_artifacts（成功后）
 ```
 
+首次调用前，先确保业务 API 已启动并检查 `/api/health/ready`。`check_subtitle_setup` 会返回 `initialized`、`missing`、`config_file`、`agent_action` 和 `restart_required`：配置缺失时，按返回路径补齐业务服务项目根目录的 `.env`，重启 FastAPI 后再次检查；不要把业务密钥传入 MCP 参数。`start_subtitle_pipeline` 只表示任务已入队，必须保存 `task_id` 并轮询状态，不要提前读取产物。
+
+任务进入 `FAILED` 时先向用户展示错误和阶段，只有用户确认后才调用 `retry_task`。如果返回 `TASK_ALREADY_RUNNING`，复用返回的 `task_id`；只有状态为 `SUCCESS` 时才调用 `get_task_artifacts`。`RESOURCE_MISSING` 表示产物已被清理，需要重新运行任务；`HARD_BURN_UNAVAILABLE` 时应询问用户改用 `burn=soft` 或安装带 libass 的 FFmpeg，不能静默改变明确指定的硬字幕选项。
+
+`start_subtitle_pipeline` 的默认参数为 `source_lang=auto`、`target_lang=zh-CN`、`mode=mono`、`burn=hard`、`model=small` 和 `need_subtitle=true`。支持的主要错误码包括 `BUSINESS_UNAVAILABLE`、`NOT_INITIALIZED`、`INVALID_URL`、`PROBE_FAILED`、`INVALID_ARGUMENT`、`TASK_NOT_READY`、`TASK_NOT_FOUND` 和 `RESOURCE_MISSING`。
+
 ### Streamable HTTP：接入远程或共享 Host
 
 ```bash
