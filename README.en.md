@@ -48,7 +48,26 @@ flowchart LR
 
 ## 🚀 Quick Start
 
-### 1. Prepare the environment
+### One-command Ubuntu / Debian install (recommended)
+
+Log in to the server and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/install-linux.sh | sudo bash
+```
+
+The installer securely prompts for the Replicate and DeepSeek credentials, then handles the repository checkout, FFmpeg, uv, Python 3.12, locked dependencies, persistent storage, a systemd service, and a health check. When it finishes, open `http://SERVER_IP:8000/`.
+
+```bash
+systemctl status subtitles-ai --no-pager
+journalctl -u subtitles-ai -f
+```
+
+The installer supports Ubuntu and Debian. On a repeat run, leave a credential blank to keep its existing value. Before public access, allow TCP 8000 in the cloud firewall; use an HTTPS reverse proxy for production. See the [Linux deployment guide](./docs/quick-start-linux.md) for options, non-interactive installation, and troubleshooting.
+
+### Local development on macOS
+
+#### 1. Prepare the environment
 
 The project is currently verified on macOS. It requires Python `3.10–3.12`, [uv](https://docs.astral.sh/uv/), and FFmpeg with `libass`:
 
@@ -67,7 +86,7 @@ ffmpeg -hide_banner -filters | grep " subtitles "
 
 > A regular FFmpeg build may not include `libass`, which prevents hard subtitle burning. You can use soft subtitles instead.
 
-### 2. Configure credentials
+#### 2. Configure credentials
 
 ```bash
 cp .env.example .env
@@ -82,7 +101,7 @@ SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 
 Credentials are read only by the business service. Never put them in MCP tool arguments or commit them to the repository.
 
-### 3. Configure Google Drive (optional)
+#### 3. Configure Google Drive (optional)
 
 The Google Drive sidecar reads OAuth application credentials from a local file. The file is ignored by Git and must not be committed:
 
@@ -92,7 +111,7 @@ cp drive-service/config.example.json drive-service/config.local.json
 
 Fill in `google_client_id` and `google_client_secret` in `drive-service/config.local.json`, or place the Google Desktop OAuth JSON at `drive-service/drive-data/oauth_client.json`. On first use, open the **Google Drive** page and click the authorization button. The browser will use a dynamic loopback callback; the Refresh Token stays in the local `drive-data` directory. The OAuth client must be a Desktop app; the sidecar listens on local `127.0.0.1:8787` by default, does not support a fixed callback URL, and OAuth JSON, Refresh Tokens, and Client Secrets must never be committed.
 
-### 4. Start the business service and Drive sidecar
+#### 4. Start the business service and Drive sidecar
 
 `./scripts/start.sh` starts both the Python business service and the Google Drive sidecar; `drive-service/config.local.json` is required only when Google Drive is enabled. If you do not need cloud storage, start the API-only command instead of the sidecar.
 
