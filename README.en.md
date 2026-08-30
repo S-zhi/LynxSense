@@ -90,11 +90,11 @@ The Google Drive sidecar reads OAuth application credentials from a local file. 
 cp drive-service/config.example.json drive-service/config.local.json
 ```
 
-Fill in `google_client_id` and `google_client_secret` in `drive-service/config.local.json`, or place the Google Desktop OAuth JSON at `drive-service/drive-data/oauth_client.json`. On first use, open the **Google Drive** page and click the authorization button. The browser will use a dynamic loopback callback; the Refresh Token stays in the local `drive-data` directory.
+Fill in `google_client_id` and `google_client_secret` in `drive-service/config.local.json`, or place the Google Desktop OAuth JSON at `drive-service/drive-data/oauth_client.json`. On first use, open the **Google Drive** page and click the authorization button. The browser will use a dynamic loopback callback; the Refresh Token stays in the local `drive-data` directory. The OAuth client must be a Desktop app; the sidecar listens on local `127.0.0.1:8787` by default, does not support a fixed callback URL, and OAuth JSON, Refresh Tokens, and Client Secrets must never be committed.
 
 ### 4. Start the business service and Drive sidecar
 
-`./scripts/start.sh` starts both the Python business service and the Google Drive sidecar, so `drive-service/config.local.json` is required even when you do not plan to use Google Drive immediately.
+`./scripts/start.sh` starts both the Python business service and the Google Drive sidecar; `drive-service/config.local.json` is required only when Google Drive is enabled. If you do not need cloud storage, start the API-only command instead of the sidecar.
 
 ```bash
 ./scripts/start.sh
@@ -125,6 +125,14 @@ Choose either path:
 
 - For direct use, open <http://localhost:8000/>.
 - For AI-agent use, continue to [MCP Integration](#-mcp-integration).
+
+### Google Drive task-level synchronization
+
+Google Drive syncs only files or job artifacts explicitly selected by the user. It does not automatically sync all local resources or delete cloud files according to the Web retention setting. Single-file uploads support resumable chunks; downloads and imports resume with `Range` requests and verify Drive's MD5 when available before submitting the stream to the business API.
+
+Folder uploads use a manifest to create task-level directories. Paths must be relative, and batches and entries expose status, progress, pause/resume, cancellation, and failure retry. Reusing an `Idempotency-Key` or `X-Client-Request-ID` safely retries batch creation. Task folders are linked by task ID metadata, so retries do not create duplicate folders. Drive folders cannot be downloaded or imported into the Python pipeline.
+
+See `drive-service/README.md` for the sidecar API. Real OAuth, cloud transfer, and credential tests are outside local verification.
 
 ## 🤖 MCP Integration
 
@@ -197,7 +205,7 @@ See [MCP Server documentation](./docs/mcp-server.md) and the [MCP Agent guide](.
 
 ## 🖥️ Web Workbench
 
-The Web workbench and API share port `8000`; no separate frontend server is required. The Google Drive page talks to the local sidecar on port `8787`.
+The Web workbench and API share port `8000`; no separate frontend server is required. When cloud storage is enabled, the Google Drive page uses CORS to talk to the local sidecar on port `8787`. The sidecar is a local Drive adapter, not the business API; both services listen locally by default.
 
 1. Open <http://localhost:8000/>.
 2. Paste a video page URL or drop in a local video.
@@ -291,7 +299,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before contributing. Report security i
 | MCP returns `BUSINESS_UNAVAILABLE` | Start the business API (`./scripts/start.sh` or the API-only command) and confirm port 8000 is reachable; confirm port 8787 as well when using Google Drive |
 | MCP returns `NOT_INITIALIZED` | Complete `.env` credentials and restart the business service |
 | Frontend cannot reach the backend | Confirm <http://localhost:8000/api/health> is available |
-| Google Drive page reports sidecar offline | Confirm `./scripts/start.sh` is running and check <http://127.0.0.1:8787/healthz> |
+| Google Drive page reports sidecar offline | Confirm the sidecar was started with its configuration and check <http://127.0.0.1:8787/healthz>; the API-only command does not provide Drive features |
 
 ## 📄 License & Compliance
 

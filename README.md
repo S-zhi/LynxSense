@@ -82,7 +82,7 @@ SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 
 密钥只由业务服务读取，不应写入 MCP 参数或提交到仓库。
 
-### 3. 配置 Google Drive（需要云盘功能时）
+### 3. 配置 Google Drive（可选）
 
 Google Drive sidecar 使用本地配置文件读取 OAuth 应用身份；该文件已被 Git 忽略，不会提交到仓库：
 
@@ -90,11 +90,11 @@ Google Drive sidecar 使用本地配置文件读取 OAuth 应用身份；该文�
 cp drive-service/config.example.json drive-service/config.local.json
 ```
 
-然后在 `drive-service/config.local.json` 中填写 `google_client_id`、`google_client_secret`，或将 Google Desktop OAuth JSON 放到 `drive-service/drive-data/oauth_client.json`。首次使用时，在网页的 **Google Drive** 页面点击授权，浏览器会打开动态 loopback 回调；Refresh Token 会保存在本地 `drive-data` 目录。
+然后在 `drive-service/config.local.json` 中填写 `google_client_id`、`google_client_secret`，或将 Google Desktop OAuth JSON 放到 `drive-service/drive-data/oauth_client.json`。首次使用时，在网页的 **Google Drive** 页面点击授权，浏览器会打开动态 loopback 回调；Refresh Token 会保存在本地 `drive-data` 目录。OAuth Client 必须是 Desktop app 类型；sidecar 默认只监听本机 `127.0.0.1:8787`，不支持固定回调地址，也不应把 OAuth JSON、Refresh Token 或 Client Secret 提交到 Git。
 
 ### 4. 启动业务服务和 Drive sidecar
 
-`./scripts/start.sh` 会同时启动 Python 业务服务和 Google Drive sidecar，因此即使暂时不用 Google Drive，也必须先准备 `drive-service/config.local.json`。
+`./scripts/start.sh` 会同时启动 Python 业务服务和 Google Drive sidecar；只有使用 Google Drive 时才需要准备 `drive-service/config.local.json`。如果暂时不用云盘功能，可以只启动 API，避免启动 sidecar。
 
 ```bash
 ./scripts/start.sh
@@ -125,6 +125,14 @@ curl http://127.0.0.1:8787/healthz
 
 - 想直接操作：打开 <http://localhost:8000/>。
 - 想让 AI Agent 操作：继续阅读 [MCP 接入](#-mcp-接入)。
+
+### Google Drive 任务级同步
+
+Google Drive 仅同步用户明确选择的文件或任务产物，不会自动同步全部本地资源，也不会按 Web 页面的保留策略自动清理云端文件。单文件上传支持可恢复分片；下载或导入会使用 `Range` 续传，完成后在可用时校验 Drive 提供的 MD5，再提交业务 API。
+
+文件夹批量上传通过 manifest 建立任务级目录：路径必须是相对路径，批次和条目分别提供状态、进度、暂停/恢复、取消与失败重试；相同 `Idempotency-Key` 或 `X-Client-Request-ID` 可安全重试批次创建。以任务 ID 创建的目录通过元数据关联同一任务，重复请求不会重复创建目录。Drive 文件夹不能下载或导入 Python 流水线。
+
+`drive-service/README.md` 列出了 sidecar API；真实 OAuth、云端传输和凭据测试不属于本地验证范围。
 
 ## 🤖 MCP 接入
 
@@ -197,7 +205,7 @@ SUBTRANS_MCP_TRANSPORT=streamable-http \
 
 ## 🖥️ Web 工作台
 
-Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务；Google Drive 页面会通过 CORS 访问同机的 `8787` sidecar。
+Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务；Google Drive 页面在启用云盘功能时通过 CORS 访问同机的 `8787` sidecar。sidecar 是本机 Drive 适配层，不是业务 API；两项服务都默认仅供本机访问。
 
 1. 打开 <http://localhost:8000/>。
 2. 粘贴视频页面地址，或拖入本地视频。
@@ -291,7 +299,7 @@ tests/             Python 测试
 | MCP 返回 `BUSINESS_UNAVAILABLE` | 启动业务 API（`./scripts/start.sh` 或 API-only 命令），确认 8000 端口可访问；使用 Google Drive 时再确认 8787 端口 |
 | MCP 返回 `NOT_INITIALIZED` | 补齐 `.env` 中的密钥并重启业务服务 |
 | 前端无法连接后端 | 确认 <http://localhost:8000/api/health> 可访问 |
-| Google Drive 页面显示 sidecar 离线 | 确认 `./scripts/start.sh` 已启动，并检查 <http://127.0.0.1:8787/healthz> |
+| Google Drive 页面显示 sidecar 离线 | 确认已按配置启动 sidecar，并检查 <http://127.0.0.1:8787/healthz>；只启动 API-only 命令不会提供 Drive 功能 |
 
 ## 📄 许可证与合规
 
