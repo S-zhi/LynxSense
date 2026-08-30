@@ -3,11 +3,11 @@
 # Subtitles AI 一键安装器（Ubuntu / Debian）。
 #
 # 交互模式：
-#   sudo bash scripts/install-linux.sh
+#   sudo bash install.sh
 #
 # 非交互模式（适合 CI；注意避免把密钥写入 Shell 历史）：
 #   sudo env REPLICATE_API_TOKEN=... SUBTRANS_DEEPSEEK_API_KEY=... \
-#     bash scripts/install-linux.sh --non-interactive
+#     bash install.sh --non-interactive
 #
 # 脚本负责：安装系统依赖、拉取仓库、交互写入密钥、安装 Python/项目依赖、
 # 创建低权限 systemd 服务并启动健康检查。重复执行可用于更新依赖和服务配置。
@@ -16,6 +16,8 @@ set -Eeuo pipefail
 umask 027
 
 REPOSITORY_URL="${SUBTRANS_REPOSITORY_URL:-https://github.com/S-zhi/Subtitles-AI.git}"
+DEFAULT_INSTALL_REF="main"
+REPOSITORY_REF="${SUBTRANS_INSTALL_REF:-${DEFAULT_INSTALL_REF}}"
 DEFAULT_INSTALL_DIR="/opt/subtitles-ai"
 DEFAULT_DATA_ROOT="/var/lib/subtitles-ai"
 SERVICE_NAME="${SUBTRANS_SERVICE_NAME:-subtitles-ai}"
@@ -40,7 +42,7 @@ die() {
 
 usage() {
   cat <<'EOF'
-用法：sudo bash scripts/install-linux.sh [选项]
+用法：sudo bash install.sh [选项]
 
 选项：
   --non-interactive  不询问输入；密钥必须通过环境变量提供或已存在于 .env
@@ -58,6 +60,7 @@ usage() {
   SUBTRANS_SERVICE_USER           systemd 用户，默认 subtitles-ai
   SUBTRANS_SERVICE_NAME           systemd 服务名，默认 subtitles-ai
   SUBTRANS_REPOSITORY_URL         Git 仓库地址
+  SUBTRANS_INSTALL_REF            Git 分支或 Tag；Release 资产默认使用对应版本 Tag
 EOF
 }
 
@@ -80,7 +83,7 @@ while (($#)); do
   shift
 done
 
-[[ "${EUID}" -eq 0 ]] || die "请使用 sudo 运行：sudo bash scripts/install-linux.sh"
+[[ "${EUID}" -eq 0 ]] || die "请使用 sudo 运行：sudo bash install.sh"
 [[ "${API_PORT}" =~ ^[0-9]+$ ]] || die "SUBTRANS_API_PORT 必须是数字"
 ((API_PORT >= 1 && API_PORT <= 65535)) || die "SUBTRANS_API_PORT 必须在 1–65535 之间"
 [[ "${SERVICE_USER}" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "SUBTRANS_SERVICE_USER 不是有效的 Linux 用户名"
@@ -160,7 +163,7 @@ if [[ ! -f "${PROJECT_DIR}/pyproject.toml" ]]; then
   fi
   log "克隆代码到 ${PROJECT_DIR}"
   mkdir -p "$(dirname "${PROJECT_DIR}")"
-  git clone --branch main --single-branch "${REPOSITORY_URL}" "${PROJECT_DIR}"
+  git clone --branch "${REPOSITORY_REF}" --single-branch "${REPOSITORY_URL}" "${PROJECT_DIR}"
 fi
 [[ -f "${PROJECT_DIR}/src/handler/app.py" ]] || die "安装目录不是有效的 Subtitles AI 仓库：${PROJECT_DIR}"
 

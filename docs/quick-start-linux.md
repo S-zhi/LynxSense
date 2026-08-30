@@ -7,7 +7,7 @@
 登录 Ubuntu/Debian 服务器后，只需执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/install-linux.sh | sudo bash
+curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh | sudo bash
 ```
 
 脚本会静默询问 `REPLICATE_API_TOKEN` 和 `SUBTRANS_DEEPSEEK_API_KEY`，输入内容不会显示在终端；随后会安装 FFmpeg、uv、Python 3.12 和锁定依赖，创建持久化目录、systemd 服务并执行健康检查。重复运行时，密钥输入留空会保留 `.env` 中的现有值。
@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/ins
 如果希望执行前先检查脚本，可以下载后再运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/install-linux.sh -o /tmp/subtitles-ai-install.sh
+curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh -o /tmp/subtitles-ai-install.sh
 less /tmp/subtitles-ai-install.sh
 sudo bash /tmp/subtitles-ai-install.sh
 ```
@@ -26,7 +26,7 @@ sudo bash /tmp/subtitles-ai-install.sh
 sudo env \
   REPLICATE_API_TOKEN='your-replicate-token' \
   SUBTRANS_DEEPSEEK_API_KEY='your-deepseek-key' \
-  bash /opt/subtitles-ai/scripts/install-linux.sh --non-interactive
+  bash /opt/subtitles-ai/install.sh --non-interactive
 ```
 
 非交互方式可能把密钥留在 Shell 历史或 CI 配置中，日常部署优先使用交互模式。安装完成后：

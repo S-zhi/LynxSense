@@ -53,8 +53,10 @@ flowchart LR
 登录服务器后执行这一行即可：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/install-linux.sh | sudo bash
+curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh | sudo bash
 ```
+
+这个稳定地址始终下载最新正式版的 `install.sh`，脚本会安装与该 Release 对应的代码版本。
 
 安装器会在终端中静默询问 Replicate 和 DeepSeek 密钥，并自动完成代码下载、FFmpeg、uv、Python 3.12、项目依赖、持久化目录、systemd 服务和健康检查。安装结束后打开 `http://服务器IP:8000/`。
 
@@ -298,6 +300,7 @@ cd web && npm test
 项目主要目录：
 
 ```text
+install.sh         Linux 一键安装与 systemd 配置
 src/core/          下载、音频、识别、翻译与字幕烧录
 src/handler/       FastAPI 路由与前端静态托管
 src/mcp_server/    MCP Server、工具与业务 API 客户端
