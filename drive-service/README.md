@@ -1,4 +1,4 @@
-# Subtitles AI Drive Service
+# LynxSense Drive Service
 
 这是一个单用户、本机运行的 Google Drive sidecar。它不读取 Python 服务的数据库，也不导入 Python 包；只通过内部 HTTP 调用现有的 `/api/tasks/upload`。Drive 的 OAuth token、上传状态和下载 `.part` 文件都保存在 `data_dir`，进程重启后会自动恢复未完成传输。
 

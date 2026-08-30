@@ -1,4 +1,4 @@
-# Subtitles AI MCP Agent 使用指南
+# LynxSense MCP Agent 使用指南
 
 这份文档是 MCP Resource `subtitles://agent-guide` 的内容，描述 Agent 调用字幕处理工具时必须遵循的行为。
 服务级 instructions 和每个工具的 description 也包含同一套关键约束，Host 可以选择读取本 Resource 获取完整说明。
