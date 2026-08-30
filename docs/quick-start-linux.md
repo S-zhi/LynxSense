@@ -1,6 +1,6 @@
 # Linux 快速启动与部署
 
-本文面向 Ubuntu/Debian Linux，目标是先启动 Subtitles AI 的 Web 工作台和业务 API，再按需配置 systemd 与 Nginx。Google Drive sidecar 是可选组件，不影响字幕主流程。
+本文面向 Ubuntu/Debian Linux，目标是先启动 LynxSense 的 Web 工作台和业务 API，再按需配置 systemd 与 Nginx。Google Drive sidecar 是可选组件，不影响字幕主流程。
 
 ## 一键安装（推荐）
 
@@ -176,7 +176,7 @@ sudo chmod 600 /opt/subtitles-ai/.env
 
 ```ini
 [Unit]
-Description=Subtitles AI FastAPI Service
+Description=LynxSense FastAPI Service
 After=network-online.target
 Wants=network-online.target
 

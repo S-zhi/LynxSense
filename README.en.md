@@ -1,13 +1,14 @@
 English | [简体中文](./README.md)
 
 <div align="center">
-  <img src="./web/assets/subtitles-ai-logo.svg" width="88" alt="Subtitles AI Logo" />
-  <h1>Subtitles AI</h1>
-  <p><strong>Turn any video into subtitles that are ready to understand, translate, and deliver.</strong></p>
-  <p>A visual subtitle workbench for people and an MCP-native video workflow for AI agents.</p>
+  <img src="./web/assets/lynxsense-logo.png" width="88" alt="LynxSense Logo" />
+  <h1>LynxSense</h1>
+  <p><strong>Sense every signal in media with the acuity of a lynx.</strong></p>
+  <p>Turn subtitles, categories, emotion, and vocal tone into information that can be understood, searched, and used by AI.</p>
 
   <p>
     <a href="#-quick-start">Quick Start</a> ·
+    <a href="#-product-direction">Product Direction</a> ·
     <a href="#-mcp-integration">MCP Integration</a> ·
     <a href="#-web-workbench">Web Workbench</a> ·
     <a href="./docs/mcp-server.md">Documentation</a>
@@ -22,28 +23,39 @@ English | [简体中文](./README.md)
   </p>
 </div>
 
-![Subtitles AI visual workbench](./docs/assets/subtitles-ai-workbench.png)
+![LynxSense visual workbench](./docs/assets/subtitles-ai-workbench.png)
 
-Subtitles AI combines video download, audio extraction, speech recognition, subtitle translation, and subtitle muxing into one automated pipeline. Paste a video page URL or drop in a local video to produce a translated SRT file and a finished video. The same workflow can also be connected to an MCP-compatible AI client, allowing an agent to validate the environment, create jobs, track progress, and return artifacts.
+LynxSense is a media-understanding workbench for video and audio. Its shipped subtitle pipeline covers video download, audio extraction, speech recognition, subtitle translation, and subtitle muxing. That is the starting point for understanding media, not the endpoint. The product direction is to turn text, content categories, emotion, vocal tone, and key events into structured results with time ranges and confidence, usable by people, search systems, and LLMs as dependable context.
+
+## 🎯 Product Direction
+
+LynxSense is intended to turn raw multimedia into a representation that can be reasoned over. Input can be video or audio; output can include subtitles and finished video today, and structured understanding results that AI agents and business systems can consume as the product evolves.
+
+- **Subtitles and segmented text**: Keep time ranges, spoken content, and editable subtitles as a traceable base layer.
+- **Content classification and tags**: Identify topics, scenes, people, or key events against configurable taxonomies to support search and downstream routing.
+- **Vocal-expression understanding**: Detect emotion, tone, speaking rate, and other acoustic signals that add evidence beyond the transcript.
+- **LLM-ready context**: Return structured fields, time ranges, and confidence so an LLM can locate, cite, and combine media signals instead of receiving only one long transcript.
+
+These capabilities are product direction rather than claims of features already shipped. They will enter the Web workbench, job results, and MCP tools as they are implemented.
 
 ## ✨ Two Ways to Use It
 
 | | 🤖 MCP Integration | 🖥️ Web Workbench |
 | --- | --- | --- |
 | Best for | Users who want Codex, Claude Desktop, or another AI client to process videos | Users who prefer direct browser interaction |
-| Interaction | Ask an agent in natural language to create, inspect, and retry jobs | Paste a URL or drop in a video, then choose language and subtitle options |
-| Core experience | Discoverable tools, trackable state, structured results | Job queue, live progress, preview, subtitle editing, and downloads |
-| Connection | stdio or Streamable HTTP | Local `http://localhost:8000` |
+| Interaction | Ask an agent in natural language to create, inspect, and retry media-understanding jobs | Paste a URL or upload media, then select the currently available processing options |
+| Core experience | Discoverable tools, trackable state, structured results for agents | Job queue, live progress, preview, subtitle editing, and result downloads |
+| Connection | stdio or Streamable HTTP | Deployment URL: direct TCP `8000`, or an HTTPS reverse proxy |
 
 ```mermaid
 flowchart LR
-    Input["Video URL / local video"] --> Entry{"Choose an entry point"}
+    Input["Video / audio"] --> Entry{"Choose an entry point"}
     Entry -->|Natural language| Agent["AI Agent + MCP"]
     Entry -->|Visual controls| Web["Web workbench"]
-    Agent --> API["Subtitles AI API"]
+    Agent --> API["LynxSense API"]
     Web --> API
-    API --> Pipeline["Download → Transcribe → Translate → Burn"]
-    Pipeline --> Output["Final video + SRT"]
+    API --> Pipeline["Media analysis → current subtitle flow → future understanding enrichment"]
+    Pipeline --> Output["Subtitles / video artifacts / structured understanding"]
 ```
 
 ## 🚀 Quick Start
@@ -144,7 +156,7 @@ curl http://127.0.0.1:8787/healthz
 
 Choose either path:
 
-- For direct use, open <http://localhost:8000/>.
+- For direct use, open the deployed Web address: `http://<SERVER_IP>:8000/` for direct access, or the configured HTTPS domain behind a reverse proxy.
 - For AI-agent use, continue to [MCP Integration](#-mcp-integration).
 
 ### Google Drive task-level synchronization
@@ -226,9 +238,11 @@ See [MCP Server documentation](./docs/mcp-server.md) and the [MCP Agent guide](.
 
 ## 🖥️ Web Workbench
 
-The Web workbench and API share port `8000`; no separate frontend server is required. When cloud storage is enabled, the Google Drive page uses CORS to talk to the local sidecar on port `8787`. The sidecar is a local Drive adapter, not the business API; both services listen locally by default.
+The Web workbench and business API share port `8000`; no separate frontend server is required. For direct deployment, run the business service on `0.0.0.0:8000` and allow TCP `8000` in both the cloud firewall/security group and the host firewall; users then visit `http://<SERVER_PUBLIC_IP>:8000/`. For production, prefer keeping the service on `127.0.0.1:8000` and exposing `80/443` plus HTTPS through Nginx or Caddy.
 
-1. Open <http://localhost:8000/>.
+When Google Drive is enabled, the page uses CORS to reach the local sidecar on port `8787`. It is a local Drive adapter, not the business API; keep it on `127.0.0.1:8787` and do not expose that port publicly.
+
+1. Open the deployed Web URL: `http://<SERVER_PUBLIC_IP>:8000/` for direct access, or the HTTPS domain behind the reverse proxy.
 2. Paste a video page URL or drop in a local video.
 3. Select source and target languages, translated-only or bilingual subtitles, hard or soft subtitles, and a recognition model.
 4. Select **Start Processing** and follow live progress in the queue.
@@ -236,17 +250,19 @@ The Web workbench and API share port `8000`; no separate frontend server is requ
 
 Highlights:
 
-- **Job center** — batch queue, live stages, and failed-job retries.
+- **Job center** — batch queues, live stages, and retries for the current subtitle jobs; future media-understanding jobs will use the same model.
 - **Video preview** — inspect the finished result in the browser.
 - **Subtitle editor** — review and adjust recognized or translated subtitles.
 - **Local resources** — inspect disk usage, retention, and cleanup previews; artifacts are retained for 30 days by default, and automatic cleanup preserves job records.
-- **Flexible output** — download-only, translated or bilingual, hard or soft subtitles.
+- **Flexible output** — video and translated or bilingual subtitles today, with LLM-ready structured understanding results planned next.
 
 ## 🧩 Headless usage
 
 The repository currently has no standalone `main.py` command-line entry point. To work without the Web UI, start the API and call `start_subtitle_pipeline` through an MCP client; see the [MCP Integration](#-mcp-integration) section for the stdio configuration and call sequence.
 
-## 🏗️ How It Works
+## 🏗️ Current Subtitle Workflow
+
+The diagram below describes the shipped subtitle pipeline. Classification, vocal-expression, and other understanding enrichments will enter as separate stages over time.
 
 ```mermaid
 flowchart LR
@@ -287,7 +303,7 @@ A failed step moves the job to `FAILED` and records the failing stage and error.
 | `SUBTRANS_MCP_PORT` | `3001` | Streamable HTTP port |
 | `SUBTRANS_MCP_PATH` | `/mcp` | Streamable HTTP path |
 
-See [.env.example](./.env.example) and [mcp.env.example](./mcp.env.example) for all options. Once started, API documentation is available at <http://localhost:8000/docs>.
+See [.env.example](./.env.example) and [mcp.env.example](./mcp.env.example) for all options. Once started, API documentation is available at `http://<SERVER_PUBLIC_IP>:8000/docs` for direct deployment or `https://<YOUR_DOMAIN>/docs` behind a reverse proxy.
 
 ## 🧪 Development & Verification
 
@@ -320,7 +336,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before contributing. Report security i
 | Download fails or the site requires authentication | Check the URL and set `SUBTRANS_COOKIES` to a cookies file |
 | MCP returns `BUSINESS_UNAVAILABLE` | Start the business API (`./scripts/start.sh` or the API-only command) and confirm port 8000 is reachable; confirm port 8787 as well when using Google Drive |
 | MCP returns `NOT_INITIALIZED` | Complete `.env` credentials and restart the business service |
-| Frontend cannot reach the backend | Confirm <http://localhost:8000/api/health> is available |
+| Frontend cannot reach the backend | Run `curl http://127.0.0.1:8000/api/health` on the server, then check the TCP `8000` listener, cloud security group, and host firewall; check the upstream configuration as well when using a reverse proxy |
 | Google Drive page reports sidecar offline | Confirm the sidecar was started with its configuration and check <http://127.0.0.1:8787/healthz>; the API-only command does not provide Drive features |
 
 ## 📄 License & Compliance

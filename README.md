@@ -1,13 +1,14 @@
 [English](./README.en.md) | 简体中文
 
 <div align="center">
-  <img src="./web/assets/subtitles-ai-logo.svg" width="88" alt="Subtitles AI Logo" />
-  <h1>Subtitles AI</h1>
-  <p><strong>把任意视频变成可理解、可翻译、可交付的字幕成片。</strong></p>
-  <p>既是开箱即用的可视化字幕工作台，也是可被 AI Agent 调用的 MCP 字幕能力。</p>
+  <img src="./web/assets/lynxsense-logo.png" width="88" alt="LynxSense Logo" />
+  <h1>LynxSense</h1>
+  <p><strong>像猞猁一样敏锐，感知媒体里的每一个信号。</strong></p>
+  <p>从字幕到分类、情绪与语调，把视频和音频中的信号提取成可理解、可检索、可供 AI 使用的信息。</p>
 
   <p>
     <a href="#-快速开始">快速开始</a> ·
+    <a href="#-产品方向">产品方向</a> ·
     <a href="#-mcp-接入">MCP 接入</a> ·
     <a href="#-web-工作台">Web 工作台</a> ·
     <a href="./docs/mcp-server.md">完整文档</a>
@@ -22,28 +23,39 @@
   </p>
 </div>
 
-![Subtitles AI 可视化工作台](./docs/assets/subtitles-ai-workbench.png)
+![LynxSense 可视化工作台](./docs/assets/subtitles-ai-workbench.png)
 
-Subtitles AI 将视频下载、音频提取、语音识别、字幕翻译与字幕烧录串成一条自动化流水线。粘贴视频页面地址或拖入本地视频，即可获得翻译后的 SRT 与成品视频；也可以把同一套能力接入支持 MCP 的 AI 客户端，让 Agent 自主检查环境、创建任务、跟踪进度并交付产物。
+LynxSense 是面向视频与音频的信息理解工作台。当前已交付的字幕流水线覆盖视频下载、音频提取、语音识别、字幕翻译与字幕烧录；它是理解媒体内容的起点，而不是终点。后续会把视频或音频中的文本、内容类别、情绪、语调和关键事件等信号转化为带时间轴与置信度的结构化结果，供人阅读、检索，也供大模型作为可靠上下文使用。
+
+## 🎯 产品方向
+
+LynxSense 的目标不是只生成一份字幕，而是把原始多媒体转化为可推理的内容表示：输入可以是视频或音频，输出既可以是字幕和成品视频，也可以是能被 AI Agent 或业务系统直接消费的结构化理解结果。
+
+- **字幕与逐段文本**：保留时间轴、说话内容和可编辑字幕，作为可追溯的基础层。
+- **内容分类与标签**：按可配置的分类体系识别主题、场景、人物或关键事件，帮助检索与下游路由。
+- **声音表达理解**：识别情绪、语调、语速及其他声学表达信号，为文本之外的语义补充证据。
+- **面向大模型的上下文**：以结构化字段、时间范围和置信度返回结果，让大模型能够定位、引用和组合多媒体信息，而非只接收一段长转写文本。
+
+上述扩展能力属于产品方向，会随着实现逐步进入 Web 工作台、任务结果和 MCP 工具；README 会清楚区分已交付能力与规划中的能力。
 
 ## ✨ 两种使用方式
 
 | | 🤖 MCP 接入 | 🖥️ Web 工作台 |
 | --- | --- | --- |
 | 适合谁 | 希望让 Codex、Claude Desktop 等 AI 客户端处理视频的用户 | 希望直接在浏览器中操作的用户 |
-| 怎么使用 | 用自然语言让 Agent 创建、查询、重试字幕任务 | 粘贴 URL 或拖入视频，选择语言与字幕参数 |
-| 核心体验 | 工具可发现、状态可追踪、结果结构化返回 | 任务队列、实时进度、视频预览、字幕编辑与下载 |
-| 接入方式 | stdio 或 Streamable HTTP | 本地打开 `http://localhost:8000` |
+| 怎么使用 | 用自然语言让 Agent 创建、查询、重试媒体理解任务 | 粘贴 URL 或上传媒体，选择当前可用的处理参数 |
+| 核心体验 | 工具可发现、状态可追踪、结构化结果可供 Agent 消费 | 任务队列、实时进度、预览、字幕编辑与结果下载 |
+| 接入方式 | stdio 或 Streamable HTTP | 部署地址：直连 TCP `8000`，或 HTTPS 反向代理 |
 
 ```mermaid
 flowchart LR
-    Input["视频 URL / 本地视频"] --> Entry{"选择入口"}
+    Input["视频 / 音频"] --> Entry{"选择入口"}
     Entry -->|自然语言| Agent["AI Agent + MCP"]
     Entry -->|可视化操作| Web["Web 工作台"]
-    Agent --> API["Subtitles AI API"]
+    Agent --> API["LynxSense API"]
     Web --> API
-    API --> Pipeline["下载 → 识别 → 翻译 → 烧录"]
-    Pipeline --> Output["成品视频 + SRT 字幕"]
+    API --> Pipeline["媒体解析 → 当前字幕流水线 → 后续理解增强"]
+    Pipeline --> Output["字幕 / 视频产物 / 结构化理解结果"]
 ```
 
 ## 🚀 快速开始
@@ -144,7 +156,7 @@ curl http://127.0.0.1:8787/healthz
 
 现在可以选择以下任一路径：
 
-- 想直接操作：打开 <http://localhost:8000/>。
+- 想直接操作：访问已部署的 Web 地址；直连时使用 `http://<服务器IP>:8000/`，使用反向代理时访问配置好的 HTTPS 域名。
 - 想让 AI Agent 操作：继续阅读 [MCP 接入](#-mcp-接入)。
 
 ### Google Drive 任务级同步
@@ -226,9 +238,11 @@ SUBTRANS_MCP_TRANSPORT=streamable-http \
 
 ## 🖥️ Web 工作台
 
-Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务；Google Drive 页面在启用云盘功能时通过 CORS 访问同机的 `8787` sidecar。sidecar 是本机 Drive 适配层，不是业务 API；两项服务都默认仅供本机访问。
+Web 工作台与业务 API 共用 `8000` 端口，无需单独启动前端服务。部署时，如果选择直连访问，让业务服务监听 `0.0.0.0:8000`，并在云平台安全组和服务器防火墙中放行 TCP `8000`；用户通过 `http://<服务器公网IP>:8000/` 访问。生产环境更建议让业务服务仅监听 `127.0.0.1:8000`，由 Nginx 或 Caddy 对外暴露 `80/443` 和 HTTPS。
 
-1. 打开 <http://localhost:8000/>。
+启用 Google Drive 时，页面通过 CORS 访问同机的 `8787` sidecar。它只是本机 Drive 适配层，不是业务 API；保持 `127.0.0.1:8787`，不要在安全组或防火墙中向公网暴露该端口。
+
+1. 访问部署后的 Web 地址：直连场景使用 `http://<服务器公网IP>:8000/`，反向代理场景使用 HTTPS 域名。
 2. 粘贴视频页面地址，或拖入本地视频。
 3. 选择源语言、目标语言、仅译文 / 双语字幕、硬烧录 / 软字幕和识别模型。
 4. 点击「开始处理」，在任务队列中查看实时进度。
@@ -236,17 +250,19 @@ Web 工作台与 API 共用 `8000` 端口，无需单独启动前端服务；Goo
 
 主要能力：
 
-- **任务中心**：批量任务队列、实时阶段与失败重试。
+- **任务中心**：当前字幕任务的批量队列、实时阶段与失败重试；后续媒体理解任务会复用同一任务模型。
 - **视频预览**：在浏览器中直接检查最终效果。
 - **字幕编辑**：查看并调整识别或翻译后的字幕。
 - **本地资源**：查看磁盘占用、保留策略和清理预览；默认保留产物 30 天，自动清理只删除产物并保留任务记录。
-- **灵活输出**：仅下载视频、单语 / 双语字幕、硬烧录 / 软字幕。
+- **灵活输出**：当前支持视频、单语 / 双语字幕、硬烧录 / 软字幕；后续会增加面向大模型的结构化理解结果。
 
 ## 🧩 无页面使用
 
 仓库当前没有独立的 `main.py` 命令行入口。不打开 Web 页面时，请启动 API，并通过 MCP 客户端调用 `start_subtitle_pipeline`；完整的 stdio 配置和调用顺序见上方 [MCP 接入](#-mcp-接入)。
 
-## 🏗️ 工作原理
+## 🏗️ 当前字幕工作流
+
+下图描述已交付的字幕处理链路；分类、声音表达和其他理解增强会在后续以独立阶段接入。
 
 ```mermaid
 flowchart LR
@@ -287,7 +303,7 @@ PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
 | `SUBTRANS_MCP_PORT` | `3001` | Streamable HTTP 监听端口 |
 | `SUBTRANS_MCP_PATH` | `/mcp` | Streamable HTTP 路径 |
 
-完整配置项见 [.env.example](./.env.example) 与 [mcp.env.example](./mcp.env.example)。启动后可访问 <http://localhost:8000/docs> 查看 API 文档。
+完整配置项见 [.env.example](./.env.example) 与 [mcp.env.example](./mcp.env.example)。启动后，直连部署可访问 `http://<服务器公网IP>:8000/docs`，反向代理部署则访问 `https://<你的域名>/docs` 查看 API 文档。
 
 ## 🧪 开发与验证
 
@@ -320,7 +336,7 @@ tests/             Python 测试
 | 下载失败或网站要求登录 | 检查 URL，并通过 `SUBTRANS_COOKIES` 指定 cookies 文件 |
 | MCP 返回 `BUSINESS_UNAVAILABLE` | 启动业务 API（`./scripts/start.sh` 或 API-only 命令），确认 8000 端口可访问；使用 Google Drive 时再确认 8787 端口 |
 | MCP 返回 `NOT_INITIALIZED` | 补齐 `.env` 中的密钥并重启业务服务 |
-| 前端无法连接后端 | 确认 <http://localhost:8000/api/health> 可访问 |
+| 前端无法连接后端 | 在服务器上运行 `curl http://127.0.0.1:8000/api/health`，并检查 TCP `8000` 的监听、云安全组和防火墙；使用反向代理时再检查上游配置 |
 | Google Drive 页面显示 sidecar 离线 | 确认已按配置启动 sidecar，并检查 <http://127.0.0.1:8787/healthz>；只启动 API-only 命令不会提供 Drive 功能 |
 
 ## 📄 许可证与合规

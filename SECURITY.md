@@ -8,7 +8,7 @@
 
 ### Supported Versions
 
-We actively support and fix security vulnerabilities for the following versions of Subtitles AI:
+We actively support and fix security vulnerabilities for the following versions of LynxSense:
 
 | Version | Supported |
 | ------- | --------- |
@@ -35,7 +35,7 @@ If you discover a security vulnerability in this project, **please do NOT open a
 
 ### Bug Bounty
 
-Currently, Subtitles AI is an open-source project maintained on a voluntary basis. We **do not** offer any monetary rewards or bug bounty programs for vulnerability reports. We sincerely appreciate your contribution to making this tool safer for everyone.
+Currently, LynxSense is an open-source project maintained on a voluntary basis. We **do not** offer any monetary rewards or bug bounty programs for vulnerability reports. We sincerely appreciate your contribution to making this tool safer for everyone.
 
 ### Security Research Scope & Rules
 
@@ -54,7 +54,7 @@ Currently, Subtitles AI is an open-source project maintained on a voluntary basi
 
 ### 支持的版本
 
-我们为以下版本的 Subtitles AI 提供积极的安全维护和漏洞修复：
+我们为以下版本的 LynxSense 提供积极的安全维护和漏洞修复：
 
 | 版本 | 是否支持 |
 | ---- | -------- |
@@ -81,7 +81,7 @@ Currently, Subtitles AI is an open-source project maintained on a voluntary basi
 
 ### 漏洞赏金 (Bug Bounty)
 
-目前 Subtitles AI 是一个主要由志愿者维护的开源项目，我们**不提供**任何形式的资金或实物漏洞赏金。我们对所有协助提升项目安全性的研究人员表示由衷的感谢！
+目前 LynxSense 是一个主要由志愿者维护的开源项目，我们**不提供**任何形式的资金或实物漏洞赏金。我们对所有协助提升项目安全性的研究人员表示由衷的感谢！
 
 ### 安全研究范围与白名单
 

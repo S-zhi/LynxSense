@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Subtitles AI 一键安装器（Ubuntu / Debian）。
+# LynxSense 一键安装器（Ubuntu / Debian）。
 #
 # 交互模式：
 #   sudo bash install.sh
@@ -28,15 +28,15 @@ NON_INTERACTIVE=0
 START_SERVICE=1
 
 log() {
-  printf '[Subtitles AI] %s\n' "$*"
+  printf '[LynxSense] %s\n' "$*"
 }
 
 warn() {
-  printf '[Subtitles AI] 警告：%s\n' "$*" >&2
+  printf '[LynxSense] 警告：%s\n' "$*" >&2
 }
 
 die() {
-  printf '[Subtitles AI] 错误：%s\n' "$*" >&2
+  printf '[LynxSense] 错误：%s\n' "$*" >&2
   exit 1
 }
 
@@ -159,13 +159,13 @@ fi
 
 if [[ ! -f "${PROJECT_DIR}/pyproject.toml" ]]; then
   if [[ -e "${PROJECT_DIR}" && -n "$(find "${PROJECT_DIR}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
-    die "安装目录已存在且不是 Subtitles AI 仓库：${PROJECT_DIR}"
+    die "安装目录已存在且不是 LynxSense 仓库：${PROJECT_DIR}"
   fi
   log "克隆代码到 ${PROJECT_DIR}"
   mkdir -p "$(dirname "${PROJECT_DIR}")"
   git clone --branch "${REPOSITORY_REF}" --single-branch "${REPOSITORY_URL}" "${PROJECT_DIR}"
 fi
-[[ -f "${PROJECT_DIR}/src/handler/app.py" ]] || die "安装目录不是有效的 Subtitles AI 仓库：${PROJECT_DIR}"
+[[ -f "${PROJECT_DIR}/src/handler/app.py" ]] || die "安装目录不是有效的 LynxSense 仓库：${PROJECT_DIR}"
 
 ENV_FILE="${PROJECT_DIR}/.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -296,7 +296,7 @@ UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 log "写入 systemd 服务 ${UNIT_FILE}"
 cat > "${UNIT_FILE}" <<EOF
 [Unit]
-Description=Subtitles AI FastAPI Service
+Description=LynxSense FastAPI Service
 After=network-online.target
 Wants=network-online.target
 

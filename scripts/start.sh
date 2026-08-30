@@ -85,7 +85,7 @@ echo "编译 Google Drive sidecar..."
   go build -o ./bin/drive-server ./cmd/server
 )
 
-echo "Subtitles AI API      → http://127.0.0.1:${API_PORT}"
+echo "LynxSense API         → http://127.0.0.1:${API_PORT}"
 echo "Google Drive sidecar  → ${DRIVE_CONFIG}"
 echo "按 Ctrl-C 同时停止两个服务。"
 
