@@ -53,8 +53,10 @@ flowchart LR
 Log in to the server and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/install-linux.sh | sudo bash
+curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh | sudo bash
 ```
+
+This stable URL always downloads `install.sh` from the latest production release, and the script installs the code version associated with that release.
 
 The installer securely prompts for the Replicate and DeepSeek credentials, then handles the repository checkout, FFmpeg, uv, Python 3.12, locked dependencies, persistent storage, a systemd service, and a health check. When it finishes, open `http://SERVER_IP:8000/`.
 
@@ -298,6 +300,7 @@ cd web && npm test
 Key directories:
 
 ```text
+install.sh         One-command Linux installation and systemd setup
 src/core/          Download, audio, transcription, translation, subtitle burning
 src/handler/       FastAPI routes and frontend static hosting
 src/mcp_server/    MCP Server, tools, and business API client
