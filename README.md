@@ -48,7 +48,26 @@ flowchart LR
 
 ## 🚀 快速开始
 
-### 1. 准备环境
+### Ubuntu / Debian 一键安装（推荐）
+
+登录服务器后执行这一行即可：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/S-zhi/Subtitles-AI/main/scripts/install-linux.sh | sudo bash
+```
+
+安装器会在终端中静默询问 Replicate 和 DeepSeek 密钥，并自动完成代码下载、FFmpeg、uv、Python 3.12、项目依赖、持久化目录、systemd 服务和健康检查。安装结束后打开 `http://服务器IP:8000/`。
+
+```bash
+systemctl status subtitles-ai --no-pager
+journalctl -u subtitles-ai -f
+```
+
+脚本支持 Ubuntu/Debian，重复执行时留空密钥即可保留原值。公网访问前还需要在云平台安全组中放行 TCP 8000，生产环境建议改用 HTTPS 反向代理。参数、非交互安装和故障排查见 [Linux 部署文档](./docs/quick-start-linux.md)。
+
+### macOS 本地运行
+
+#### 1. 准备环境
 
 当前已在 macOS 验证，需要 Python `3.10–3.12`、[uv](https://docs.astral.sh/uv/) 和带 `libass` 的 FFmpeg：
 
@@ -67,7 +86,7 @@ ffmpeg -hide_banner -filters | grep " subtitles "
 
 > 普通版 FFmpeg 可能不包含 `libass`，硬字幕会因此无法烧录；遇到该情况也可以选择软字幕模式。
 
-### 2. 配置密钥
+#### 2. 配置密钥
 
 ```bash
 cp .env.example .env
@@ -82,7 +101,7 @@ SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 
 密钥只由业务服务读取，不应写入 MCP 参数或提交到仓库。
 
-### 3. 配置 Google Drive（可选）
+#### 3. 配置 Google Drive（可选）
 
 Google Drive sidecar 使用本地配置文件读取 OAuth 应用身份；该文件已被 Git 忽略，不会提交到仓库：
 
@@ -92,7 +111,7 @@ cp drive-service/config.example.json drive-service/config.local.json
 
 然后在 `drive-service/config.local.json` 中填写 `google_client_id`、`google_client_secret`，或将 Google Desktop OAuth JSON 放到 `drive-service/drive-data/oauth_client.json`。首次使用时，在网页的 **Google Drive** 页面点击授权，浏览器会打开动态 loopback 回调；Refresh Token 会保存在本地 `drive-data` 目录。OAuth Client 必须是 Desktop app 类型；sidecar 默认只监听本机 `127.0.0.1:8787`，不支持固定回调地址，也不应把 OAuth JSON、Refresh Token 或 Client Secret 提交到 Git。
 
-### 4. 启动业务服务和 Drive sidecar
+#### 4. 启动业务服务和 Drive sidecar
 
 `./scripts/start.sh` 会同时启动 Python 业务服务和 Google Drive sidecar；只有使用 Google Drive 时才需要准备 `drive-service/config.local.json`。如果暂时不用云盘功能，可以只启动 API，避免启动 sidecar。
 
