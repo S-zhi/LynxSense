@@ -256,3 +256,41 @@ func TestPauseDuringUploadDoesNotGetOverwrittenByWorker(t *testing.T) {
 		t.Fatalf("expected transfer state %s, got %s", StatePaused, finalTr.State)
 	}
 }
+
+func TestManagerRecoverDoesNotStartPausedOrTerminalTransfers(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	state, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewManager(&cfg, state, &fakeDrive{})
+
+	// Create transfers in PAUSED, SUCCESS, FAILED, CANCELLED states
+	nonRecoverable := []string{StatePaused, StateSuccess, StateFailed, StateCancelled}
+	nonRecoverableIDs := make(map[string]bool)
+	for _, st := range nonRecoverable {
+		tr, err := state.CreateTransfer(store.Transfer{
+			Kind:  KindDriveUpload,
+			State: st,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		nonRecoverableIDs[tr.ID] = true
+	}
+
+	// Trigger Recover()
+	manager.Recover()
+
+	// Verify that m.cancels map never registered any non-recoverable transfer IDs
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for id := range nonRecoverableIDs {
+		if _, exists := manager.cancels[id]; exists {
+			t.Fatalf("transfer %s (non-recoverable) was registered in cancels during Recover()", id)
+		}
+	}
+}

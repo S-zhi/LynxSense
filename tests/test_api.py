@@ -84,7 +84,7 @@ def test_create_task(client):
 # ---------- API Token 鉴权 ----------
 
 def test_api_token_auth_when_token_configured(client, monkeypatch):
-    """配置 SUBTRANS_API_TOKEN 时，变更接口必须校验 Authorization / X-API-Token。"""
+    """配置 SUBTRANS_API_TOKEN 时，变更接口必须校验 Authorization / X-API-Token / URL Token。"""
     monkeypatch.setenv("SUBTRANS_API_TOKEN", "secret-token-123")
 
     # 未提供 Token -> 401
@@ -101,16 +101,67 @@ def test_api_token_auth_when_token_configured(client, monkeypatch):
     assert r_bearer.status_code == 201
 
     # X-API-Token 正确 Token -> 201
-    r_header = client.post("/api/tasks", json=_payload(), headers={"X-API-Token": "secret-token-123"})
+    r_header = client.post("/api/tasks", json=_payload(url="https://example.com/header-token"), headers={"X-API-Token": "secret-token-123"})
     assert r_header.status_code == 201
 
 
+def test_api_token_auth_read_and_download_endpoints(client, monkeypatch):
+    """配置 SUBTRANS_API_TOKEN 时，任务列表、详情、媒体下载、SSE 流及存储接口均受保护。"""
+    monkeypatch.delenv("SUBTRANS_API_TOKEN", raising=False)
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+    d = client._tmp / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.mp4").write_bytes(b"SRC")
+    (d / "output.mp4").write_bytes(b"OUT")
+    (d / "translated.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+
+    monkeypatch.setenv("SUBTRANS_API_TOKEN", "secret-token-123")
+
+    endpoints_get = [
+        "/api/tasks",
+        f"/api/tasks/{cid}",
+        "/api/tasks/probe/records",
+        f"/api/tasks/{cid}/source",
+        f"/api/tasks/{cid}/download",
+        f"/api/tasks/{cid}/subtitle",
+        f"/api/tasks/{cid}/subtitles",
+        "/api/storage/stats",
+        "/api/storage/retention",
+    ]
+
+    endpoints_head = [
+        f"/api/tasks/{cid}/source",
+        f"/api/tasks/{cid}/download",
+    ]
+
+    # 未带 Token 均返回 401
+    for ep in endpoints_get:
+        assert client.get(ep).status_code == 401, f"{ep} 未拦截 401"
+    for ep in endpoints_head:
+        assert client.head(ep).status_code == 401, f"HEAD {ep} 未拦截 401"
+    assert client.post("/api/storage/cleanup_preview", json={}).status_code == 401
+
+    # 支持 Header Authorization: Bearer
+    assert client.get("/api/tasks", headers={"Authorization": "Bearer secret-token-123"}).status_code == 200
+    # 支持 Header X-API-Token
+    assert client.get(f"/api/tasks/{cid}", headers={"X-API-Token": "secret-token-123"}).status_code == 200
+    # 支持 Query ?token=
+    assert client.get(f"/api/tasks/{cid}/download?token=secret-token-123").status_code == 200
+    # 支持 Query ?api_token=
+    assert client.get(f"/api/tasks/{cid}/subtitle?api_token=secret-token-123").status_code == 200
+
+
 def test_api_token_auth_when_token_unset(client, monkeypatch):
-    """未配置 SUBTRANS_API_TOKEN 时，接口无须鉴权直接通过。"""
+    """未配置 SUBTRANS_API_TOKEN 时，读取和修改接口无须鉴权直接通过。"""
     monkeypatch.delenv("SUBTRANS_API_TOKEN", raising=False)
 
     r = client.post("/api/tasks", json=_payload())
     assert r.status_code == 201
+    cid = r.json()["id"]
+
+    assert client.get("/api/tasks").status_code == 200
+    assert client.get(f"/api/tasks/{cid}").status_code == 200
 
 
 def test_create_defaults_when_minimal(client):
@@ -292,8 +343,8 @@ def test_delete_task(client):
 def test_delete_running_task_returns_409(client):
     """运行中状态（非 SUCCESS/FAILED）的任务禁止删除，返回 409。"""
     running_statuses = ["PENDING", "DOWNLOADING", "EXTRACTING", "TRANSCRIBING", "TRANSLATING", "BURNING"]
-    for status in running_statuses:
-        cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    for index, status in enumerate(running_statuses):
+        cid = client.post("/api/tasks", json=_payload(url=f"https://example.com/running-{index}")).json()["id"]
         client._store.update(cid, status=status)
         d = client._tmp / cid
         d.mkdir(parents=True, exist_ok=True)
@@ -1419,3 +1470,12 @@ def test_sse_stream_keepalive(client, monkeypatch):
 
     assert res.status_code == 200
     assert ":keepalive" in lines
+
+
+def test_create_task_duplicate_url_returns_existing_task_id(client):
+    first = client.post("/api/tasks", json=_payload())
+    duplicate = client.post("/api/tasks", json=_payload())
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "TASK_ALREADY_RUNNING"
+    assert duplicate.json()["detail"]["taskId"] == first.json()["id"]

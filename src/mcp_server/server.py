@@ -1,4 +1,4 @@
-"""Subtitles AI MCP Server 入口。
+"""LynxSense MCP Server 入口。
 
 默认使用 stdio，适合桌面 MCP Host；设置
 ``SUBTRANS_MCP_TRANSPORT=streamable-http`` 可启动独立 HTTP MCP 服务。
@@ -16,7 +16,7 @@ from .tools import register_tools
 
 logging.basicConfig(level=os.getenv("SUBTRANS_MCP_LOG_LEVEL", "INFO"))
 
-SERVER_INSTRUCTIONS = """你是 Subtitles AI 的视频字幕处理助手。
+SERVER_INSTRUCTIONS = """你是 LynxSense 的视频理解与字幕处理助手。
 
 请严格遵循下面的工作流：
 1. 任何视频处理前先调用 check_subtitle_setup。
@@ -37,8 +37,8 @@ MCP 只负责调用业务 API，不直接访问业务数据库、文件或底层
 AGENT_GUIDE_PATH = Path(__file__).resolve().parents[2] / "docs" / "mcp-agent-guide.md"
 
 mcp = MCPServer(
-    name="Subtitles AI MCP",
-    title="Subtitles AI 字幕处理服务",
+    name="LynxSense MCP",
+    title="LynxSense 视频理解服务",
     description="通过业务 API 执行视频下载、语音识别、字幕翻译和字幕烧录。",
     instructions=SERVER_INSTRUCTIONS,
     version="0.1.0",
@@ -48,7 +48,7 @@ mcp = MCPServer(
 @mcp.resource(
     "subtitles://agent-guide",
     name="subtitle-agent-guide",
-    title="Subtitles AI Agent 使用指南",
+    title="LynxSense Agent 使用指南",
     description="Agent 使用字幕处理 MCP 时必须遵守的工作流、初始化和错误处理说明。",
     mime_type="text/markdown",
 )

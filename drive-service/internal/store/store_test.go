@@ -140,3 +140,45 @@ func TestStoreUpdateTransferProgressThrottling(t *testing.T) {
 		t.Fatalf("expected flushed disk progress to be 100, got %d", got.Transferred)
 	}
 }
+
+// TestRecoverableTransfersExcludesPausedAndTerminalStates 验证 RecoverableTransfers 仅返回 PENDING, TRANSFERRING, RETRYING, VERIFYING，
+// 排除 PAUSED 以及终态任务 (SUCCESS, FAILED, CANCELLED)。
+func TestRecoverableTransfersExcludesPausedAndTerminalStates(t *testing.T) {
+	t.Parallel()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	states := map[string]bool{
+		"PENDING":      true,
+		"TRANSFERRING": true,
+		"RETRYING":     true,
+		"VERIFYING":    true,
+		"PAUSED":       false,
+		"SUCCESS":      false,
+		"FAILED":       false,
+		"CANCELLED":    false,
+	}
+
+	for state := range states {
+		if _, err := s.CreateTransfer(Transfer{
+			Kind:  "DRIVE_UPLOAD",
+			State: state,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recoverable := s.RecoverableTransfers()
+	if len(recoverable) != 4 {
+		t.Fatalf("expected 4 recoverable transfers, got %d", len(recoverable))
+	}
+
+	for _, tr := range recoverable {
+		if !states[tr.State] {
+			t.Errorf("unexpected recoverable state: %s", tr.State)
+		}
+	}
+}

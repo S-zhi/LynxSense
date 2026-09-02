@@ -197,6 +197,8 @@ function errorHint(msg, code) {
     return `连接翻译 API 超时或网络异常，请检查网络设置或代理`;
   if (code === "invalid_response")
     return `翻译 API 返回数据格式无法解析，请尝试更换模型或稍后重试`;
+  if (code === "internal_error")
+    return `处理过程中发生内部错误，请检查任务日志并稍后重试`;
 
   const m = (msg || "").toLowerCase();
   if (m.includes("replicate") || m.includes("token"))

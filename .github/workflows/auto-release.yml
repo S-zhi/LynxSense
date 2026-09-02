@@ -230,13 +230,39 @@ jobs:
           fi
           mv ai-release-notes.md release-notes.md
 
+      - name: Prepare Linux installer and quick-start notes
+        if: steps.gate.outputs.should_release == 'true'
+        env:
+          NEXT_TAG: ${{ steps.gate.outputs.next_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sed "s/^DEFAULT_INSTALL_REF=.*/DEFAULT_INSTALL_REF=\"${NEXT_TAG}\"/" \
+            install.sh > install.release.sh
+          install -m 0755 install.release.sh install.sh
+          rm install.release.sh
+
+          test -x install.sh
+          grep -Fqx "DEFAULT_INSTALL_REF=\"${NEXT_TAG}\"" install.sh
+          bash -n install.sh
+
+          cat >> release-notes.md <<'EOF'
+
+          ## Quick Start (Linux)
+
+          ```bash
+          curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh | sudo bash
+          ```
+          EOF
+
       - name: Publish GitHub release
         if: steps.gate.outputs.should_release == 'true'
         env:
           NEXT_TAG: ${{ steps.gate.outputs.next_tag }}
           TARGET_SHA: ${{ github.sha }}
         run: |
-          gh release create "${NEXT_TAG}" \
+          gh release create "${NEXT_TAG}" install.sh \
             --target "${TARGET_SHA}" \
             --title "${NEXT_TAG}" \
             --notes-file release-notes.md
