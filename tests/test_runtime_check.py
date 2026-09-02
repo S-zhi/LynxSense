@@ -205,3 +205,39 @@ def test_readiness_handles_unavailable_replicate_check_gracefully(monkeypatch, t
     assert result["initialized"] is True
     assert result["checks"]["replicate_api_token"] == "unavailable"
     assert result["agent_action"] == "continue"
+
+
+def test_readiness_handles_replicate_query_exception_without_leaking_details(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-secret")
+    monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(runtime_check.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: True)
+
+    def fail_query():
+        raise RuntimeError("upstream secret details")
+
+    monkeypatch.setattr(runtime_check, "query_replicate_balance", fail_query)
+    result = runtime_check.build_readiness()
+    assert result["ok"] is True
+    assert result["initialized"] is True
+    assert result["checks"]["replicate_api_token"] == "network_error"
+    assert result["replicate_checked_at"] is not None
+    assert result["replicate_cached"] is False
+    assert "Replicate 服务暂时不可达，请检查网络连接" in result["missing"]
+    assert "upstream secret details" not in str(result)
+
+
+def test_readiness_normalizes_non_dict_replicate_result(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_check, "settings", _settings(tmp_path))
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-secret")
+    monkeypatch.setenv("SUBTRANS_DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(runtime_check.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(runtime_check.importlib.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(runtime_check, "has_subtitles_filter", lambda _: True)
+    monkeypatch.setattr(runtime_check, "query_replicate_balance", lambda: ["invalid"])
+    result = runtime_check.build_readiness()
+    assert result["checks"]["replicate_api_token"] == "network_error"
+    assert result["initialized"] is True
+    assert result["replicate_checked_at"] is not None

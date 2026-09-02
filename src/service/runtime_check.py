@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +52,23 @@ def build_readiness() -> dict[str, Any]:
     replicate_check_status = "missing"
 
     if replicate_token_configured:
-        account_info = query_replicate_balance()
+        # External account checks must not make the readiness endpoint fail.
+        try:
+            account_info = query_replicate_balance()
+        except Exception:
+            account_info = {
+                "status": "unavailable",
+                "errorCode": "network_error",
+                "checkedAt": int(time.time() * 1000),
+                "cached": False,
+            }
+        if not isinstance(account_info, dict):
+            account_info = {
+                "status": "unavailable",
+                "errorCode": "network_error",
+                "checkedAt": int(time.time() * 1000),
+                "cached": False,
+            }
         replicate_checked_at = account_info.get("checkedAt")
         replicate_cached = bool(account_info.get("cached", False))
 
@@ -65,7 +82,9 @@ def build_readiness() -> dict[str, Any]:
         elif status == "unavailable":
             replicate_token_invalid = False
             replicate_ready = True
-            replicate_check_status = "unavailable"
+            replicate_check_status = (
+                "network_error" if error_code == "network_error" else "unavailable"
+            )
         else:
             replicate_token_invalid = False
             replicate_ready = True
@@ -102,6 +121,8 @@ def build_readiness() -> dict[str, Any]:
         missing.append("REPLICATE_API_TOKEN")
     elif replicate_token_invalid:
         missing.append("REPLICATE_API_TOKEN（Token 无效或已过期）")
+    elif replicate_check_status == "network_error":
+        missing.append("Replicate 服务暂时不可达，请检查网络连接")
     if not deepseek_ready:
         missing.append("SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY")
     if ffmpeg_status != "available":
