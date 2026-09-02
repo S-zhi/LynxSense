@@ -520,7 +520,7 @@ def cancel_drive_batch(batch_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return batch.to_payload()
 
-@router.get("/stats", response_model=StorageStats)
+@router.get("/stats", response_model=StorageStats, dependencies=[Depends(require_api_token)])
 def get_stats(store: TaskStore = Depends(get_store)) -> StorageStats:
     """全量统计：总占用、类别分布、按任务的占用排行。"""
     by_kind: dict[str, int] = {k: 0 for k in _ARTIFACT_KINDS}
@@ -547,7 +547,7 @@ def get_stats(store: TaskStore = Depends(get_store)) -> StorageStats:
     )
 
 
-@router.post("/cleanup_preview", response_model=CleanupPreviewResponse)
+@router.post("/cleanup_preview", response_model=CleanupPreviewResponse, dependencies=[Depends(require_api_token)])
 def cleanup_preview(
     body: CleanupPreviewRequest,
     store: TaskStore = Depends(get_store),
@@ -703,7 +703,7 @@ def cleanup(
     return execute_cleanup(body, store, probes)
 
 
-@router.get("/retention", response_model=RetentionOut)
+@router.get("/retention", response_model=RetentionOut, dependencies=[Depends(require_api_token)])
 def get_retention() -> RetentionOut:
     """读取产物保留策略（days=None 表示不限，未配置时默认为 30 天）。"""
     return _load_retention()
