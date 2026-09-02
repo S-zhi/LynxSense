@@ -173,10 +173,10 @@ def scan_missing_terminal(
     detected_errno: Optional[int] = None
 
     try:
-        if not data_path.exists():
-            data_root_unavailable = True
-        else:
-            data_root_unavailable = not any(data_path.iterdir())
+        data_path.stat()
+        data_root_unavailable = not any(data_path.iterdir())
+    except FileNotFoundError:
+        data_root_unavailable = True
     except NotADirectoryError as e:
         logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
         data_root_unavailable = True

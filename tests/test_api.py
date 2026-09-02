@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import errno
+import pathlib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -563,6 +566,31 @@ def test_scan_missing_terminal_not_a_directory_error(client, tmp_path, caplog):
     data = client.get(f"/api/tasks/{cid}").json()
     assert data["downgradeReason"] == "USER_CLEANED"
     assert data["downgradeErrno"] == rec.downgrade_errno
+
+
+def test_scan_missing_terminal_stat_os_error(client, tmp_path, monkeypatch, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+    data_dir = tmp_path / "stat-error-dir"
+    data_dir.mkdir()
+
+    original_stat = pathlib.Path.stat
+
+    def fake_stat(path, *args, **kwargs):
+        if path == data_dir:
+            raise OSError(errno.EIO, "Input/output error")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr("pathlib.Path.stat", fake_stat)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.downgrade_errno == errno.EIO
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
 
 
 def test_scan_missing_terminal_permission_error(client, tmp_path, monkeypatch, caplog):
