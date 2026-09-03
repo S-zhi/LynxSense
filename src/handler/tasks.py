@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import re
@@ -51,6 +52,7 @@ from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
     DOWNGRADE_REASON_UNKNOWN,
+    DOWNGRADE_REASON_USER_CLEANED,
     DOWNGRADE_REASON_VOLUME_MIGRATED,
     RESOURCE_STATUS_AVAILABLE,
     RESOURCE_STATUS_MISSING,
@@ -104,6 +106,7 @@ def _mark_resource_missing(
     task_id: str,
     reason: str,
     downgrade_reason: str = DOWNGRADE_REASON_UNKNOWN,
+    downgrade_errno: Optional[int] = None,
 ) -> None:
     """把一个任务的 resource_status 幂等地置为 MISSING。"""
     rec = store.get(task_id)
@@ -114,6 +117,7 @@ def _mark_resource_missing(
         resource_status=RESOURCE_STATUS_MISSING,
         error=reason,
         downgrade_reason=downgrade_reason,
+        downgrade_errno=downgrade_errno,
         downgraded_at=int(time.time() * 1000),
     )
 
@@ -165,10 +169,33 @@ def scan_missing_terminal(
         recs = store.list()
 
     success_count = sum(1 for rec in recs if rec.status == "SUCCESS")
+    data_root_unavailable = False
+    detected_reason: Optional[str] = None
+    detected_errno: Optional[int] = None
+
     try:
-        data_root_unavailable = not data_path.exists()
-    except OSError:
+        data_path.stat()
+        list(data_path.iterdir())
+    except FileNotFoundError:
         data_root_unavailable = True
+    except NotADirectoryError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_reason = DOWNGRADE_REASON_USER_CLEANED
+        detected_errno = e.errno
+    except PermissionError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_reason = DOWNGRADE_REASON_DISK_FAILURE
+        detected_errno = e.errno
+    except OSError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_errno = e.errno
+        if e.errno in (errno.EIO, errno.ENXIO, errno.ESTALE):
+            detected_reason = DOWNGRADE_REASON_DISK_FAILURE
+        else:
+            detected_reason = DOWNGRADE_REASON_UNKNOWN
 
     for rec in recs:
         if rec.status != "SUCCESS":
@@ -190,12 +217,19 @@ def scan_missing_terminal(
             unreadable = state_src == ResourceState.UNREADABLE
 
         error_msg = "资源不可读" if unreadable else _DELETED_MESSAGE
+        audit_errno: Optional[int] = None
         if downgrade_reason is not None:
             audit_reason = downgrade_reason
         elif unreadable:
             audit_reason = DOWNGRADE_REASON_DISK_FAILURE
-        elif data_root_unavailable and success_count > 1:
-            audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+        elif data_root_unavailable:
+            if detected_reason is not None:
+                audit_reason = detected_reason
+                audit_errno = detected_errno
+            elif success_count > 1:
+                audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+            else:
+                audit_reason = DOWNGRADE_REASON_UNKNOWN
         else:
             audit_reason = DOWNGRADE_REASON_UNKNOWN
 
@@ -204,6 +238,7 @@ def scan_missing_terminal(
             resource_status=RESOURCE_STATUS_MISSING,
             error=error_msg,
             downgrade_reason=audit_reason,
+            downgrade_errno=audit_errno,
             downgraded_at=int(time.time() * 1000),
         )
         downgraded.append(rec.id)

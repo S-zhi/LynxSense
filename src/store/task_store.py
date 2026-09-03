@@ -71,6 +71,7 @@ class TaskRecord:
     resource_status: str = RESOURCE_STATUS_AVAILABLE  # 产物文件是否在盘
     error_code: Optional[str] = None
     downgrade_reason: Optional[str] = None
+    downgrade_errno: Optional[int] = None
     downgraded_at: Optional[int] = None
 
     def to_dict(self) -> dict:
@@ -131,6 +132,7 @@ class TaskStore:
                     resource_status TEXT NOT NULL DEFAULT 'AVAILABLE',
                     error_code TEXT,
                     downgrade_reason TEXT,
+                    downgrade_errno INTEGER,
                     downgraded_at INTEGER
                 )
                 """
@@ -156,6 +158,8 @@ class TaskStore:
                 conn.execute("ALTER TABLE tasks ADD COLUMN error_code TEXT")
             if "downgrade_reason" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN downgrade_reason TEXT")
+            if "downgrade_errno" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN downgrade_errno INTEGER")
             if "downgraded_at" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN downgraded_at INTEGER")
             conn.execute(
