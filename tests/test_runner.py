@@ -158,6 +158,9 @@ def test_cancel_pipeline_terminates_procs_and_updates_status(store):
     rec = store.get(tid)
     assert rec.status == "CANCELLED"
     assert rec.error == "用户取消"
+    assert rec.resource_status == "MISSING"
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgraded_at is not None
     proc.wait(timeout=2)
     assert proc.poll() is not None
 

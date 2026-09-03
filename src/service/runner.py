@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -27,9 +28,30 @@ from src.service.orchestrator import (
     unregister_cancellation_signal,
 )
 from src.service.asset_resolver import AssetResolver, ResourceError, ResourceState
-from src.store import STATUSES, TaskStore, TranslationEngineStore
+from src.store import (
+    DOWNGRADE_REASON_USER_CLEANED,
+    RESOURCE_STATUS_MISSING,
+    STATUSES,
+    TaskStore,
+    TranslationEngineStore,
+)
 
 logger = logging.getLogger(__name__)
+
+_DELETED_MESSAGE = "资源已删除"
+
+
+def _mark_resource_missing(task_id: str) -> None:
+    """将任务资源幂等标记为已缺失，并记录用户取消清理原因。"""
+    rec = _store.get(task_id)
+    if rec is None or rec.resource_status == RESOURCE_STATUS_MISSING:
+        return
+    _store.update(
+        task_id,
+        resource_status=RESOURCE_STATUS_MISSING,
+        downgrade_reason=DOWNGRADE_REASON_USER_CLEANED,
+        downgraded_at=int(time.time() * 1000),
+    )
 
 # 线程池状态（延迟/懒构造 + 动态扩缩容）
 _executor: ThreadPoolExecutor | None = None
@@ -126,6 +148,7 @@ def _cleanup_partial_artifacts(task_id: str) -> None:
     """清理任务取消后留下的半截/临时产物（如半截 output.mp4、.part/.ytdl 临时文件等）。"""
     d = task_dir(task_id)
     if not d.exists():
+        _mark_resource_missing(task_id)
         return
 
     out_video = d / OUTPUT_VIDEO
@@ -153,6 +176,8 @@ def _cleanup_partial_artifacts(task_id: str) -> None:
                         logger.warning("清理临时文件失败: task=%s, path=%s, err=%s", task_id, p, e)
     except Exception as e:
         logger.warning("清理任务临时文件目录失败: task=%s, err=%s", task_id, e)
+
+    _mark_resource_missing(task_id)
 
 
 def cancel_pipeline(task_id: str) -> bool:
@@ -315,7 +340,7 @@ def _run(task_id: str) -> None:
                 current_step=rec.current_step if rec else None,
                 source_type=rec.source_type if rec else "url",
             )
-            _store.update(task_id, resource_status="MISSING")
+            _mark_resource_missing(task_id)
             return
         logger.error("任务由于资源异常执行失败: %s - %s", task_id, str(e))
         if last_state["status"] != "FAILED":
@@ -329,7 +354,7 @@ def _run(task_id: str) -> None:
                 current_step=rec.current_step if rec else None,
                 source_type=rec.source_type if rec else "url",
             )
-            _store.update(task_id, resource_status="MISSING")
+            _mark_resource_missing(task_id)
             return
         logger.exception("流水线执行失败: %s", task_id)
         if last_state["status"] != "FAILED":
