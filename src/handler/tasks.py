@@ -498,6 +498,9 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
         progress=0,
         current_step=None,
         error=None,
+        resource_status=RESOURCE_STATUS_AVAILABLE,
+        downgrade_reason=None,
+        downgraded_at=None,
     )
     enqueue_pipeline(task_id)
     return to_out(updated)
