@@ -104,9 +104,10 @@ type stateFile struct {
 
 // Store 是由所有 handler 和传输 worker 共享的并发安全状态仓库。
 type Store struct {
-	path string
-	mu   sync.Mutex
-	data stateFile
+	path     string
+	mu       sync.Mutex
+	data     stateFile
+	lastSave time.Time
 }
 
 // Open 加载已有状态文件；如果文件不存在，则初始化空仓库。
@@ -165,7 +166,15 @@ func (s *Store) saveLocked() error {
 	if err := os.Rename(tmp, s.path); err != nil {
 		return fmt.Errorf("replace state: %w", err)
 	}
+	s.lastSave = time.Now()
 	return nil
+}
+
+// Flush 强制将当前内存状态写入磁盘。
+func (s *Store) Flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveLocked()
 }
 
 // DriveFolderID 返回已缓存的应用目录 ID；如果尚未获取则返回空字符串。
@@ -227,6 +236,27 @@ func (s *Store) UpdateUpload(id string, fn func(*Upload) error) (Upload, error) 
 		return nil
 	})
 	return out, err
+}
+
+// UpdateTransferProgress 原子地更新传输任务的已传输字节数。为了避免大文件传输时频繁落盘导致的 IO 放大和锁阻塞，
+// 内存更新后仅当距离上次落盘超过 1 秒时才执行同步落盘。
+func (s *Store) UpdateTransferProgress(id string, transferred int64) (Transfer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.data.Transfers[id]
+	if !ok {
+		return Transfer{}, fmt.Errorf("transfer %s not found", id)
+	}
+	t.Transferred = transferred
+	t.UpdatedAt = now()
+	s.data.Transfers[id] = t
+
+	if time.Since(s.lastSave) >= time.Second {
+		if err := s.saveLocked(); err != nil {
+			return t, err
+		}
+	}
+	return t, nil
 }
 
 // DeleteUpload 删除本地暂存记录。
@@ -445,7 +475,8 @@ func (s *Store) UpdateFolderEntry(id string, fn func(*FolderEntry) error) (Folde
 	return out, err
 }
 
-// RecoverableTransfers 筛选非终态任务，以便进程启动时安全恢复。
+// RecoverableTransfers 筛选处于活跃中且可恢复状态的任务（PENDING、TRANSFERRING、RETRYING、VERIFYING），
+// 排除 PAUSED 以及终态任务（SUCCESS、FAILED、CANCELLED），以便进程启动时安全恢复。
 func (s *Store) RecoverableTransfers() []Transfer {
 	all := s.ListTransfers()
 	result := make([]Transfer, 0, len(all))

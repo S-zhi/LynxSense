@@ -1,1 +1,1 @@
-"""Subtitles AI 的独立 MCP 适配层。"""
+"""LynxSense 的独立 MCP 适配层。"""

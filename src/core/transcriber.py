@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -93,7 +94,17 @@ def _prediction_state_path(state_dir: Path) -> Path:
     return state_dir / _PREDICTION_STATE_FILE
 
 
-def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
+def _load_prediction_state(state_dir: Path, model_ref: str) -> Optional[dict]:
+    """读取匹配模型的 prediction 状态；损坏或不匹配时返回 None。
+
+    Args:
+        state_dir: 保存任务运行状态的目录。
+        model_ref: 当前 Replicate 模型版本引用。
+    Returns:
+        包含 prediction_id 等字段的状态字典，或不可用时的 None。
+    Side effects:
+        对不可读或模型不匹配的状态文件记录 warning，但不删除文件。
+    """
     path = _prediction_state_path(state_dir)
     if not path.exists():
         return None
@@ -102,11 +113,29 @@ def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
     except (OSError, ValueError, TypeError):
         logger.warning("Replicate prediction 状态文件不可读，忽略并重新创建: %s", path)
         return None
+    if not isinstance(payload, dict):
+        logger.warning("Replicate prediction 状态格式无效，忽略并重新创建: %s", path)
+        return None
     prediction_id = payload.get("prediction_id")
     if payload.get("model_ref") != model_ref or not isinstance(prediction_id, str):
         logger.warning("Replicate prediction 状态与当前模型不匹配，忽略: %s", path)
         return None
-    return prediction_id
+    return payload
+
+
+def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
+    """读取可恢复的 prediction ID；无有效状态时返回 None。
+
+    Args:
+        state_dir: 保存任务运行状态的目录。
+        model_ref: 当前 Replicate 模型版本引用。
+    Returns:
+        匹配状态中的 prediction ID，或 None。
+    Side effects:
+        复用状态读取逻辑并保留其日志行为。
+    """
+    payload = _load_prediction_state(state_dir, model_ref)
+    return payload["prediction_id"] if payload is not None else None
 
 
 def _save_prediction_state(
@@ -182,7 +211,16 @@ def _run_replicate_with_retry(
         api_token=os.getenv("REPLICATE_API_TOKEN"),
         timeout=httpx.Timeout(float(timeout), connect=30.0),
     )
-    prediction_id = _load_prediction_id(state_dir, model_ref)
+    state = _load_prediction_state(state_dir, model_ref)
+    prediction_id = state["prediction_id"] if state is not None else None
+    if state is not None and state.get("status") == "cancel_pending":
+        try:
+            client.predictions.cancel(prediction_id)
+        except Exception:
+            logger.warning("重试取消 Replicate prediction 失败: id=%s", prediction_id, exc_info=True)
+        else:
+            _clear_prediction_state(state_dir)
+            prediction_id = None
     network_failures = 0
     last_exc: Exception | None = None
 
@@ -268,12 +306,21 @@ def _run_replicate_with_retry(
                     try:
                         client.predictions.cancel(prediction_id)
                     except Exception:
+                        _save_prediction_state(
+                            state_dir,
+                            prediction_id=prediction_id,
+                            model_ref=model_ref,
+                            status="cancel_pending",
+                        )
+                        path = _prediction_state_path(state_dir)
                         logger.warning(
-                            "取消 Replicate prediction 失败: id=%s",
+                            "取消 Replicate prediction 失败，远端可能仍在运行；将于下次任务启动时重试: id=%s state=%s",
                             prediction_id,
+                            path,
                             exc_info=True,
                         )
-                    _clear_prediction_state(state_dir)
+                    else:
+                        _clear_prediction_state(state_dir)
                 raise
             if isinstance(e, TranscribeError):
                 raise
@@ -364,14 +411,23 @@ def transcribe(
     for i, seg in enumerate(segments, start=1):
         text = (seg.get("text") or "").strip()
         if text:
-            subs.append(Subtitle(
-                index=i,
-                start=float(seg.get("start", 0.0)),
-                end=float(seg.get("end", 0.0)),
-                text=text,
-            ))
+            try:
+                start = float(seg["start"])
+                end = float(seg["end"])
+            except (KeyError, TypeError, ValueError):
+                raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response") from None
+            if not math.isfinite(start) or not math.isfinite(end):
+                raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
+            if end <= start:
+                raise TranscribeError("结束时间必须大于开始时间", code="invalid_response")
+            subs.append(Subtitle(index=i, start=start, end=end, text=text))
 
-    write_srt(subs, srt_path)
+    if not subs:
+        raise TranscribeError("Replicate 返回空字幕列表", code="empty_response")
+    try:
+        write_srt(subs, srt_path)
+    except ValueError as exc:
+        raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response") from exc
     _clear_prediction_state(out_dir)
     if on_progress is not None:
         _safe_callback(on_progress, 100.0, "succeeded")
@@ -399,7 +455,13 @@ def _extract_segments(output) -> List[dict]:
             srt_text = _download_text(srt_url)
             return _parse_srt_segments(srt_text)
         if "segments" in output:
-            return output["segments"]
+            segments = output["segments"]
+            if not isinstance(segments, list) or any(
+                not isinstance(seg, dict) or "text" not in seg or "start" not in seg or "end" not in seg
+                for seg in segments
+            ):
+                raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
+            return segments
         if "srt" in output:
             return _parse_srt_segments(output["srt"])
         if "text" in output:
@@ -407,11 +469,16 @@ def _extract_segments(output) -> List[dict]:
 
     # 格式 2: output 直接是 segments 列表
     if isinstance(output, list):
-        if output and isinstance(output[0], dict) and "text" in output[0]:
+        if not output:
+            return []
+        if all(
+            isinstance(seg, dict) and "text" in seg and "start" in seg and "end" in seg
+            for seg in output
+        ):
             return output
-        return [{"text": str(x), "start": 0.0, "end": 0.0} for x in output if x]
+        raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
 
-    return []
+    raise TranscribeError("Replicate 返回结构无法解析", code="invalid_response")
 
 
 def _download_text(url: str) -> str:

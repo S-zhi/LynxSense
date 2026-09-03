@@ -42,14 +42,16 @@ type pendingAuth struct {
 	verifier string // PKCE 校验值，用于交换授权码
 	server   *http.Server
 	listener net.Listener
+	timer    *time.Timer
 }
 
 // Manager 管理一次浏览器授权流程，以及进程级 Drive 客户端后续的 Token 刷新。
 type Manager struct {
 	cfg *config.Config
 
-	mu      sync.Mutex
-	pending *pendingAuth
+	mu             sync.Mutex
+	pending        *pendingAuth
+	pendingTimeout time.Duration
 
 	clientID     string
 	clientSecret string
@@ -57,7 +59,9 @@ type Manager struct {
 }
 
 // NewManager 创建 OAuth 管理器，不执行网络 I/O。
-func NewManager(cfg *config.Config) *Manager { return &Manager{cfg: cfg} }
+func NewManager(cfg *config.Config) *Manager {
+	return &Manager{cfg: cfg, pendingTimeout: 5 * time.Minute}
+}
 
 // credentials 按“配置字段优先、客户端 JSON 兜底”的顺序加载 OAuth 应用凭据。
 func (m *Manager) credentials() (string, string, error) {
@@ -137,25 +141,31 @@ func (m *Manager) Start() (string, error) {
 	}
 	state, err := randomString(32)
 	if err != nil {
+		_ = listener.Close()
 		return "", err
 	}
 	verifier, err := randomString(48)
 	if err != nil {
+		_ = listener.Close()
 		return "", err
 	}
 	// state 用于防止登录响应串线；verifier 启用 PKCE，即使授权码在到达回调前
 	// 被截获，也不能直接兑换 Token。
 	p := &pendingAuth{cfg: ocfg, state: state, verifier: verifier, listener: listener}
-	m.mu.Lock()
-	if m.pending != nil && m.pending.listener != nil {
-		_ = m.pending.listener.Close()
-	}
-	m.pending = p
-	m.mu.Unlock()
-
 	p.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.finishCallback(w, r, p)
 	})}
+	p.timer = time.AfterFunc(m.pendingTimeout, func() {
+		m.clearPending(p)
+	})
+	m.mu.Lock()
+	previous := m.pending
+	m.pending = p
+	m.mu.Unlock()
+	if previous != nil {
+		m.clearPending(previous)
+	}
+
 	go func() {
 		_ = p.server.Serve(listener)
 	}()
@@ -202,13 +212,20 @@ func (m *Manager) clearPending(p *pendingAuth) {
 	if m.pending == p {
 		m.pending = nil
 	}
+	timer := p.timer
+	server := p.server
+	listener := p.listener
 	m.mu.Unlock()
-	if p.server != nil {
+
+	if timer != nil {
+		timer.Stop()
+	}
+	if server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_ = p.server.Shutdown(ctx)
+		_ = server.Shutdown(ctx)
 		cancel()
-	} else if p.listener != nil {
-		_ = p.listener.Close()
+	} else if listener != nil {
+		_ = listener.Close()
 	}
 }
 

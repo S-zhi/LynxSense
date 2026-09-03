@@ -134,7 +134,7 @@ class SubtitleDocument(BaseModel):
     """PUT 请求体：一条 locale 的全部字幕。"""
 
     locale: _Locale
-    entries: List[SubtitleEntry] = Field(min_length=0)
+    entries: List[SubtitleEntry] = Field(min_length=1)
     # 可选：写入版本文件而不是覆盖。例 "v2" -> original.v2.srt
     version: Optional[str] = None
 
@@ -208,7 +208,7 @@ def _resolve_target_path(d: Path, locale: _Locale, version: Optional[str]) -> tu
 
 # ---------- 路由 ----------
 
-@router.get("/{task_id}/subtitles", response_model=SubtitlesOut)
+@router.get("/{task_id}/subtitles", response_model=SubtitlesOut, dependencies=[Depends(require_api_token)])
 def get_subtitles(task_id: str, store: TaskStore = Depends(get_store)) -> SubtitlesOut:
     """读取任务当前 ORIGINAL_SRT / TRANSLATED_SRT，解析为结构化 JSON 供前端编辑。
 

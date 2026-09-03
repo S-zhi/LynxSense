@@ -8,6 +8,7 @@ from __future__ import annotations
 import errno
 import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -174,7 +175,7 @@ def scan_missing_terminal(
 
     try:
         data_path.stat()
-        data_root_unavailable = not any(data_path.iterdir())
+        list(data_path.iterdir())
     except FileNotFoundError:
         data_root_unavailable = True
     except NotADirectoryError as e:
@@ -253,7 +254,7 @@ def create_task(
     engines: TranslationEngineStore = Depends(get_translation_engine_store),
 ) -> TaskOut:
     _ensure_translation_engine(body.engine, body.needSubtitle, engines)
-    rec = store.create(
+    rec, created = store.create_if_no_recent_active(
         url=body.url,
         source_lang=body.sourceLang,
         target_lang=body.targetLang,
@@ -263,6 +264,15 @@ def create_task(
         engine=body.engine,
         need_subtitle=body.needSubtitle,
     )
+    if not created:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TASK_ALREADY_RUNNING",
+                "message": "该 URL 已有任务正在处理，请复用现有 task_id",
+                "taskId": rec.id,
+            },
+        )
     enqueue_pipeline(rec.id)  # 第 2 步接入真正执行
     return to_out(rec)
 
@@ -396,7 +406,7 @@ def create_upload_task(
     return to_out(store.get(rec.id) or rec)
 
 
-@router.get("", response_model=List[TaskOut])
+@router.get("", response_model=List[TaskOut], dependencies=[Depends(require_api_token)])
 def list_tasks(
     offset: int = Query(0, ge=0, description="跳过前 N 条记录"),
     limit: int = Query(50, ge=1, le=200, description="单页最大记录数，取值范围 1 到 200，默认 50"),
@@ -415,7 +425,7 @@ def list_tasks(
     ]
 
 
-@router.get("/{task_id}", response_model=TaskOut)
+@router.get("/{task_id}", response_model=TaskOut, dependencies=[Depends(require_api_token)])
 def get_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     return to_out(_require(store, task_id))
 
@@ -459,7 +469,7 @@ def probe_task(
     )
 
 
-@router.get("/probe/records", response_model=List[ProbeRecordOut])
+@router.get("/probe/records", response_model=List[ProbeRecordOut], dependencies=[Depends(require_api_token)])
 def list_probe_records(
     limit: int = Query(50, ge=1, le=500),
     probes: ProbeStore = Depends(get_probe_store),
@@ -530,14 +540,14 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 
 # ---------- 文件下载 ----------
 
-@router.head("/{task_id}/source", status_code=204)
+@router.head("/{task_id}/source", status_code=204, dependencies=[Depends(require_api_token)])
 def check_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     """轻量确认源视频是否可用，避免前端先展示原生播放器加载态。"""
     download_source_video(task_id, store)
     return Response(status_code=204)
 
 
-@router.get("/{task_id}/source")
+@router.get("/{task_id}/source", dependencies=[Depends(require_api_token)])
 def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     """返回未烧录字幕的源视频，供预览页在两个视频轨道之间切换。"""
     _require(store, task_id)
@@ -547,14 +557,14 @@ def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     raise HTTPException(status_code=409, detail=message)
 
 
-@router.head("/{task_id}/download", status_code=204)
+@router.head("/{task_id}/download", status_code=204, dependencies=[Depends(require_api_token)])
 def check_download_video(task_id: str, store: TaskStore = Depends(get_store)):
     """轻量确认成品视频是否可用，避免前端误显示播放器转圈。"""
     download_video(task_id, store)
     return Response(status_code=204)
 
 
-@router.get("/{task_id}/download")
+@router.get("/{task_id}/download", dependencies=[Depends(require_api_token)])
 def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
     if rec.status != "SUCCESS":
@@ -594,7 +604,7 @@ def _resolve_video(task_id: str):
     return None
 
 
-@router.get("/{task_id}/subtitle")
+@router.get("/{task_id}/subtitle", dependencies=[Depends(require_api_token)])
 def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
     path = task_dir(task_id) / TRANSLATED_SRT
@@ -619,22 +629,33 @@ def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
 @router.post("/{task_id}/folder", summary="打开任务文件夹", dependencies=[Depends(require_api_token)])
 def open_task_folder(task_id: str, store: TaskStore = Depends(get_store)) -> dict:
     """用系统文件管理器打开任务产物目录。"""
+    if not task_id or not re.match(r"^task_[A-Za-z0-9_-]+$", task_id):
+        raise HTTPException(status_code=400, detail="task_id 格式不符合规范")
+
     _require(store, task_id)
-    path = task_dir(task_id)
+    path = task_dir(task_id).resolve()
+    data_dir = settings.data_dir.resolve()
+    try:
+        if not path.is_relative_to(data_dir):
+            raise HTTPException(status_code=400, detail="任务目录路径非法")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="任务目录路径非法")
+
     if not path.exists():
         raise HTTPException(status_code=409, detail="任务目录尚未生成")
     _open_folder(path)
     return {"ok": True}
 
 
-def _open_folder(path) -> None:
+def _open_folder(path: Path | str) -> None:
     """按当前系统选择文件管理器打开目录。"""
+    abs_path = Path(path).resolve()
     if sys.platform == "darwin":
-        cmd = ["open", str(path)]
+        cmd = ["open", str(abs_path)]
     elif sys.platform.startswith("win"):
-        cmd = ["explorer", str(path)]
+        cmd = ["explorer", str(abs_path)]
     else:
-        cmd = ["xdg-open", str(path)]
+        cmd = ["xdg-open", str(abs_path)]
     try:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except FileNotFoundError as e:
@@ -658,7 +679,7 @@ def _sse_payload(rec) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@router.get("/{task_id}/stream")
+@router.get("/{task_id}/stream", dependencies=[Depends(require_api_token)])
 def stream_progress(task_id: str, store: TaskStore = Depends(get_store)):
     """轮询库表并以 SSE 推送进度（含心跳保活、超时断流与终态事件）。"""
     _require(store, task_id)

@@ -288,3 +288,23 @@ def test_downgrade_audit_migration_adds_columns(tmp_path):
     rec = TaskStore(db_path).get("task_old")
     assert rec.downgrade_reason is None
     assert rec.downgraded_at is None
+
+
+def test_create_if_no_recent_active_reuses_running_task(store):
+    fields = dict(url="http://x/v", source_lang="auto", target_lang="zh-CN", mode="mono", burn="hard", model="small", engine="deepseek")
+    first, created = store.create_if_no_recent_active(**fields)
+    second, created_again = store.create_if_no_recent_active(**{**fields, "source_lang": "en"})
+    assert created is True
+    assert created_again is False
+    assert second.id == first.id
+
+
+def test_create_if_no_recent_active_allows_terminal_task(store):
+    first = _create(store)
+    store.update(first.id, status="SUCCESS")
+    second, created = store.create_if_no_recent_active(
+        url=first.url, source_lang="auto", target_lang="zh-CN", mode="mono",
+        burn="hard", model="small", engine="deepseek",
+    )
+    assert created is True
+    assert second.id != first.id

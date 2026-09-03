@@ -49,9 +49,18 @@ def test_parse_code_fenced_json():
     assert _parse_translation_response(content, 2) == ["x", "y"]
 
 
-def test_parse_truncated_json_array():
+def test_parse_truncated_json_array_returns_error():
     content = '["hello", "world", "partial'
-    assert _parse_translation_response(content, 3) == ["hello", "world"]
+    with pytest.raises(TranslateError) as exc_info:
+        _parse_translation_response(content, 3)
+    assert exc_info.value.code == "invalid_response"
+    assert "JSON 截断，只恢复了 2/3 条" in str(exc_info.value)
+
+
+def test_parse_truncated_json_array_exact_match():
+    # If the JSON array was truncated at closing bracket but all expected elements were recovered
+    content = '["hello", "world"'
+    assert _parse_translation_response(content, 2) == ["hello", "world"]
 
 
 def test_parse_numbered_fallback():
@@ -139,6 +148,37 @@ def test_translate_texts_dedup_partial_hit(fake_settings, monkeypatch):
     assert len(called_items) == 2
     assert len(called_items[0]) == 4
     assert len(called_items[1]) == 2
+
+
+def test_translate_texts_partial_response_falls_back_without_losing_results(fake_settings, monkeypatch):
+    """截断批次留下空槽时，保留已翻译项并回填原文。"""
+    called_batches = []
+
+    def fake(messages, **kw):
+        user = messages[1]["content"]
+        items = re.findall(r"^\d+\.\s*(.*)$", user, re.M)
+        called_batches.append(items)
+        if len(items) == 4:
+            return json.dumps(["translated-1", "translated-2"])
+        if len(items) == 2:
+            return json.dumps(["translated-3"])
+        return json.dumps([])
+
+    monkeypatch.setattr(translator, "_call_deepseek", fake)
+    monkeypatch.setattr(translator.settings, "translate_batch_size", 4)
+    progress = []
+
+    result = translate_texts(
+        ["item1", "item2", "item3", "item4"],
+        "auto",
+        "zh-CN",
+        on_batch=lambda done, total: progress.append((done, total)),
+    )
+
+    assert result == ["translated-1", "translated-2", "translated-3", "item4"]
+    assert progress == [(2, 4), (3, 4), (4, 4)]
+    assert called_batches == [["item1", "item2", "item3", "item4"], ["item3", "item4"], ["item4"]]
+
 
 
 # ---------- translate_srt ----------
@@ -317,7 +357,30 @@ def test_transient_error_continues_to_halve(fake_settings, monkeypatch):
     assert exc_info.value.code == "upstream_error"
     # 5xx 只在原批次上做有限退避重试，不再拆分成单条请求。
     assert called_count == 4
-    assert sleeps == [5, 15, 60]
+    assert sleeps == [0.5] * 10 + [0.5] * 30 + [0.5] * 120
+
+
+def test_upstream_retry_sleep_honors_cancellation(fake_settings, monkeypatch):
+    def fake_batch(*args, **kwargs):
+        raise TranslateError("Transient upstream error", code="upstream_error")
+
+    monkeypatch.setattr(translator, "_translate_batch", fake_batch)
+    sleeps = []
+    monkeypatch.setattr(translator.time, "sleep", sleeps.append)
+    checks = 0
+
+    def cancel_check():
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise RuntimeError("cancelled")
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        translator._translate_batch_with_retry(
+            ["a"], "en", "zh-CN", "test-key", cancel_check=cancel_check,
+        )
+    assert sleeps == [0.5]
+    assert checks == 2
 
 
 def test_network_error_retries_without_batch_fallback(fake_settings, monkeypatch):

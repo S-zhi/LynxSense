@@ -1,7 +1,15 @@
 // 前端运行时配置。后端就绪后，把 USE_MOCK 改为 false 即可对接真实接口。
+const _localFrontendHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const _isLocalDevServer =
+  _localFrontendHosts.has(window.location.hostname) && window.location.port === "5273";
+const _defaultApiBaseUrl =
+  window.location.protocol === "file:" || _isLocalDevServer
+    ? "http://localhost:8000"
+    : window.location.origin;
+
 window.APP_CONFIG = {
-  // FastAPI 后端地址（REST + SSE 同源）
-  API_BASE_URL: "http://localhost:8000",
+  // FastAPI 后端地址（REST + SSE 同源）。云端默认跟随当前页面域名。
+  API_BASE_URL: _defaultApiBaseUrl,
 
   // true  = 纯前端 mock，自动模拟整条流水线进度，无需后端
   // false = 走真实 REST + SSE 接口

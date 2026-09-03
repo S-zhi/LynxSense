@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections import OrderedDict
 import shutil
 import threading
 import time
@@ -47,29 +48,45 @@ DEFAULT_RETENTION_DAYS = 30
 class TokenBucketRateLimiter:
     """按 Client IP 限流的内存 Token Bucket 实现。"""
 
-    def __init__(self, capacity: int = 10, fill_rate_per_sec: float = 10.0 / 60.0) -> None:
+    def __init__(
+        self,
+        capacity: int = 10,
+        fill_rate_per_sec: float = 10.0 / 60.0,
+        max_buckets: int = 1000,
+    ) -> None:
         self.capacity = capacity
         self.fill_rate = fill_rate_per_sec
-        self._buckets: dict[str, tuple[float, float]] = {}  # ip -> (tokens, last_time)
+        self.max_buckets = max_buckets
+        self._buckets: OrderedDict[str, tuple[float, float]] = OrderedDict()  # ip -> (tokens, last_time)
         self._lock = threading.Lock()
 
     def check(self, ip: str) -> bool:
         now = time.time()
         with self._lock:
-            if len(self._buckets) > 1000:
-                self._buckets = {
-                    k: (t, ts) for k, (t, ts) in self._buckets.items() if now - ts < 120
-                }
-            tokens, last_time = self._buckets.get(ip, (float(self.capacity), now))
+            tokens, last_time = self._buckets.pop(ip, (float(self.capacity), now))
             delta = now - last_time
             tokens = min(float(self.capacity), tokens + delta * self.fill_rate)
+
+            allowed = False
             if tokens >= 1.0:
                 tokens -= 1.0
+                allowed = True
+
+            if tokens < float(self.capacity):
                 self._buckets[ip] = (tokens, now)
-                return True
-            else:
-                self._buckets[ip] = (tokens, now)
-                return False
+
+            if len(self._buckets) > self.max_buckets:
+                expired_ips = [
+                    k for k, (t, ts) in self._buckets.items()
+                    if t + (now - ts) * self.fill_rate >= self.capacity
+                ]
+                for k in expired_ips:
+                    del self._buckets[k]
+
+                while len(self._buckets) > self.max_buckets:
+                    self._buckets.popitem(last=False)
+
+            return allowed
 
     def reset(self) -> None:
         with self._lock:
@@ -503,7 +520,7 @@ def cancel_drive_batch(batch_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return batch.to_payload()
 
-@router.get("/stats", response_model=StorageStats)
+@router.get("/stats", response_model=StorageStats, dependencies=[Depends(require_api_token)])
 def get_stats(store: TaskStore = Depends(get_store)) -> StorageStats:
     """全量统计：总占用、类别分布、按任务的占用排行。"""
     by_kind: dict[str, int] = {k: 0 for k in _ARTIFACT_KINDS}
@@ -530,7 +547,7 @@ def get_stats(store: TaskStore = Depends(get_store)) -> StorageStats:
     )
 
 
-@router.post("/cleanup_preview", response_model=CleanupPreviewResponse)
+@router.post("/cleanup_preview", response_model=CleanupPreviewResponse, dependencies=[Depends(require_api_token)])
 def cleanup_preview(
     body: CleanupPreviewRequest,
     store: TaskStore = Depends(get_store),
@@ -686,7 +703,7 @@ def cleanup(
     return execute_cleanup(body, store, probes)
 
 
-@router.get("/retention", response_model=RetentionOut)
+@router.get("/retention", response_model=RetentionOut, dependencies=[Depends(require_api_token)])
 def get_retention() -> RetentionOut:
     """读取产物保留策略（days=None 表示不限，未配置时默认为 30 天）。"""
     return _load_retention()

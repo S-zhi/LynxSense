@@ -1,4 +1,4 @@
-# Subtitles AI MCP Agent 使用指南
+# LynxSense MCP Agent 使用指南
 
 这份文档是 MCP Resource `subtitles://agent-guide` 的内容，描述 Agent 调用字幕处理工具时必须遵循的行为。
 服务级 instructions 和每个工具的 description 也包含同一套关键约束，Host 可以选择读取本 Resource 获取完整说明。
@@ -66,6 +66,7 @@ Agent 不得：
 - `FAILED`：展示错误信息，只有用户确认后才调用 `retry_task`；
 - `RESOURCE_MISSING`：产物已经不存在，提示用户重新运行任务；
 - `TASK_NOT_READY`：不要把结果当作可下载产物，继续等待或先确认任务状态。
+- `TASK_ALREADY_RUNNING`：同一 URL 已有近 10 分钟内的运行中任务；复用返回的 `task_id` 调用 `get_task_status`，不要再次创建。
 
 ## 常见错误与下一步
 

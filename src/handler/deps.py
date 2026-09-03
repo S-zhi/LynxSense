@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Query
 
 from src.config import settings
 from src.store import ProbeStore, TaskStore, TranslationEngineStore
@@ -52,11 +52,14 @@ def reset_singletons() -> None:
 def require_api_token(
     authorization: Optional[str] = Header(None),
     x_api_token: Optional[str] = Header(None, alias="X-API-Token"),
+    token: Optional[str] = Query(None),
+    api_token: Optional[str] = Query(None, alias="api_token"),
 ) -> None:
     """校验 API Token（可选开启）。
 
     配置 SUBTRANS_API_TOKEN 环境变量时生效；支持 Authorization: Bearer <token>
-    或 X-API-Token: <token> 头。如果未设置 SUBTRANS_API_TOKEN，则不作拦截。
+    或 X-API-Token: <token> 头，以及 URL 查询参数 ?token=<token> 或 ?api_token=<token>。
+    如果未设置 SUBTRANS_API_TOKEN，则不作拦截。
     """
     expected = settings.api_token
     if not expected:
@@ -70,6 +73,10 @@ def require_api_token(
             provided = authorization.strip()
     elif x_api_token:
         provided = x_api_token.strip()
+    elif token:
+        provided = token.strip()
+    elif api_token:
+        provided = api_token.strip()
 
     if not provided or provided != expected:
         raise HTTPException(

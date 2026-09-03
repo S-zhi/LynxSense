@@ -95,3 +95,90 @@ func TestFolderBatchIdempotencyAndPersistence(t *testing.T) {
 		t.Fatalf("persisted entries = %#v", entries)
 	}
 }
+
+// TestStoreUpdateTransferProgressThrottling 验证 UpdateTransferProgress 的内存更新、节流落盘以及 Flush 强制落盘。
+func TestStoreUpdateTransferProgressThrottling(t *testing.T) {
+	t.Parallel()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tRecord, err := s.CreateTransfer(Transfer{
+		Kind:       "PYTHON_IMPORT",
+		State:      "TRANSFERRING",
+		TotalBytes: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// UpdateTransferProgress 在创建后立即调用 (未满 1 秒)，只更新内存，磁盘仍为 0
+	if _, err := s.UpdateTransferProgress(tRecord.ID, 100); err != nil {
+		t.Fatal(err)
+	}
+	if inMem, ok := s.GetTransfer(tRecord.ID); !ok || inMem.Transferred != 100 {
+		t.Fatalf("in-memory transfer progress expected 100, got %d", inMem.Transferred)
+	}
+	reopened, err := Open(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := reopened.GetTransfer(tRecord.ID); got.Transferred != 0 {
+		t.Fatalf("expected throttled disk progress to be 0, got %d", got.Transferred)
+	}
+
+	// 调用 Flush 强制落盘
+	if err := s.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	reopened2, err := Open(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := reopened2.GetTransfer(tRecord.ID); got.Transferred != 100 {
+		t.Fatalf("expected flushed disk progress to be 100, got %d", got.Transferred)
+	}
+}
+
+// TestRecoverableTransfersExcludesPausedAndTerminalStates 验证 RecoverableTransfers 仅返回 PENDING, TRANSFERRING, RETRYING, VERIFYING，
+// 排除 PAUSED 以及终态任务 (SUCCESS, FAILED, CANCELLED)。
+func TestRecoverableTransfersExcludesPausedAndTerminalStates(t *testing.T) {
+	t.Parallel()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	states := map[string]bool{
+		"PENDING":      true,
+		"TRANSFERRING": true,
+		"RETRYING":     true,
+		"VERIFYING":    true,
+		"PAUSED":       false,
+		"SUCCESS":      false,
+		"FAILED":       false,
+		"CANCELLED":    false,
+	}
+
+	for state := range states {
+		if _, err := s.CreateTransfer(Transfer{
+			Kind:  "DRIVE_UPLOAD",
+			State: state,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recoverable := s.RecoverableTransfers()
+	if len(recoverable) != 4 {
+		t.Fatalf("expected 4 recoverable transfers, got %d", len(recoverable))
+	}
+
+	for _, tr := range recoverable {
+		if !states[tr.State] {
+			t.Errorf("unexpected recoverable state: %s", tr.State)
+		}
+	}
+}

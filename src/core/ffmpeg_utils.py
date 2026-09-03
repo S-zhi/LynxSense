@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -34,23 +35,53 @@ def probe_duration(path: Path | str, ffprobe_bin: str = "ffprobe") -> Optional[f
         return None
 
 
-_subtitles_filter_cache: Optional[bool] = None
+_subtitles_filter_cache: dict[tuple[object, ...], bool] = {}
+
+
+def _ffmpeg_cache_key(ffmpeg_bin: str) -> tuple[object, ...]:
+    """Return a process-local identity that changes when the binary changes."""
+    resolved = shutil.which(ffmpeg_bin) if not Path(ffmpeg_bin).is_file() else ffmpeg_bin
+    if resolved is None:
+        return (ffmpeg_bin, None)
+    try:
+        stat = Path(resolved).stat()
+    except OSError:
+        return (resolved, None)
+    return (
+        str(Path(resolved).resolve()),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+    )
 
 
 def has_subtitles_filter(ffmpeg_bin: str = "ffmpeg") -> bool:
-    """检测 ffmpeg 是否带 subtitles 滤镜（即编译了 libass）。结果缓存。"""
-    global _subtitles_filter_cache
-    if _subtitles_filter_cache is not None:
-        return _subtitles_filter_cache
+    """Check for libass support, caching independently for each binary identity.
+
+    Args:
+        ffmpeg_bin: Executable name or path to inspect.
+
+    Returns:
+        True when the executable advertises the ``subtitles`` filter.
+
+    Side effects:
+        Runs ``ffmpeg -hide_banner -filters`` on a cache miss. Missing or
+        unresponsive executables return False without raising.
+    """
+    cache_key = _ffmpeg_cache_key(ffmpeg_bin)
+    if cache_key in _subtitles_filter_cache:
+        return _subtitles_filter_cache[cache_key]
     try:
         out = subprocess.run(
             [ffmpeg_bin, "-hide_banner", "-filters"],
             capture_output=True, text=True, timeout=15,
         )
-        _subtitles_filter_cache = " subtitles " in out.stdout
+        result = " subtitles " in out.stdout
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        _subtitles_filter_cache = False
-    return _subtitles_filter_cache
+        result = False
+    _subtitles_filter_cache[cache_key] = result
+    return result
 
 
 def run_ffmpeg(

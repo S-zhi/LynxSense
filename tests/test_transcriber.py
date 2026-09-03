@@ -101,9 +101,20 @@ def test_extract_from_segments_list():
     assert len(_extract_segments([{"text": "a", "start": 0.0, "end": 1.0}])) == 1
 
 
+def test_extract_rejects_unstructured_list():
+    with pytest.raises(TranscribeError, match="结构无法解析") as exc_info:
+        _extract_segments(["a", "b"])
+    assert exc_info.value.code == "invalid_response"
+
+
+def test_extract_rejects_invalid_segment_shape():
+    with pytest.raises(TranscribeError, match="结构无法解析") as exc_info:
+        _extract_segments({"segments": [{"text": "a"}]})
+    assert exc_info.value.code == "invalid_response"
+
+
 def test_extract_from_empty():
-    assert _extract_segments(None) == []
-    assert _extract_segments({}) == []
+    assert _extract_segments([]) == []
 
 
 # ---------- transcribe ----------
@@ -111,6 +122,20 @@ def test_extract_from_empty():
 def test_transcribe_missing_audio():
     with pytest.raises(TranscribeError, match="不存在"):
         transcribe(Path("/nonexistent/audio.wav"), "t1")
+
+
+def test_transcribe_rejects_empty_response(monkeypatch, tmp_path):
+    _mock_replicate(monkeypatch, [])
+    with pytest.raises(TranscribeError, match="空字幕列表") as exc_info:
+        transcribe("https://example.com/audio.wav", "t1")
+    assert exc_info.value.code == "empty_response"
+
+
+def test_transcribe_rejects_zero_duration_segment(monkeypatch, tmp_path):
+    _mock_replicate(monkeypatch, [{"text": "Hello", "start": 1.0, "end": 1.0}])
+    with pytest.raises(TranscribeError, match="结束时间必须大于开始时间") as exc_info:
+        transcribe("https://example.com/audio.wav", "t1")
+    assert exc_info.value.code == "invalid_response"
 
 
 def test_transcribe_with_remote_url(monkeypatch, tmp_path):
@@ -517,3 +542,62 @@ def test_transcribe_resumes_persisted_prediction_after_restart(monkeypatch, tmp_
 
     assert result.segment_count == 1
     assert calls == {"create": 0, "get": ["pred_saved"]}
+
+
+def test_cancel_failure_preserves_prediction_for_next_run(monkeypatch, tmp_path):
+    """远端取消失败时保留 ID，并在下一次运行启动时重试清理。"""
+    cancel_calls = []
+    checks = {"count": 0}
+
+    class FirstPredictions:
+        def create(self, **kwargs):
+            return _prediction(status="starting", prediction_id="pred_pending")
+
+        def cancel(self, prediction_id):
+            cancel_calls.append(prediction_id)
+            raise RuntimeError("temporary cancel failure")
+
+    class FirstClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = FirstPredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", FirstClient)
+    monkeypatch.setattr(transcriber.time, "sleep", lambda seconds: None)
+
+    def cancel_check():
+        checks["count"] += 1
+        if checks["count"] >= 4:
+            raise TranscribeCancelledError("cancelled")
+
+    with pytest.raises(TranscribeCancelledError):
+        transcriber._run_replicate_with_retry(
+            "model", lambda: {}, timeout=30, retries=1, retry_interval=0,
+            poll_interval=0, state_dir=tmp_path, cancel_check=cancel_check,
+        )
+
+    state = (tmp_path / "replicate_prediction.json").read_text(encoding="utf-8")
+    assert '"prediction_id": "pred_pending"' in state
+    assert '"status": "cancel_pending"' in state
+
+    class RetryPredictions:
+        def cancel(self, prediction_id):
+            cancel_calls.append(prediction_id)
+
+        def create(self, **kwargs):
+            return _prediction(output="result", prediction_id="pred_new")
+
+    class RetryClient:
+        def __init__(self, *args, **kwargs):
+            self.predictions = RetryPredictions()
+
+    monkeypatch.setattr(transcriber.replicate, "Client", RetryClient)
+    result = transcriber._run_replicate_with_retry(
+        "model", lambda: {}, timeout=30, retries=1, retry_interval=0,
+        poll_interval=0, state_dir=tmp_path,
+    )
+
+    assert result == "result"
+    assert cancel_calls == ["pred_pending", "pred_pending"]
+    state = (tmp_path / "replicate_prediction.json").read_text(encoding="utf-8")
+    assert '"prediction_id": "pred_new"' in state
+    assert '"status": "succeeded"' in state

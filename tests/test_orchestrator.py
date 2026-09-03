@@ -57,6 +57,29 @@ def _install_fakes(monkeypatch, *, calls, fail_at=None, percent=100):
     monkeypatch.setattr(orchestrator.AssetResolver, "require_output_video", lambda tid: Path("/d/output.mp4"))
 
 
+@pytest.mark.parametrize(
+    ("exception", "expected"),
+    [
+        (KeyError("field"), "invalid_input"),
+        (ValueError("bad value"), "invalid_input"),
+        (AttributeError("missing"), "internal_error"),
+        (TypeError("wrong type"), "internal_error"),
+        (OSError("disk failure"), "io_error"),
+        (RuntimeError("unexpected"), "internal_error"),
+    ],
+)
+def test_error_code_for_exception_maps_builtin_errors(exception, expected):
+    """内置异常应映射为稳定错误码，避免错误事件携带空码。"""
+    assert orchestrator._error_code_for_exception(exception) == expected
+
+
+def test_error_code_for_exception_preserves_custom_code():
+    """异常自定义非空 code 应优先于通用类型映射。"""
+    error = ValueError("bad value")
+    error.code = "custom_error"
+    assert orchestrator._error_code_for_exception(error) == "custom_error"
+
+
 def test_pipeline_success_event_sequence(monkeypatch):
     calls = []
     _install_fakes(monkeypatch, calls=calls)
@@ -117,6 +140,7 @@ def test_pipeline_failure(monkeypatch):
     last = events[-1]
     assert last.status == "FAILED"
     assert last.current_step == "TRANSCRIBING"
+    assert last.error_code == "internal_error"
     assert "boom" in last.error
 
 
