@@ -14,8 +14,9 @@ import logging
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Iterator, Optional
 
 from src.config import OUTPUT_VIDEO, settings, task_dir
 from src.service.orchestrator import (
@@ -106,6 +107,17 @@ _engine_store = TranslationEngineStore(settings.db_path)
 
 _procs: dict[str, list[subprocess.Popen]] = {}
 _procs_lock = threading.Lock()
+_task_locks: dict[str, threading.RLock] = {}
+_task_locks_lock = threading.Lock()
+
+
+@contextmanager
+def task_operation(task_id: str) -> Iterator[None]:
+    """Serialize cancellation cleanup and retry for one task."""
+    with _task_locks_lock:
+        lock = _task_locks.setdefault(task_id, threading.RLock())
+    with lock:
+        yield
 
 
 def register_process(task_id: str, proc: subprocess.Popen) -> None:
@@ -182,40 +194,41 @@ def _cleanup_partial_artifacts(task_id: str) -> None:
 
 def cancel_pipeline(task_id: str) -> bool:
     """取消运行中的任务，终止其关联子进程，清理半截产物并更新状态为 CANCELLED。"""
-    set_cancelled_signal(task_id)
+    with task_operation(task_id):
+        set_cancelled_signal(task_id)
 
-    rec = _store.get(task_id)
-    if rec is None:
-        return False
+        rec = _store.get(task_id)
+        if rec is None:
+            return False
 
-    _store.update(task_id, status="CANCELLED", error="用户取消")
+        _store.update(task_id, status="CANCELLED", error="用户取消")
 
-    with _procs_lock:
-        procs = _procs.pop(task_id, [])
+        with _procs_lock:
+            procs = _procs.pop(task_id, [])
 
-    for proc in procs:
-        _terminate_process(proc, task_id=task_id)
+        for proc in procs:
+            _terminate_process(proc, task_id=task_id)
 
-    _cleanup_partial_artifacts(task_id)
+        _cleanup_partial_artifacts(task_id)
 
-    for proc in procs:
-        try:
-            proc.wait(timeout=2.0)
-        except subprocess.TimeoutExpired:
+        for proc in procs:
             try:
-                proc.kill()
-                proc.wait(timeout=1.0)
-            except Exception as e:
-                logger.warning("强制杀死子进程失败: task=%s, err=%s", task_id, e)
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=1.0)
+                except Exception as e:
+                    logger.warning("强制杀死子进程失败: task=%s, err=%s", task_id, e)
 
-    AssetResolver.cleanup_cancelled_artifacts(
-        task_id,
-        current_step=rec.current_step,
-        source_type=rec.source_type,
-    )
+        AssetResolver.cleanup_cancelled_artifacts(
+            task_id,
+            current_step=rec.current_step,
+            source_type=rec.source_type,
+        )
 
-    logger.info("任务已取消并清理产物: %s", task_id)
-    return True
+        logger.info("任务已取消并清理产物: %s", task_id)
+        return True
 
 
 def enqueue_pipeline(task_id: str) -> None:
@@ -362,10 +375,12 @@ def _run(task_id: str) -> None:
             _store.update(task_id, status="FAILED", error=str(exc) or "执行异常", error_code=err_code)
             last_state["status"] = "FAILED"
     finally:
-        with _procs_lock:
-            remaining_procs = _procs.pop(task_id, [])
-        for proc in remaining_procs:
-            _terminate_process(proc, task_id=task_id)
-        if is_cancelled_signal(task_id):
-            _cleanup_partial_artifacts(task_id)
-        unregister_cancellation_signal(task_id)
+        with task_operation(task_id):
+            with _procs_lock:
+                remaining_procs = _procs.pop(task_id, [])
+            for proc in remaining_procs:
+                _terminate_process(proc, task_id=task_id)
+            current = _store.get(task_id)
+            if is_cancelled_signal(task_id) and current is not None and current.status == "CANCELLED":
+                _cleanup_partial_artifacts(task_id)
+            unregister_cancellation_signal(task_id)

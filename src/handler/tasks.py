@@ -46,7 +46,12 @@ from src.handler.schemas import (
     _probe_record_to_out,
     to_out,
 )
-from src.service.runner import cancel_pipeline, enqueue_pipeline
+from src.service.runner import (
+    cancel_pipeline,
+    enqueue_pipeline,
+    task_operation,
+)
+from src.service.orchestrator import register_cancellation_signal
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
@@ -489,21 +494,23 @@ def cancel_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 @router.post("/{task_id}/retry", response_model=TaskOut, dependencies=[Depends(require_api_token)])
 def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     """仅允许失败或已取消任务重新入队，避免运行中任务重复执行。"""
-    rec = _require(store, task_id)
-    if rec.status not in ("FAILED", "CANCELLED"):
-        raise HTTPException(status_code=409, detail="只有失败或已取消任务可以重试")
-    updated = store.update(
-        task_id,
-        status="PENDING",
-        progress=0,
-        current_step=None,
-        error=None,
-        resource_status=RESOURCE_STATUS_AVAILABLE,
-        downgrade_reason=None,
-        downgraded_at=None,
-    )
-    enqueue_pipeline(task_id)
-    return to_out(updated)
+    with task_operation(task_id):
+        rec = _require(store, task_id)
+        if rec.status not in ("FAILED", "CANCELLED"):
+            raise HTTPException(status_code=409, detail="只有失败或已取消任务可以重试")
+        register_cancellation_signal(task_id, is_cancelled=False)
+        updated = store.update(
+            task_id,
+            status="PENDING",
+            progress=0,
+            current_step=None,
+            error=None,
+            resource_status=RESOURCE_STATUS_AVAILABLE,
+            downgrade_reason=None,
+            downgraded_at=None,
+        )
+        enqueue_pipeline(task_id)
+        return to_out(updated)
 
 
 # ---------- 文件下载 ----------
