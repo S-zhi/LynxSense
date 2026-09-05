@@ -404,7 +404,14 @@ def test_delete_cancelled_task_succeeds(client):
 
 def test_retry_cancelled_task_succeeds(client, monkeypatch):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
-    client._store.update(cid, status="CANCELLED", error="用户取消")
+    client._store.update(
+        cid,
+        status="CANCELLED",
+        error="用户取消",
+        resource_status=RESOURCE_STATUS_MISSING,
+        downgrade_reason="USER_CLEANED",
+        downgraded_at=123,
+    )
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
 
@@ -414,7 +421,15 @@ def test_retry_cancelled_task_succeeds(client, monkeypatch):
     assert data["status"] == "PENDING"
     assert data["progress"] == 0
     assert data["error"] is None
+    assert data["resourceStatus"] == RESOURCE_STATUS_AVAILABLE
+    assert data["downgradeReason"] is None
+    assert data["downgradedAt"] is None
     assert enqueued == [cid]
+
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_AVAILABLE
+    assert rec.downgrade_reason is None
+    assert rec.downgraded_at is None
 
 
 def test_retry_resets_status(client, monkeypatch):
