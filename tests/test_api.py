@@ -402,6 +402,17 @@ def test_delete_cancelled_task_succeeds(client):
     assert not d.exists()
 
 
+def test_delete_cancelling_task_returns_409(client):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="CANCELLED", is_cancelling=1)
+
+    response = client.delete(f"/api/tasks/{cid}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "任务正在取消，请稍后再试"
+    assert client.get(f"/api/tasks/{cid}").status_code == 200
+
+
 def test_retry_cancelled_task_succeeds(client, monkeypatch):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
     client._store.update(cid, status="CANCELLED", error="用户取消")
