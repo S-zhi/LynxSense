@@ -47,7 +47,7 @@ from src.handler.schemas import (
     _probe_record_to_out,
     to_out,
 )
-from src.service.runner import cancel_pipeline, enqueue_pipeline
+from src.service.runner import _cleanup_partial_artifacts, cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
@@ -486,12 +486,21 @@ def delete_probe_record(
 
 @router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
+    """删除终态任务及其目录，取消清理期间拒绝删除以避免目录竞态。"""
     rec = _require(store, task_id)
+    if rec.is_cancelling:
+        raise HTTPException(status_code=409, detail="任务正在取消，请稍后再试")
     if rec.status not in _TERMINAL:
         raise HTTPException(
             status_code=409,
             detail="任务运行中，请先等待或调用取消接口",
         )
+    _cleanup_partial_artifacts(task_id)
+    AssetResolver.cleanup_cancelled_artifacts(
+        task_id,
+        current_step=rec.current_step,
+        source_type=rec.source_type,
+    )
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
     release_lock(task_id)
