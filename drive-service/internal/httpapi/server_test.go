@@ -150,7 +150,7 @@ func TestConcurrentUploadChunksSerialize(t *testing.T) {
 	server := New(&cfg, auth, drive, transfers, state)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/drive/uploads", nil)
-	createReq.Header.Set("X-Upload-Length", "3")
+	createReq.Header.Set("X-Upload-Length", "4")
 	createResp := httptest.NewRecorder()
 	server.ServeHTTP(createResp, createReq)
 	if createResp.Code != http.StatusCreated {
