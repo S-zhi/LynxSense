@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
@@ -47,7 +47,7 @@ from src.handler.schemas import (
     _probe_record_to_out,
     to_out,
 )
-from src.service.runner import cancel_pipeline, enqueue_pipeline
+from src.service.runner import _cleanup_partial_artifacts, cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
@@ -279,7 +279,6 @@ def create_task(
 
 @router.post("/upload", response_model=TaskOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_upload_task(
-    request: Request,
     file: UploadFile = File(..., description="本地视频文件"),
     sourceLang: str = Form("auto", min_length=1),
     targetLang: str = Form("zh-CN", min_length=1),
@@ -295,21 +294,9 @@ def create_upload_task(
 
     字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
     """
+    # multipart 请求的 Content-Length 包含边界和表单字段，不能代表视频文件大小。
+    # 实际文件大小在写入过程中通过 written_bytes 流式校验。
     max_upload_bytes = settings.max_upload_mb * 1024 * 1024
-    content_length_hdr = request.headers.get("content-length")
-    if content_length_hdr:
-        try:
-            if int(content_length_hdr) > max_upload_bytes:
-                raise _upload_error(
-                    413,
-                    code="UPLOAD_TOO_LARGE",
-                    message=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
-                    limits={"maxMb": settings.max_upload_mb},
-                    suggestion="请压缩或切分视频，也可以改用 URL 任务模式。",
-                )
-        except ValueError:
-            pass
-
     filename = (file.filename or "").strip()
     _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
@@ -499,12 +486,21 @@ def delete_probe_record(
 
 @router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
+    """删除终态任务及其目录，取消清理期间拒绝删除以避免目录竞态。"""
     rec = _require(store, task_id)
+    if rec.is_cancelling:
+        raise HTTPException(status_code=409, detail="任务正在取消，请稍后再试")
     if rec.status not in _TERMINAL:
         raise HTTPException(
             status_code=409,
             detail="任务运行中，请先等待或调用取消接口",
         )
+    _cleanup_partial_artifacts(task_id)
+    AssetResolver.cleanup_cancelled_artifacts(
+        task_id,
+        current_step=rec.current_step,
+        source_type=rec.source_type,
+    )
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
     release_lock(task_id)

@@ -8,6 +8,7 @@ Replicate 的公开 HTTP API 目前没有余额 / credit balance endpoint。这�
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import time
@@ -23,12 +24,20 @@ REPLICATE_REQUEST_TIMEOUT = 10.0
 
 _cache_lock = threading.Lock()
 _account_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_active_token_fingerprint: Optional[str] = None
 
 
 def clear_cache() -> None:
     """清空 Replicate 账户状态缓存。"""
+    global _active_token_fingerprint
     with _cache_lock:
         _account_cache.clear()
+        _active_token_fingerprint = None
+
+
+def _token_fingerprint(token: str) -> str:
+    """返回 Token 的不可逆短指纹，避免凭据明文成为缓存键。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
 def _unconfigured() -> dict[str, Any]:
@@ -192,11 +201,20 @@ def query_replicate_balance(
     clean_token = token.strip()
     effective_ttl = ttl_sec if ttl_sec is not None else float(settings.readiness_ttl_sec)
     now = time.time()
+    token_fingerprint = _token_fingerprint(clean_token)
 
     if not force_refresh and effective_ttl > 0:
+        global _active_token_fingerprint
         with _cache_lock:
-            if clean_token in _account_cache:
-                ts, cached_res = _account_cache[clean_token]
+            # Token rotation must not serve a result produced for the old credential.
+            if (
+                _active_token_fingerprint is not None
+                and _active_token_fingerprint != token_fingerprint
+            ):
+                _account_cache.clear()
+            _active_token_fingerprint = token_fingerprint
+            if token_fingerprint in _account_cache:
+                ts, cached_res = _account_cache[token_fingerprint]
                 if now - ts < effective_ttl:
                     res = dict(cached_res)
                     res["cached"] = True
@@ -207,6 +225,9 @@ def query_replicate_balance(
 
     if effective_ttl > 0:
         with _cache_lock:
-            _account_cache[clean_token] = (now, res)
+            if _active_token_fingerprint != token_fingerprint:
+                _account_cache.clear()
+                _active_token_fingerprint = token_fingerprint
+            _account_cache[token_fingerprint] = (now, res)
 
     return res
