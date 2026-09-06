@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
+from src.handler import tasks as task_routes
 from src.service import runner
 from src.service.orchestrator import PipelineEvent
 from src.store import TaskStore
@@ -158,6 +161,9 @@ def test_cancel_pipeline_terminates_procs_and_updates_status(store):
     rec = store.get(tid)
     assert rec.status == "CANCELLED"
     assert rec.error == "用户取消"
+    assert rec.resource_status == "MISSING"
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgraded_at is not None
     proc.wait(timeout=2)
     assert proc.poll() is not None
 
@@ -207,6 +213,44 @@ def test_retry_cancelled_task_clears_signal_and_resumes(store, monkeypatch):
     rec = store.get(tid)
     assert rec.status == "SUCCESS"
     assert seen_cancellation_state == [False]
+
+
+def test_retry_waits_for_cancel_cleanup(store, monkeypatch):
+    tid = _make_task(store)
+    store.update(tid, status="DOWNLOADING")
+    cleanup_started = threading.Event()
+    allow_cleanup = threading.Event()
+
+    def blocked_cleanup(task_id):
+        cleanup_started.set()
+        assert allow_cleanup.wait(timeout=2)
+        store.update(task_id, resource_status="MISSING")
+
+    monkeypatch.setattr(runner, "_cleanup_partial_artifacts", blocked_cleanup)
+    monkeypatch.setattr(runner.AssetResolver, "cleanup_cancelled_artifacts", lambda *a, **k: None)
+    monkeypatch.setattr(task_routes, "enqueue_pipeline", lambda task_id: None)
+
+    cancel_thread = threading.Thread(target=runner.cancel_pipeline, args=(tid,))
+    cancel_thread.start()
+    assert cleanup_started.wait(timeout=2)
+
+    retry_done = threading.Event()
+    retry_result = []
+
+    def retry():
+        retry_result.append(task_routes.retry_task(tid, store))
+        retry_done.set()
+
+    retry_thread = threading.Thread(target=retry)
+    retry_thread.start()
+    assert not retry_done.wait(timeout=0.1)
+
+    allow_cleanup.set()
+    cancel_thread.join(timeout=2)
+    retry_thread.join(timeout=2)
+
+    assert retry_result and retry_result[0].status == "PENDING"
+    assert store.get(tid).resource_status == "AVAILABLE"
 
 
 def test_run_does_not_overwrite_cancelled_status(store, monkeypatch):
@@ -399,6 +443,7 @@ def test_run_finally_terminates_procs_and_cleans_artifacts(store, tmp_path, monk
     def fake_pipeline(params, on_event, *, api_key=None):
         runner.register_process(tid, mock_proc)
         runner.set_cancelled_signal(tid)
+        store.update(tid, status="CANCELLED", error="用户取消")
         raise runner.PipelineCancelledError("cancelled")
 
     monkeypatch.setattr(runner, "run_pipeline", fake_pipeline)
