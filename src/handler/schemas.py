@@ -120,6 +120,7 @@ class TaskOut(BaseModel):
     outputs: Optional[dict]
     resourceStatus: str  # AVAILABLE | MISSING — 任务产物文件是否在盘
     downgradeReason: Optional[str] = None
+    downgradeErrno: Optional[int] = None
     downgradedAt: Optional[int] = None
     createdAt: int
     updatedAt: int
@@ -160,6 +161,7 @@ def to_out(rec: TaskRecord) -> TaskOut:
         outputs=outputs,
         resourceStatus=resource_status,
         downgradeReason=rec.downgrade_reason,
+        downgradeErrno=rec.downgrade_errno,
         downgradedAt=rec.downgraded_at,
         createdAt=rec.created_at,
         updatedAt=rec.updated_at,

@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import errno
+import pathlib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -593,6 +596,128 @@ def test_scan_missing_terminal_records_volume_migration(client, tmp_path):
     assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"VOLUME_MIGRATED"}
 
 
+
+def test_scan_missing_terminal_not_a_directory_error(client, tmp_path, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    # 造一个同名文件代替目录
+    not_a_dir = tmp_path / "file-as-datadir"
+    not_a_dir.write_text("i am a file")
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=not_a_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "USER_CLEANED"
+    assert rec.downgrade_errno is not None
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+    data = client.get(f"/api/tasks/{cid}").json()
+    assert data["downgradeReason"] == "USER_CLEANED"
+    assert data["downgradeErrno"] == rec.downgrade_errno
+
+
+def test_scan_missing_terminal_stat_os_error(client, tmp_path, monkeypatch, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+    data_dir = tmp_path / "stat-error-dir"
+    data_dir.mkdir()
+
+    original_stat = pathlib.Path.stat
+
+    def fake_stat(path, *args, **kwargs):
+        if path == data_dir:
+            raise OSError(errno.EIO, "Input/output error")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr("pathlib.Path.stat", fake_stat)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.downgrade_errno == errno.EIO
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+
+def test_scan_missing_terminal_permission_error(client, tmp_path, monkeypatch, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    data_dir = tmp_path / "perm-denied-dir"
+    data_dir.mkdir()
+
+    def fake_iterdir(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr("pathlib.Path.iterdir", fake_iterdir)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.downgrade_errno == 13
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+
+def test_scan_missing_terminal_os_error_io(client, tmp_path, monkeypatch, caplog):
+    import errno
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    data_dir = tmp_path / "eio-dir"
+    data_dir.mkdir()
+
+    def fake_iterdir(*args, **kwargs):
+        err = OSError("Input/output error")
+        err.errno = errno.EIO
+        raise err
+
+    monkeypatch.setattr("pathlib.Path.iterdir", fake_iterdir)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "DISK_FAILURE"
+    assert rec.downgrade_errno == errno.EIO
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
+
+def test_scan_missing_terminal_os_error_generic(client, tmp_path, monkeypatch, caplog):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="SUCCESS", progress=100)
+
+    data_dir = tmp_path / "generic-oserror-dir"
+    data_dir.mkdir()
+
+    def fake_iterdir(*args, **kwargs):
+        err = OSError("Unknown error")
+        err.errno = 999
+        raise err
+
+    monkeypatch.setattr("pathlib.Path.iterdir", fake_iterdir)
+
+    with caplog.at_level("WARNING"):
+        marked = tasks_routes.scan_missing_terminal(client._store, data_dir=data_dir)
+
+    assert marked == [cid]
+    rec = client._store.get(cid)
+    assert rec.resource_status == RESOURCE_STATUS_MISSING
+    assert rec.downgrade_reason == "UNKNOWN"
+    assert rec.downgrade_errno == 999
+    assert "scan_missing_terminal data_dir 异常" in caplog.text
+
 def test_scan_missing_terminal_empty_data_dir_does_not_mark_volume_migration(client, tmp_path):
     """数据目录存在但为空（新装系统/空挂载）时，有多条 SUCCESS 任务不应被误标记为 VOLUME_MIGRATED。"""
     ids = [
@@ -608,6 +733,7 @@ def test_scan_missing_terminal_empty_data_dir_does_not_mark_volume_migration(cli
     marked = tasks_routes.scan_missing_terminal(client._store, data_dir=empty_dir)
     assert set(marked) == set(ids)
     assert {client._store.get(task_id).downgrade_reason for task_id in ids} == {"UNKNOWN"}
+
 
 
 def test_success_download_only_task_with_missing_source_hides_outputs(client):
@@ -1083,15 +1209,16 @@ def test_upload_calls_enqueue_with_task_id(client, monkeypatch):
     assert enqueued == [data["id"]]
 
 
-def test_upload_content_length_exceeds_max_413(client, monkeypatch):
-    """Content-Length 超过 max_upload_mb 限制时直接返回 413。"""
+def test_upload_allows_file_when_multipart_content_length_exceeds_max(client, monkeypatch):
+    """multipart 总长度超过上限时，只要实际视频未超限仍应允许上传。"""
     import dataclasses
+
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
     s = dataclasses.replace(tasks_routes.settings, max_upload_mb=1)
     monkeypatch.setattr(tasks_routes, "settings", s)
 
-    # 发送请求并带 Content-Length header 2MB (> 1MB)
+    # 模拟 multipart 封装开销使请求总长度超过 1MB，但文件实际只有 4 字节。
     r = client.post(
         "/api/tasks/upload",
         headers={"Content-Length": str(2 * 1024 * 1024)},
@@ -1102,12 +1229,8 @@ def test_upload_content_length_exceeds_max_413(client, monkeypatch):
         },
         files={"file": ("clip.mp4", b"VIDEO", "video/mp4")},
     )
-    assert r.status_code == 413
-    detail = r.json()["detail"]
-    assert detail["code"] == "UPLOAD_TOO_LARGE"
-    assert "超过最大限制" in detail["message"]
-    assert detail["limits"]["maxMb"] == 1
-    assert enqueued == []
+    assert r.status_code == 201
+    assert enqueued == [r.json()["id"]]
 
 
 def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch):

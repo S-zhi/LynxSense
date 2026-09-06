@@ -799,6 +799,7 @@ class DriveSyncManager:
                             error=None,
                             error_code=None,
                             downgrade_reason=None,
+                            downgrade_errno=None,
                             downgraded_at=None,
                         )
         except Exception as exc:

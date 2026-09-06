@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import re
@@ -15,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
@@ -51,6 +52,7 @@ from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
     DOWNGRADE_REASON_UNKNOWN,
+    DOWNGRADE_REASON_USER_CLEANED,
     DOWNGRADE_REASON_VOLUME_MIGRATED,
     RESOURCE_STATUS_AVAILABLE,
     RESOURCE_STATUS_MISSING,
@@ -104,6 +106,7 @@ def _mark_resource_missing(
     task_id: str,
     reason: str,
     downgrade_reason: str = DOWNGRADE_REASON_UNKNOWN,
+    downgrade_errno: Optional[int] = None,
 ) -> None:
     """把一个任务的 resource_status 幂等地置为 MISSING。"""
     rec = store.get(task_id)
@@ -114,6 +117,7 @@ def _mark_resource_missing(
         resource_status=RESOURCE_STATUS_MISSING,
         error=reason,
         downgrade_reason=downgrade_reason,
+        downgrade_errno=downgrade_errno,
         downgraded_at=int(time.time() * 1000),
     )
 
@@ -165,10 +169,33 @@ def scan_missing_terminal(
         recs = store.list()
 
     success_count = sum(1 for rec in recs if rec.status == "SUCCESS")
+    data_root_unavailable = False
+    detected_reason: Optional[str] = None
+    detected_errno: Optional[int] = None
+
     try:
-        data_root_unavailable = not data_path.exists()
-    except OSError:
+        data_path.stat()
+        list(data_path.iterdir())
+    except FileNotFoundError:
         data_root_unavailable = True
+    except NotADirectoryError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_reason = DOWNGRADE_REASON_USER_CLEANED
+        detected_errno = e.errno
+    except PermissionError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_reason = DOWNGRADE_REASON_DISK_FAILURE
+        detected_errno = e.errno
+    except OSError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_errno = e.errno
+        if e.errno in (errno.EIO, errno.ENXIO, errno.ESTALE):
+            detected_reason = DOWNGRADE_REASON_DISK_FAILURE
+        else:
+            detected_reason = DOWNGRADE_REASON_UNKNOWN
 
     for rec in recs:
         if rec.status != "SUCCESS":
@@ -190,12 +217,19 @@ def scan_missing_terminal(
             unreadable = state_src == ResourceState.UNREADABLE
 
         error_msg = "资源不可读" if unreadable else _DELETED_MESSAGE
+        audit_errno: Optional[int] = None
         if downgrade_reason is not None:
             audit_reason = downgrade_reason
         elif unreadable:
             audit_reason = DOWNGRADE_REASON_DISK_FAILURE
-        elif data_root_unavailable and success_count > 1:
-            audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+        elif data_root_unavailable:
+            if detected_reason is not None:
+                audit_reason = detected_reason
+                audit_errno = detected_errno
+            elif success_count > 1:
+                audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+            else:
+                audit_reason = DOWNGRADE_REASON_UNKNOWN
         else:
             audit_reason = DOWNGRADE_REASON_UNKNOWN
 
@@ -204,6 +238,7 @@ def scan_missing_terminal(
             resource_status=RESOURCE_STATUS_MISSING,
             error=error_msg,
             downgrade_reason=audit_reason,
+            downgrade_errno=audit_errno,
             downgraded_at=int(time.time() * 1000),
         )
         downgraded.append(rec.id)
@@ -244,7 +279,6 @@ def create_task(
 
 @router.post("/upload", response_model=TaskOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_upload_task(
-    request: Request,
     file: UploadFile = File(..., description="本地视频文件"),
     sourceLang: str = Form("auto", min_length=1),
     targetLang: str = Form("zh-CN", min_length=1),
@@ -260,21 +294,9 @@ def create_upload_task(
 
     字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
     """
+    # multipart 请求的 Content-Length 包含边界和表单字段，不能代表视频文件大小。
+    # 实际文件大小在写入过程中通过 written_bytes 流式校验。
     max_upload_bytes = settings.max_upload_mb * 1024 * 1024
-    content_length_hdr = request.headers.get("content-length")
-    if content_length_hdr:
-        try:
-            if int(content_length_hdr) > max_upload_bytes:
-                raise _upload_error(
-                    413,
-                    code="UPLOAD_TOO_LARGE",
-                    message=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
-                    limits={"maxMb": settings.max_upload_mb},
-                    suggestion="请压缩或切分视频，也可以改用 URL 任务模式。",
-                )
-        except ValueError:
-            pass
-
     filename = (file.filename or "").strip()
     _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
