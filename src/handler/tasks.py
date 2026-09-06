@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
@@ -279,7 +279,6 @@ def create_task(
 
 @router.post("/upload", response_model=TaskOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_upload_task(
-    request: Request,
     file: UploadFile = File(..., description="本地视频文件"),
     sourceLang: str = Form("auto", min_length=1),
     targetLang: str = Form("zh-CN", min_length=1),
@@ -295,21 +294,9 @@ def create_upload_task(
 
     字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
     """
+    # multipart 请求的 Content-Length 包含边界和表单字段，不能代表视频文件大小。
+    # 实际文件大小在写入过程中通过 written_bytes 流式校验。
     max_upload_bytes = settings.max_upload_mb * 1024 * 1024
-    content_length_hdr = request.headers.get("content-length")
-    if content_length_hdr:
-        try:
-            if int(content_length_hdr) > max_upload_bytes:
-                raise _upload_error(
-                    413,
-                    code="UPLOAD_TOO_LARGE",
-                    message=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
-                    limits={"maxMb": settings.max_upload_mb},
-                    suggestion="请压缩或切分视频，也可以改用 URL 任务模式。",
-                )
-        except ValueError:
-            pass
-
     filename = (file.filename or "").strip()
     _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
