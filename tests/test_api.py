@@ -402,6 +402,17 @@ def test_delete_cancelled_task_succeeds(client):
     assert not d.exists()
 
 
+def test_delete_cancelling_task_returns_409(client):
+    cid = client.post("/api/tasks", json=_payload()).json()["id"]
+    client._store.update(cid, status="CANCELLED", is_cancelling=1)
+
+    response = client.delete(f"/api/tasks/{cid}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "任务正在取消，请稍后再试"
+    assert client.get(f"/api/tasks/{cid}").status_code == 200
+
+
 def test_retry_cancelled_task_succeeds(client, monkeypatch):
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
     client._store.update(cid, status="CANCELLED", error="用户取消")
@@ -1209,15 +1220,16 @@ def test_upload_calls_enqueue_with_task_id(client, monkeypatch):
     assert enqueued == [data["id"]]
 
 
-def test_upload_content_length_exceeds_max_413(client, monkeypatch):
-    """Content-Length 超过 max_upload_mb 限制时直接返回 413。"""
+def test_upload_allows_file_when_multipart_content_length_exceeds_max(client, monkeypatch):
+    """multipart 总长度超过上限时，只要实际视频未超限仍应允许上传。"""
     import dataclasses
+
     enqueued = []
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", enqueued.append)
     s = dataclasses.replace(tasks_routes.settings, max_upload_mb=1)
     monkeypatch.setattr(tasks_routes, "settings", s)
 
-    # 发送请求并带 Content-Length header 2MB (> 1MB)
+    # 模拟 multipart 封装开销使请求总长度超过 1MB，但文件实际只有 4 字节。
     r = client.post(
         "/api/tasks/upload",
         headers={"Content-Length": str(2 * 1024 * 1024)},
@@ -1228,12 +1240,8 @@ def test_upload_content_length_exceeds_max_413(client, monkeypatch):
         },
         files={"file": ("clip.mp4", b"VIDEO", "video/mp4")},
     )
-    assert r.status_code == 413
-    detail = r.json()["detail"]
-    assert detail["code"] == "UPLOAD_TOO_LARGE"
-    assert "超过最大限制" in detail["message"]
-    assert detail["limits"]["maxMb"] == 1
-    assert enqueued == []
+    assert r.status_code == 201
+    assert enqueued == [r.json()["id"]]
 
 
 def test_upload_streaming_bytes_exceeds_max_413_and_cleanup(client, monkeypatch):
