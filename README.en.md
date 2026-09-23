@@ -79,6 +79,34 @@ journalctl -u subtitles-ai -f
 
 The installer supports Ubuntu and Debian. On a repeat run, leave a credential blank to keep its existing value. Before public access, allow TCP 8000 in the cloud firewall; use an HTTPS reverse proxy for production. See the [Linux deployment guide](./docs/quick-start-linux.md) for options, non-interactive installation, and troubleshooting.
 
+### Run with Docker
+
+The repository includes a Dockerfile for the Python API, Web workbench, FFmpeg/libass, and CJK fonts. The Google Drive sidecar is not included in this image.
+
+Prepare the credentials and build the image from the repository root:
+
+```bash
+cp .env.example .env
+# Set REPLICATE_API_TOKEN and SUBTRANS_DEEPSEEK_API_KEY in .env
+docker build -t lynxsense:local .
+```
+
+Start the container with a persistent volume:
+
+```bash
+docker run -d \
+  --name lynxsense \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  --env-file .env \
+  -e SUBTRANS_DATA_DIR=/data \
+  -e SUBTRANS_DB=/data/app.db \
+  -v lynxsense-data:/data \
+  lynxsense:local
+```
+
+Open `http://localhost:8000/` to use the workbench, and check the service with `curl http://127.0.0.1:8000/api/health`. The `lynxsense-data` volume stores the task database and artifacts; keep it when replacing or upgrading the container. Use `docker logs -f lynxsense` to view logs and `docker stop lynxsense` to stop it. For production, put the service behind an HTTPS reverse proxy instead of exposing the port directly to an untrusted network.
+
 ### Local development on macOS
 
 #### 1. Prepare the environment
