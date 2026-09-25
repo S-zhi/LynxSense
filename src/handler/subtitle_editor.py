@@ -208,7 +208,7 @@ def _resolve_target_path(d: Path, locale: _Locale, version: Optional[str]) -> tu
 
 # ---------- 路由 ----------
 
-@router.get("/{task_id}/subtitles", response_model=SubtitlesOut)
+@router.get("/{task_id}/subtitles", response_model=SubtitlesOut, dependencies=[Depends(require_api_token)])
 def get_subtitles(task_id: str, store: TaskStore = Depends(get_store)) -> SubtitlesOut:
     """读取任务当前 ORIGINAL_SRT / TRANSLATED_SRT，解析为结构化 JSON 供前端编辑。
 
