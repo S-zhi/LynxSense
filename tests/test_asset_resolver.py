@@ -234,3 +234,43 @@ def test_pipeline_resumes_from_existing_artifacts(monkeypatch, tmp_path):
     assert calls == ["translate_srt", "burn_subtitles"]
     assert result.status == "SUCCESS"
     assert result.title == "Recovered video"
+
+
+def test_pipeline_skips_every_stage_when_all_artifacts_exist(monkeypatch, tmp_path):
+    """完整恢复时复用源视频、音频、字幕与成品视频，不重复执行处理阶段。"""
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path)
+    for name, content in {
+        "source.mp4": b"video",
+        "audio.wav": b"audio",
+        "original.srt": b"original",
+        "translated.srt": b"translated",
+        "output.mp4": b"output",
+    }.items():
+        (tmp_path / name).write_bytes(content)
+
+    calls = []
+
+    def should_not_run(name):
+        def fn(*args, **kwargs):
+            calls.append(name)
+            raise AssertionError(f"已有产物时不应重复执行: {name}")
+        return fn
+
+    for name in ("download_video", "extract_audio", "transcribe", "translate_srt", "burn_subtitles"):
+        monkeypatch.setattr(orchestrator, name, should_not_run(name))
+
+    params = PipelineParams(
+        task_id="t1", url="https://x/v", source_lang="auto", target_lang="zh-CN",
+        title="Recovered video",
+    )
+    events = []
+    result = run_pipeline(params, events.append)
+
+    assert calls == []
+    assert result.status == "SUCCESS"
+    assert result.title == "Recovered video"
+    assert result.outputs == {
+        "video": str(tmp_path / "output.mp4"),
+        "subtitle": str(tmp_path / "translated.srt"),
+    }
+    assert events[-1].progress == 100
