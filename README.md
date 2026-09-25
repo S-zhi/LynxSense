@@ -79,6 +79,34 @@ journalctl -u subtitles-ai -f
 
 脚本支持 Ubuntu/Debian，重复执行时留空密钥即可保留原值。公网访问前还需要在云平台安全组中放行 TCP 8000，生产环境建议改用 HTTPS 反向代理。参数、非交互安装和故障排查见 [Linux 部署文档](./docs/quick-start-linux.md)。
 
+### Docker 容器运行
+
+仓库根目录提供 Dockerfile，可构建包含 Python API、Web 工作台、FFmpeg/libass 和中文字体的镜像。Google Drive sidecar 不包含在此镜像中。
+
+先准备密钥配置并构建镜像：
+
+```bash
+cp .env.example .env
+# 在 .env 中填写 REPLICATE_API_TOKEN 和 SUBTRANS_DEEPSEEK_API_KEY
+docker build -t lynxsense:local .
+```
+
+启动容器并挂载持久化卷：
+
+```bash
+docker run -d \
+  --name lynxsense \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  --env-file .env \
+  -e SUBTRANS_DATA_DIR=/data \
+  -e SUBTRANS_DB=/data/app.db \
+  -v lynxsense-data:/data \
+  lynxsense:local
+```
+
+打开 `http://localhost:8000/` 使用工作台，并用 `curl http://127.0.0.1:8000/api/health` 检查服务。任务数据库和产物保存在 `lynxsense-data` 卷中；容器重建或升级时保留该卷。查看日志和停止容器可使用 `docker logs -f lynxsense` 和 `docker stop lynxsense`。生产环境请通过 HTTPS 反向代理对外提供服务，不要直接向不受信任的公网开放端口。
+
 ### macOS 本地运行
 
 #### 1. 准备环境

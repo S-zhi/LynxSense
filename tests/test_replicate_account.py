@@ -137,6 +137,28 @@ def test_ttl_caching_and_force_refresh(monkeypatch):
     assert res3["cached"] is False
 
 
+def test_token_rotation_does_not_reuse_old_cache_or_retain_plaintext(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        replicate_account.httpx,
+        "get",
+        lambda _url, **kwargs: (
+            calls.append(kwargs["headers"]["Authorization"])
+            or _response({"type": "user", "username": "alice"})
+        ),
+    )
+
+    first = replicate_account.query_replicate_balance(api_token="r8_old", ttl_sec=60)
+    second = replicate_account.query_replicate_balance(api_token="r8_new", ttl_sec=60)
+
+    assert len(calls) == 2
+    assert first["cached"] is False
+    assert second["cached"] is False
+    assert "r8_old" not in replicate_account._account_cache
+    assert "r8_new" not in replicate_account._account_cache
+    assert all(token not in replicate_account._account_cache for token in calls)
+
+
 def test_rate_limit_and_server_error_caching(monkeypatch):
     calls = []
     monkeypatch.setattr(

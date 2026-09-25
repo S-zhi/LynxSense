@@ -94,7 +94,17 @@ def _prediction_state_path(state_dir: Path) -> Path:
     return state_dir / _PREDICTION_STATE_FILE
 
 
-def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
+def _load_prediction_state(state_dir: Path, model_ref: str) -> Optional[dict]:
+    """读取匹配模型的 prediction 状态；损坏或不匹配时返回 None。
+
+    Args:
+        state_dir: 保存任务运行状态的目录。
+        model_ref: 当前 Replicate 模型版本引用。
+    Returns:
+        包含 prediction_id 等字段的状态字典，或不可用时的 None。
+    Side effects:
+        对不可读或模型不匹配的状态文件记录 warning，但不删除文件。
+    """
     path = _prediction_state_path(state_dir)
     if not path.exists():
         return None
@@ -103,11 +113,29 @@ def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
     except (OSError, ValueError, TypeError):
         logger.warning("Replicate prediction 状态文件不可读，忽略并重新创建: %s", path)
         return None
+    if not isinstance(payload, dict):
+        logger.warning("Replicate prediction 状态格式无效，忽略并重新创建: %s", path)
+        return None
     prediction_id = payload.get("prediction_id")
     if payload.get("model_ref") != model_ref or not isinstance(prediction_id, str):
         logger.warning("Replicate prediction 状态与当前模型不匹配，忽略: %s", path)
         return None
-    return prediction_id
+    return payload
+
+
+def _load_prediction_id(state_dir: Path, model_ref: str) -> Optional[str]:
+    """读取可恢复的 prediction ID；无有效状态时返回 None。
+
+    Args:
+        state_dir: 保存任务运行状态的目录。
+        model_ref: 当前 Replicate 模型版本引用。
+    Returns:
+        匹配状态中的 prediction ID，或 None。
+    Side effects:
+        复用状态读取逻辑并保留其日志行为。
+    """
+    payload = _load_prediction_state(state_dir, model_ref)
+    return payload["prediction_id"] if payload is not None else None
 
 
 def _save_prediction_state(
@@ -183,7 +211,16 @@ def _run_replicate_with_retry(
         api_token=os.getenv("REPLICATE_API_TOKEN"),
         timeout=httpx.Timeout(float(timeout), connect=30.0),
     )
-    prediction_id = _load_prediction_id(state_dir, model_ref)
+    state = _load_prediction_state(state_dir, model_ref)
+    prediction_id = state["prediction_id"] if state is not None else None
+    if state is not None and state.get("status") == "cancel_pending":
+        try:
+            client.predictions.cancel(prediction_id)
+        except Exception:
+            logger.warning("重试取消 Replicate prediction 失败: id=%s", prediction_id, exc_info=True)
+        else:
+            _clear_prediction_state(state_dir)
+            prediction_id = None
     network_failures = 0
     last_exc: Exception | None = None
 
@@ -269,12 +306,21 @@ def _run_replicate_with_retry(
                     try:
                         client.predictions.cancel(prediction_id)
                     except Exception:
+                        _save_prediction_state(
+                            state_dir,
+                            prediction_id=prediction_id,
+                            model_ref=model_ref,
+                            status="cancel_pending",
+                        )
+                        path = _prediction_state_path(state_dir)
                         logger.warning(
-                            "取消 Replicate prediction 失败: id=%s",
+                            "取消 Replicate prediction 失败，远端可能仍在运行；将于下次任务启动时重试: id=%s state=%s",
                             prediction_id,
+                            path,
                             exc_info=True,
                         )
-                    _clear_prediction_state(state_dir)
+                    else:
+                        _clear_prediction_state(state_dir)
                 raise
             if isinstance(e, TranscribeError):
                 raise

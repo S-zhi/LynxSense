@@ -42,6 +42,15 @@ def test_create_defaults(store):
     assert rec.created_at == rec.updated_at
 
 
+def test_is_cancelling_defaults_to_false_and_round_trips(store):
+    rec = _create(store)
+    assert rec.is_cancelling == 0
+    updated = store.update(rec.id, is_cancelling=1)
+    assert updated.is_cancelling == 1
+    assert TaskStore(store.db_path).get(rec.id).is_cancelling == 1
+
+
+
 def test_get_roundtrip(store):
     rec = _create(store)
     got = store.get(rec.id)

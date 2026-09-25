@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from src.config import settings, ensure_task_dir, AUDIO_FILENAME
+from src.core.ffmpeg_utils import run_ffmpeg
 from src.service.asset_resolver import AssetResolver, ResourceState
 
 logger = logging.getLogger(__name__)
@@ -140,68 +141,44 @@ def _run_ffmpeg(
     task_id: Optional[str] = None,
 ) -> None:
     """执行 ffmpeg 并解析 -progress 输出，逐步回调进度。"""
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-    except FileNotFoundError as e:
-        raise AudioExtractError(
-            f"找不到 ffmpeg（{cmd[0]}）。请安装 ffmpeg-full 或设置 SUBTRANS_FFMPEG。 MAC用户请使用  brew install ffmpeg-full,请注意不要下载 ffmpeg，ffmpeg-full 是 ffmpeg 的完整版本，仅下载ffmpeg可能会导致字幕无法烧录到视频"
-        ) from e
+    last_pct = -1.0
 
-    if task_id:
-        try:
-            from src.service.runner import register_process
-            register_process(task_id, proc)
-        except Exception:
-            pass
+    def _tick(processed: float) -> None:
+        nonlocal last_pct
+        if on_progress is None:
+            return
+        pct = None
+        if total_seconds and total_seconds > 0:
+            pct = max(0.0, min(100.0, processed / total_seconds * 100.0))
+        # 去抖：百分比无变化时不重复回调
+        if pct is None or round(pct, 1) != last_pct:
+            last_pct = round(pct, 1) if pct is not None else last_pct
+            _safe_call(on_progress, AudioProgress(
+                percent=round(pct, 1) if pct is not None else None,
+                processed_seconds=processed,
+                total_seconds=total_seconds,
+            ))
 
-    try:
-        assert proc.stdout is not None
-        last_pct = -1.0
-        for line in proc.stdout:
-            line = line.strip()
-            if not line or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            if key == "out_time_us" and on_progress is not None:
-                processed = _parse_us(value)
-                if processed is None:
-                    continue
-                pct = None
-                if total_seconds and total_seconds > 0:
-                    pct = max(0.0, min(100.0, processed / total_seconds * 100.0))
-                # 去抖：百分比无变化时不重复回调
-                if pct is None or round(pct, 1) != last_pct:
-                    last_pct = round(pct, 1) if pct is not None else last_pct
-                    _safe_call(on_progress, AudioProgress(
-                        percent=round(pct, 1) if pct is not None else None,
-                        processed_seconds=processed,
-                        total_seconds=total_seconds,
-                    ))
-            elif key == "progress" and value == "end":
-                if on_progress is not None:
-                    _safe_call(on_progress, AudioProgress(
-                        percent=100.0 if total_seconds else None,
-                        processed_seconds=total_seconds or 0.0,
-                        total_seconds=total_seconds,
-                    ))
+    not_found_msg = (
+        f"找不到 ffmpeg（{cmd[0]}）。请安装 ffmpeg-full 或设置 SUBTRANS_FFMPEG。"
+        " MAC用户请使用  brew install ffmpeg-full,请注意不要下载 ffmpeg，"
+        "ffmpeg-full 是 ffmpeg 的完整版本，仅下载ffmpeg可能会导致字幕无法烧录到视频"
+    )
 
-        proc.wait()
-        if proc.returncode != 0:
-            stderr = proc.stderr.read() if proc.stderr else ""
-            raise AudioExtractError(f"ffmpeg 提取音频失败（退出码 {proc.returncode}）: {stderr.strip()}")
-    finally:
-        if task_id:
-            try:
-                from src.service.runner import unregister_process
-                unregister_process(task_id, proc)
-            except Exception:
-                pass
+    run_ffmpeg(
+        cmd,
+        on_tick=_tick,
+        error_cls=AudioExtractError,
+        not_found_msg=not_found_msg,
+        task_id=task_id,
+    )
+
+    if on_progress is not None:
+        _safe_call(on_progress, AudioProgress(
+            percent=100.0 if total_seconds else None,
+            processed_seconds=total_seconds or 0.0,
+            total_seconds=total_seconds,
+        ))
 
 
 def _has_audio_stream(video_path: Path) -> bool:

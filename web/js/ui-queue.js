@@ -110,6 +110,23 @@ function updateRow(row, t) {
   applyDynamic(row, t);
 }
 
+export function downgradeReasonText(reason, errno) {
+  let text = "";
+  if (reason === "USER_CLEANED") {
+    text = "资源已被用户或系统清理";
+  } else if (reason === "DISK_FAILURE") {
+    text = "磁盘故障或读写错误";
+  } else if (reason === "VOLUME_MIGRATED") {
+    text = "存储卷已迁移或卸载";
+  } else {
+    text = "存储资源丢失";
+  }
+  if (errno != null && errno !== "") {
+    text += ` (errno: ${errno})`;
+  }
+  return text;
+}
+
 function setHeader(row, t) {
   const meta = STATUS_META[t.status] || STATUS_META.PENDING;
   ["pending", "active", "success", "failed"].forEach((c) => row.classList.remove("is-" + c));
@@ -121,8 +138,15 @@ function setHeader(row, t) {
   if (t._streamStatus === "reconnecting") {
     badgeLabel = "重连中";
   }
-  row.querySelector(".qrow__badge").innerHTML =
-    `<span class="badge badge--${meta.cls}"><i class="ph ${meta.icon}"></i>${badgeLabel}</span>`;
+  const badgeContainer = row.querySelector(".qrow__badge");
+  if (t.resourceStatus === "MISSING") {
+    const reasonText = downgradeReasonText(t.downgradeReason, t.downgradeErrno);
+    badgeContainer.innerHTML =
+      `<span class="badge badge--${meta.cls}" title="资源缺失原因：${escapeHtml(reasonText)}"><i class="ph ${meta.icon}"></i>${badgeLabel}</span>`;
+  } else {
+    badgeContainer.innerHTML =
+      `<span class="badge badge--${meta.cls}"><i class="ph ${meta.icon}"></i>${badgeLabel}</span>`;
+  }
 }
 
 function categoryOf(status) {
