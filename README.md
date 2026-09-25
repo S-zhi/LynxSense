@@ -1,4 +1,4 @@
-[English](./README.en.md) | 简体中文
+[English](./resources/docs/README.en.md) | 简体中文
 
 <div align="center">
   <img src="./web/assets/lynxsense-logo.png" width="88" alt="LynxSense Logo" />
