@@ -9,7 +9,15 @@ import pytest
 
 from src.service import orchestrator
 from src.core.transcriber import TranscribeCancelledError
-from src.service.orchestrator import PipelineCancelledError, PipelineParams, run_pipeline
+from src.service.orchestrator import (
+    PipelineCancelledError,
+    PipelineHandler,
+    PipelineParams,
+    PipelineResources,
+    build_default_pipeline_chain,
+    build_pipeline_chain,
+    run_pipeline,
+)
 
 
 def _params():
@@ -142,6 +150,94 @@ def test_pipeline_failure(monkeypatch):
     assert last.current_step == "TRANSCRIBING"
     assert last.error_code == "internal_error"
     assert "boom" in last.error
+
+
+def test_default_pipeline_chain_has_expected_handler_order():
+    handler = build_default_pipeline_chain()
+    names = []
+    while handler is not None:
+        names.append(type(handler).__name__)
+        handler = handler._next_handler
+
+    assert names == [
+        "DownloadHandler",
+        "AudioExtractionHandler",
+        "TranscriptionHandler",
+        "TranslationHandler",
+        "SubtitleBurningHandler",
+    ]
+
+
+def test_custom_handler_chain_shares_context_and_runs_in_order():
+    calls = []
+    resource_ids = []
+
+    class RecordingHandler(PipelineHandler):
+        def __init__(self, name, *, complete=False):
+            super().__init__()
+            self.name = name
+            self.should_complete = complete
+
+        def process(self, context):
+            calls.append((self.name, context.task_id))
+            resource_ids.append(id(context.resources))
+            if self.name == "first":
+                context.resources.video_path = Path("/d/source.mp4")
+            else:
+                assert context.resources.video_path == Path("/d/source.mp4")
+            if self.should_complete:
+                context.complete(outputs={"video": str(context.resources.video_path)})
+
+    chain = build_pipeline_chain(
+        RecordingHandler("first"),
+        RecordingHandler("second", complete=True),
+    )
+    events = []
+
+    result = run_pipeline(_params(), events.append, handler_chain=chain)
+
+    assert calls == [("first", "t1"), ("second", "t1")]
+    assert resource_ids[0] == resource_ids[1]
+    assert result.status == "SUCCESS"
+    assert result.outputs == {"video": "/d/source.mp4"}
+    assert events == [result]
+
+
+def test_pipeline_resources_isolated_per_context():
+    first = PipelineResources(video_path=Path("/d/first.mp4"))
+    second = PipelineResources()
+
+    assert first.video_path == Path("/d/first.mp4")
+    assert second.video_path is None
+
+
+def test_custom_handler_failure_stops_chain_and_emits_failed():
+    calls = []
+
+    class RecordingHandler(PipelineHandler):
+        def __init__(self, name, *, fail=False):
+            super().__init__()
+            self.name = name
+            self.fail = fail
+
+        def process(self, context):
+            calls.append(self.name)
+            if self.fail:
+                raise RuntimeError("handler failed")
+
+    chain = build_pipeline_chain(
+        RecordingHandler("first", fail=True),
+        RecordingHandler("must-not-run"),
+    )
+    events = []
+
+    with pytest.raises(RuntimeError, match="handler failed"):
+        run_pipeline(_params(), events.append, handler_chain=chain)
+
+    assert calls == ["first"]
+    assert events[-1].status == "FAILED"
+    assert events[-1].error == "handler failed"
+    assert events[-1].error_code == "internal_error"
 
 
 def test_pipeline_passes_options(monkeypatch):
@@ -478,6 +574,8 @@ def test_pipeline_transcribing_cancelled_raises_pipeline_cancelled(monkeypatch):
     events = []
     with pytest.raises(PipelineCancelledError, match="任务已被用户取消"):
         run_pipeline(_params(), events.append)
+
+
 def test_in_memory_cancellation_signal():
     tid = "test_cancel_sig"
     orchestrator.unregister_cancellation_signal(tid)
@@ -525,3 +623,42 @@ def test_pipeline_cancelled_during_emit(monkeypatch):
         run_pipeline(params, events.append)
 
     orchestrator.unregister_cancellation_signal(tid)
+
+
+def test_pipeline_cancellation_cleans_current_stage_artifacts(monkeypatch, tmp_path):
+    """责任链取消时，清理当前阶段的部分产物并保留可续跑输入。"""
+    tid = "t_cancel_cleanup"
+    monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda task_id: tmp_path)
+    for name, content in {
+        "source.mp4": b"video",
+        "audio.wav": b"audio",
+        "original.srt": b"original",
+        "translated.srt": b"translated",
+    }.items():
+        (tmp_path / name).write_bytes(content)
+
+    def cancelling_burn(video, subtitle, task_id, on_progress=None, **kwargs):
+        (tmp_path / "output.mp4").write_bytes(b"partial output")
+        orchestrator.set_cancelled_signal(tid)
+        on_progress(SimpleNamespace(percent=50))
+
+    monkeypatch.setattr(orchestrator, "burn_subtitles", cancelling_burn)
+    orchestrator.register_cancellation_signal(tid)
+    events = []
+    params = PipelineParams(
+        task_id=tid, url="https://x/v", source_lang="auto", target_lang="zh-CN",
+    )
+
+    try:
+        with pytest.raises(PipelineCancelledError, match="任务已被用户取消"):
+            run_pipeline(params, events.append)
+    finally:
+        orchestrator.unregister_cancellation_signal(tid)
+
+    assert (tmp_path / "source.mp4").exists()
+    assert (tmp_path / "audio.wav").exists()
+    assert (tmp_path / "original.srt").exists()
+    assert (tmp_path / "translated.srt").exists()
+    assert not (tmp_path / "output.mp4").exists()
+    assert not (tmp_path / "tmp_burn.srt").exists()
+    assert all(event.status != "FAILED" for event in events)

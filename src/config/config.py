@@ -175,6 +175,15 @@ _ALIAS_MAP = {
     "replicate_retries": "_replicate_retries",
     "replicate_retry_interval": "_replicate_retry_interval",
     "replicate_poll_interval": "_replicate_poll_interval",
+    "transcriber_backend": "_transcriber_backend",
+    "transcriber_url": "_transcriber_url",
+    "transcriber_api_key": "_transcriber_api_key",
+    "transcriber_timeout": "_transcriber_timeout",
+    "local_whisper_model": "_local_whisper_model",
+    "local_whisper_device": "_local_whisper_device",
+    "local_whisper_compute_type": "_local_whisper_compute_type",
+    "local_whisper_download_root": "_local_whisper_download_root",
+    "local_whisper_beam_size": "_local_whisper_beam_size",
     "deepseek_api_key": "_deepseek_api_key",
     "deepseek_base_url": "_deepseek_base_url",
     "deepseek_model": "_deepseek_model",
@@ -215,6 +224,15 @@ class Settings:
     _replicate_retries: Any = field(default=_UNSET, repr=False)
     _replicate_retry_interval: Any = field(default=_UNSET, repr=False)
     _replicate_poll_interval: Any = field(default=_UNSET, repr=False)
+    _transcriber_backend: Any = field(default=_UNSET, repr=False)
+    _transcriber_url: Any = field(default=_UNSET, repr=False)
+    _transcriber_api_key: Any = field(default=_UNSET, repr=False)
+    _transcriber_timeout: Any = field(default=_UNSET, repr=False)
+    _local_whisper_model: Any = field(default=_UNSET, repr=False)
+    _local_whisper_device: Any = field(default=_UNSET, repr=False)
+    _local_whisper_compute_type: Any = field(default=_UNSET, repr=False)
+    _local_whisper_download_root: Any = field(default=_UNSET, repr=False)
+    _local_whisper_beam_size: Any = field(default=_UNSET, repr=False)
     _deepseek_api_key: Any = field(default=_UNSET, repr=False)
     _deepseek_base_url: Any = field(default=_UNSET, repr=False)
     _deepseek_model: Any = field(default=_UNSET, repr=False)
@@ -250,6 +268,15 @@ class Settings:
         _replicate_retries: Any = _UNSET,
         _replicate_retry_interval: Any = _UNSET,
         _replicate_poll_interval: Any = _UNSET,
+        _transcriber_backend: Any = _UNSET,
+        _transcriber_url: Any = _UNSET,
+        _transcriber_api_key: Any = _UNSET,
+        _transcriber_timeout: Any = _UNSET,
+        _local_whisper_model: Any = _UNSET,
+        _local_whisper_device: Any = _UNSET,
+        _local_whisper_compute_type: Any = _UNSET,
+        _local_whisper_download_root: Any = _UNSET,
+        _local_whisper_beam_size: Any = _UNSET,
         _deepseek_api_key: Any = _UNSET,
         _deepseek_base_url: Any = _UNSET,
         _deepseek_model: Any = _UNSET,
@@ -285,6 +312,15 @@ class Settings:
             "_replicate_retries": _replicate_retries,
             "_replicate_retry_interval": _replicate_retry_interval,
             "_replicate_poll_interval": _replicate_poll_interval,
+            "_transcriber_backend": _transcriber_backend,
+            "_transcriber_url": _transcriber_url,
+            "_transcriber_api_key": _transcriber_api_key,
+            "_transcriber_timeout": _transcriber_timeout,
+            "_local_whisper_model": _local_whisper_model,
+            "_local_whisper_device": _local_whisper_device,
+            "_local_whisper_compute_type": _local_whisper_compute_type,
+            "_local_whisper_download_root": _local_whisper_download_root,
+            "_local_whisper_beam_size": _local_whisper_beam_size,
             "_deepseek_api_key": _deepseek_api_key,
             "_deepseek_base_url": _deepseek_base_url,
             "_deepseek_model": _deepseek_model,
@@ -562,6 +598,89 @@ class Settings:
             return float(val)
         except (ValueError, TypeError):
             return 30.0
+
+    # --- ③ 语音识别服务选择 ---
+    @property
+    def transcriber_backend(self) -> str:
+        """识别服务标识：replicate（默认）或 http。"""
+        if self._transcriber_backend is not _UNSET:
+            return str(self._transcriber_backend).strip().lower() or "replicate"
+        _sync_env_file()
+        return (os.getenv("SUBTRANS_TRANSCRIBER_BACKEND", "replicate") or "replicate").strip().lower()
+
+    @property
+    def transcriber_url(self) -> Optional[str]:
+        """自定义 HTTP 识别服务的 POST 地址。"""
+        if self._transcriber_url is not _UNSET:
+            value = self._transcriber_url
+        else:
+            _sync_env_file()
+            value = os.getenv("SUBTRANS_TRANSCRIBER_URL")
+        value = (value or "").strip()
+        return value or None
+
+    @property
+    def transcriber_api_key(self) -> Optional[str]:
+        """自定义 HTTP 识别服务的 Bearer token。"""
+        if self._transcriber_api_key is not _UNSET:
+            value = self._transcriber_api_key
+        else:
+            _sync_env_file()
+            value = os.getenv("SUBTRANS_TRANSCRIBER_API_KEY")
+        value = (value or "").strip()
+        return value or None
+
+    @property
+    def transcriber_timeout(self) -> int:
+        if self._transcriber_timeout is not _UNSET:
+            return int(self._transcriber_timeout)
+        _sync_env_file()
+        value = os.getenv("SUBTRANS_TRANSCRIBER_TIMEOUT", "1800")
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return 1800
+
+    @property
+    def local_whisper_model(self) -> str:
+        if self._local_whisper_model is not _UNSET:
+            return str(self._local_whisper_model)
+        _sync_env_file()
+        return os.getenv("SUBTRANS_LOCAL_WHISPER_MODEL", "small") or "small"
+
+    @property
+    def local_whisper_device(self) -> str:
+        if self._local_whisper_device is not _UNSET:
+            return str(self._local_whisper_device)
+        _sync_env_file()
+        return os.getenv("SUBTRANS_LOCAL_WHISPER_DEVICE", "cpu") or "cpu"
+
+    @property
+    def local_whisper_compute_type(self) -> str:
+        if self._local_whisper_compute_type is not _UNSET:
+            return str(self._local_whisper_compute_type)
+        _sync_env_file()
+        return os.getenv("SUBTRANS_LOCAL_WHISPER_COMPUTE_TYPE", "int8") or "int8"
+
+    @property
+    def local_whisper_download_root(self) -> Optional[str]:
+        if self._local_whisper_download_root is not _UNSET:
+            value = self._local_whisper_download_root
+        else:
+            _sync_env_file()
+            value = os.getenv("SUBTRANS_LOCAL_WHISPER_DOWNLOAD_ROOT")
+        value = str(value or "").strip()
+        return value or None
+
+    @property
+    def local_whisper_beam_size(self) -> int:
+        if self._local_whisper_beam_size is not _UNSET:
+            return int(self._local_whisper_beam_size)
+        _sync_env_file()
+        try:
+            return max(1, int(os.getenv("SUBTRANS_LOCAL_WHISPER_BEAM_SIZE", "5")))
+        except (ValueError, TypeError):
+            return 5
 
     # --- ④ 翻译（旧版 DeepSeek 兼容配置；新配置位于 SQLite）---
     @property

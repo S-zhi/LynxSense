@@ -28,6 +28,13 @@ from .transcriber import (
     TranscribeError,
     TranscribeProgress,
     TranscribeResult,
+    TranscribeRequest,
+    TranscribeResponse,
+    TranscriberBackend,
+    TranscriberService,
+    ReplicateTranscriber,
+    HttpTranscriber,
+    LocalWhisperTranscriber,
     transcribe,
 )
 from .translator import (
@@ -53,6 +60,9 @@ __all__ = [
     "Subtitle", "decode_srt_bytes", "format_timestamp", "parse_timestamp", "read_srt_content", "write_srt", "parse_srt",
     # ③ 语音识别
     "transcribe", "TranscribeResult", "TranscribeProgress", "TranscribeError",
+    "TranscribeRequest", "TranscribeResponse", "TranscriberBackend", "TranscriberService",
+    "ReplicateTranscriber", "HttpTranscriber",
+    "LocalWhisperTranscriber",
     # ④ 翻译
     "translate_srt", "translate_texts", "TranslateResult", "TranslateProgress", "TranslateError",
     # ⑤ 烧录

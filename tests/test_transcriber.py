@@ -13,6 +13,9 @@ import pytest
 
 from src.core import transcriber
 from src.core.transcriber import (
+    HttpTranscriber,
+    LocalWhisperTranscriber,
+    TranscribeRequest,
     TranscribeCancelledError,
     TranscribeError,
     transcribe,
@@ -145,6 +148,100 @@ def test_transcribe_with_remote_url(monkeypatch, tmp_path):
         text=fake_srt, raise_for_status=lambda: None))
     res = transcribe("https://example.com/audio.wav", "t1", language="en")
     assert res.segment_count == 1
+
+
+def test_transcribe_with_custom_http_service(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "language": "ja",
+                "language_probability": 0.98,
+                "segments": [{"text": "こんにちは", "start": 0, "end": 1.25}],
+            }
+
+    def fake_post(url, **kwargs):
+        captured.update(url=url, kwargs=kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(transcriber.httpx, "post", fake_post)
+    service = HttpTranscriber(url="https://stt.example.test/transcribe", api_key="secret")
+    result = transcribe(audio, "t1", service=service, language="ja")
+
+    assert result.language == "ja"
+    assert result.language_probability == 0.98
+    assert result.segment_count == 1
+    assert captured["kwargs"]["headers"]["Authorization"] == "Bearer secret"
+    assert captured["kwargs"]["data"]["language"] == "ja"
+    assert captured["kwargs"]["files"]["audio"][0] == audio.name
+
+
+def test_custom_service_protocol_can_return_raw_segments(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+
+    class FakeService:
+        def transcribe(self, request, *, on_progress=None, cancel_check=None):
+            assert isinstance(request, TranscribeRequest)
+            assert request.model_name == "tiny"
+            return [{"text": "hello", "start": 0.0, "end": 1.0}]
+
+    result = transcribe(audio, "t1", service=FakeService(), model_name="tiny")
+    assert result.segment_count == 1
+
+
+def test_custom_backend_requires_service_url(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+    monkeypatch.setattr(transcriber, "settings", SimpleNamespace(transcriber_backend="http", transcriber_url=None))
+    with pytest.raises(TranscribeError, match="未配置") as exc_info:
+        transcribe(audio, "t1")
+    assert exc_info.value.code == "missing_service_config"
+
+
+def test_local_whisper_transcriber_normalizes_segments(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+    captured = {}
+
+    class FakeSegment:
+        def __init__(self, text, start, end):
+            self.text, self.start, self.end = text, start, end
+
+    class FakeInfo:
+        language = "en"
+        language_probability = 0.91
+        duration = 2.5
+
+    class FakeModel:
+        def transcribe(self, path, **kwargs):
+            captured.update(path=path, kwargs=kwargs)
+            return iter([FakeSegment(" hello ", 0, 1.25), FakeSegment("", 1.25, 2)]), FakeInfo()
+
+    fake_module = SimpleNamespace(WhisperModel=lambda model, **kwargs: (captured.update(model=model, init=kwargs) or FakeModel()))
+    monkeypatch.setitem(__import__("sys").modules, "faster_whisper", fake_module)
+    service = LocalWhisperTranscriber(model_name="tiny", device="cpu", compute_type="int8", beam_size=2)
+    events = []
+    result = service.transcribe(
+        TranscribeRequest(audio_path=audio, task_id="t1", language="en", model_name="tiny"),
+        on_progress=events.append,
+    )
+
+    assert captured["model"] == "tiny"
+    assert captured["kwargs"] == {"language": "en", "beam_size": 2, "vad_filter": True}
+    assert result.output["segments"] == [{"text": "hello", "start": 0.0, "end": 1.25}]
+    assert result.language == "en" and result.language_probability == 0.91
+    assert result.duration == 2.5
+    assert any(event.status == "processing" for event in events)
+
+
+def test_local_whisper_requires_local_audio(tmp_path):
+    service = LocalWhisperTranscriber()
+    with pytest.raises(TranscribeError, match="只支持本地") as exc_info:
+        service.transcribe(TranscribeRequest("https://example.com/audio.wav", "t1"))
+    assert exc_info.value.code == "invalid_input"
 
 
 def test_transcribe_with_local_file(monkeypatch, tmp_path):

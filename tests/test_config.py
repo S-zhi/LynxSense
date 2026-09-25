@@ -82,6 +82,38 @@ def test_dynamic_settings_read_from_env(monkeypatch):
     assert settings.probe_cache_ttl_sec == 600
 
 
+def test_transcriber_settings_read_from_env(monkeypatch):
+    monkeypatch.setenv("SUBTRANS_TRANSCRIBER_BACKEND", "http")
+    monkeypatch.setenv("SUBTRANS_TRANSCRIBER_URL", "https://stt.example.test/transcribe")
+    monkeypatch.setenv("SUBTRANS_TRANSCRIBER_API_KEY", "custom-key")
+    monkeypatch.setenv("SUBTRANS_TRANSCRIBER_TIMEOUT", "90")
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+
+    settings = config.Settings()
+
+    assert settings.transcriber_backend == "http"
+    assert settings.transcriber_url == "https://stt.example.test/transcribe"
+    assert settings.transcriber_api_key == "custom-key"
+    assert settings.transcriber_timeout == 90
+
+
+def test_local_whisper_settings_read_from_env(monkeypatch):
+    monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_MODEL", "tiny")
+    monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_DEVICE", "cuda")
+    monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_COMPUTE_TYPE", "float16")
+    monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_DOWNLOAD_ROOT", "/models")
+    monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_BEAM_SIZE", "3")
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+
+    settings = config.Settings()
+
+    assert settings.local_whisper_model == "tiny"
+    assert settings.local_whisper_device == "cuda"
+    assert settings.local_whisper_compute_type == "float16"
+    assert settings.local_whisper_download_root == "/models"
+    assert settings.local_whisper_beam_size == 3
+
+
 def test_dataclasses_replace_compatibility(monkeypatch):
     """验证 dataclasses.replace 对所有字段仍然成立（如单元测试使用）。"""
     monkeypatch.setattr(config, "_sync_env_file", lambda: None)
