@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import re
@@ -15,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
@@ -46,11 +47,12 @@ from src.handler.schemas import (
     _probe_record_to_out,
     to_out,
 )
-from src.service.runner import cancel_pipeline, enqueue_pipeline
+from src.service.runner import _cleanup_partial_artifacts, cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
     DOWNGRADE_REASON_UNKNOWN,
+    DOWNGRADE_REASON_USER_CLEANED,
     DOWNGRADE_REASON_VOLUME_MIGRATED,
     RESOURCE_STATUS_AVAILABLE,
     RESOURCE_STATUS_MISSING,
@@ -104,6 +106,7 @@ def _mark_resource_missing(
     task_id: str,
     reason: str,
     downgrade_reason: str = DOWNGRADE_REASON_UNKNOWN,
+    downgrade_errno: Optional[int] = None,
 ) -> None:
     """把一个任务的 resource_status 幂等地置为 MISSING。"""
     rec = store.get(task_id)
@@ -114,6 +117,7 @@ def _mark_resource_missing(
         resource_status=RESOURCE_STATUS_MISSING,
         error=reason,
         downgrade_reason=downgrade_reason,
+        downgrade_errno=downgrade_errno,
         downgraded_at=int(time.time() * 1000),
     )
 
@@ -165,10 +169,33 @@ def scan_missing_terminal(
         recs = store.list()
 
     success_count = sum(1 for rec in recs if rec.status == "SUCCESS")
+    data_root_unavailable = False
+    detected_reason: Optional[str] = None
+    detected_errno: Optional[int] = None
+
     try:
-        data_root_unavailable = not data_path.exists()
-    except OSError:
+        data_path.stat()
+        list(data_path.iterdir())
+    except FileNotFoundError:
         data_root_unavailable = True
+    except NotADirectoryError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_reason = DOWNGRADE_REASON_USER_CLEANED
+        detected_errno = e.errno
+    except PermissionError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_reason = DOWNGRADE_REASON_DISK_FAILURE
+        detected_errno = e.errno
+    except OSError as e:
+        logger.warning("scan_missing_terminal data_dir 异常: errno=%s msg=%s", e.errno, e)
+        data_root_unavailable = True
+        detected_errno = e.errno
+        if e.errno in (errno.EIO, errno.ENXIO, errno.ESTALE):
+            detected_reason = DOWNGRADE_REASON_DISK_FAILURE
+        else:
+            detected_reason = DOWNGRADE_REASON_UNKNOWN
 
     for rec in recs:
         if rec.status != "SUCCESS":
@@ -190,12 +217,19 @@ def scan_missing_terminal(
             unreadable = state_src == ResourceState.UNREADABLE
 
         error_msg = "资源不可读" if unreadable else _DELETED_MESSAGE
+        audit_errno: Optional[int] = None
         if downgrade_reason is not None:
             audit_reason = downgrade_reason
         elif unreadable:
             audit_reason = DOWNGRADE_REASON_DISK_FAILURE
-        elif data_root_unavailable and success_count > 1:
-            audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+        elif data_root_unavailable:
+            if detected_reason is not None:
+                audit_reason = detected_reason
+                audit_errno = detected_errno
+            elif success_count > 1:
+                audit_reason = DOWNGRADE_REASON_VOLUME_MIGRATED
+            else:
+                audit_reason = DOWNGRADE_REASON_UNKNOWN
         else:
             audit_reason = DOWNGRADE_REASON_UNKNOWN
 
@@ -204,6 +238,7 @@ def scan_missing_terminal(
             resource_status=RESOURCE_STATUS_MISSING,
             error=error_msg,
             downgrade_reason=audit_reason,
+            downgrade_errno=audit_errno,
             downgraded_at=int(time.time() * 1000),
         )
         downgraded.append(rec.id)
@@ -244,7 +279,6 @@ def create_task(
 
 @router.post("/upload", response_model=TaskOut, status_code=201, dependencies=[Depends(require_api_token)])
 def create_upload_task(
-    request: Request,
     file: UploadFile = File(..., description="本地视频文件"),
     sourceLang: str = Form("auto", min_length=1),
     targetLang: str = Form("zh-CN", min_length=1),
@@ -260,21 +294,9 @@ def create_upload_task(
 
     字幕模式（mode）与烧录方式（burn）与链接任务同样透传到下层流水线。
     """
+    # multipart 请求的 Content-Length 包含边界和表单字段，不能代表视频文件大小。
+    # 实际文件大小在写入过程中通过 written_bytes 流式校验。
     max_upload_bytes = settings.max_upload_mb * 1024 * 1024
-    content_length_hdr = request.headers.get("content-length")
-    if content_length_hdr:
-        try:
-            if int(content_length_hdr) > max_upload_bytes:
-                raise _upload_error(
-                    413,
-                    code="UPLOAD_TOO_LARGE",
-                    message=f"上传文件大小超过最大限制 ({settings.max_upload_mb} MB)",
-                    limits={"maxMb": settings.max_upload_mb},
-                    suggestion="请压缩或切分视频，也可以改用 URL 任务模式。",
-                )
-        except ValueError:
-            pass
-
     filename = (file.filename or "").strip()
     _ensure_translation_engine(engine, needSubtitle, engines)
     ext = Path(filename).suffix.lower()
@@ -371,7 +393,7 @@ def create_upload_task(
     return to_out(store.get(rec.id) or rec)
 
 
-@router.get("", response_model=List[TaskOut])
+@router.get("", response_model=List[TaskOut], dependencies=[Depends(require_api_token)])
 def list_tasks(
     offset: int = Query(0, ge=0, description="跳过前 N 条记录"),
     limit: int = Query(50, ge=1, le=200, description="单页最大记录数，取值范围 1 到 200，默认 50"),
@@ -390,7 +412,7 @@ def list_tasks(
     ]
 
 
-@router.get("/{task_id}", response_model=TaskOut)
+@router.get("/{task_id}", response_model=TaskOut, dependencies=[Depends(require_api_token)])
 def get_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
     return to_out(_require(store, task_id))
 
@@ -434,7 +456,7 @@ def probe_task(
     )
 
 
-@router.get("/probe/records", response_model=List[ProbeRecordOut])
+@router.get("/probe/records", response_model=List[ProbeRecordOut], dependencies=[Depends(require_api_token)])
 def list_probe_records(
     limit: int = Query(50, ge=1, le=500),
     probes: ProbeStore = Depends(get_probe_store),
@@ -464,12 +486,21 @@ def delete_probe_record(
 
 @router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_api_token)])
 def delete_task(task_id: str, store: TaskStore = Depends(get_store)) -> None:
+    """删除终态任务及其目录，取消清理期间拒绝删除以避免目录竞态。"""
     rec = _require(store, task_id)
+    if rec.is_cancelling:
+        raise HTTPException(status_code=409, detail="任务正在取消，请稍后再试")
     if rec.status not in _TERMINAL:
         raise HTTPException(
             status_code=409,
             detail="任务运行中，请先等待或调用取消接口",
         )
+    _cleanup_partial_artifacts(task_id)
+    AssetResolver.cleanup_cancelled_artifacts(
+        task_id,
+        current_step=rec.current_step,
+        source_type=rec.source_type,
+    )
     store.delete(task_id)
     shutil.rmtree(task_dir(task_id), ignore_errors=True)  # 连产物目录一起清
     release_lock(task_id)
@@ -505,14 +536,14 @@ def retry_task(task_id: str, store: TaskStore = Depends(get_store)) -> TaskOut:
 
 # ---------- 文件下载 ----------
 
-@router.head("/{task_id}/source", status_code=204)
+@router.head("/{task_id}/source", status_code=204, dependencies=[Depends(require_api_token)])
 def check_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     """轻量确认源视频是否可用，避免前端先展示原生播放器加载态。"""
     download_source_video(task_id, store)
     return Response(status_code=204)
 
 
-@router.get("/{task_id}/source")
+@router.get("/{task_id}/source", dependencies=[Depends(require_api_token)])
 def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     """返回未烧录字幕的源视频，供预览页在两个视频轨道之间切换。"""
     _require(store, task_id)
@@ -522,14 +553,14 @@ def download_source_video(task_id: str, store: TaskStore = Depends(get_store)):
     raise HTTPException(status_code=409, detail=message)
 
 
-@router.head("/{task_id}/download", status_code=204)
+@router.head("/{task_id}/download", status_code=204, dependencies=[Depends(require_api_token)])
 def check_download_video(task_id: str, store: TaskStore = Depends(get_store)):
     """轻量确认成品视频是否可用，避免前端误显示播放器转圈。"""
     download_video(task_id, store)
     return Response(status_code=204)
 
 
-@router.get("/{task_id}/download")
+@router.get("/{task_id}/download", dependencies=[Depends(require_api_token)])
 def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
     if rec.status != "SUCCESS":
@@ -569,7 +600,7 @@ def _resolve_video(task_id: str):
     return None
 
 
-@router.get("/{task_id}/subtitle")
+@router.get("/{task_id}/subtitle", dependencies=[Depends(require_api_token)])
 def download_subtitle(task_id: str, store: TaskStore = Depends(get_store)):
     rec = _require(store, task_id)
     path = task_dir(task_id) / TRANSLATED_SRT
@@ -644,7 +675,7 @@ def _sse_payload(rec) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@router.get("/{task_id}/stream")
+@router.get("/{task_id}/stream", dependencies=[Depends(require_api_token)])
 def stream_progress(task_id: str, store: TaskStore = Depends(get_store)):
     """轮询库表并以 SSE 推送进度（含心跳保活、超时断流与终态事件）。"""
     _require(store, task_id)

@@ -248,7 +248,7 @@ server {
 }
 ```
 
-配置域名证书，并在 Nginx/Caddy、VPN 或零信任网关层增加身份认证。项目支持通过 `SUBTRANS_API_TOKEN` 保护会修改数据的 API，但当前 Web 工作台不会自动携带该 Token；如果主要通过浏览器操作，直接开启它会导致创建、重试等请求返回 401，更适合纯 API/MCP 调用场景。
+配置域名证书，并在 Nginx/Caddy、VPN 或零信任网关层增加身份认证。项目支持通过 `SUBTRANS_API_TOKEN` 保护全量 API（包括任务列表、详情、媒体/字幕下载、SSE 进度流与数据变更等，支持 HTTP Header `Authorization`/`X-API-Token` 或 URL 参数 `?token=`/`?api_token=`），但当前 Web 工作台默认未集成 Token 自动携带逻辑；如果主要通过浏览器访问 UI，建议通过网关/VPN 进行接入防护，或在客户端请求中携带 Token。
 
 ## 7. 更新、备份与故障排查
 
@@ -275,7 +275,7 @@ sudo systemctl start subtitles-ai
 | 硬字幕不可用 | 运行 `ffmpeg -hide_banner -filters \| grep ' subtitles '`，或任务改选软字幕 |
 | 视频 URL 下载失败 | 更新依赖中的 yt-dlp，必要时配置 `SUBTRANS_COOKIES` |
 | 浏览器无法访问 | 检查 `systemctl status`、监听地址、安全组和防火墙 |
-| 接口返回 401 | 检查是否设置了 `SUBTRANS_API_TOKEN`，以及客户端是否发送 Bearer 或 `X-API-Token` |
+| 接口返回 401 | 检查是否设置了 `SUBTRANS_API_TOKEN`，以及客户端是否发送 Bearer Header、`X-API-Token` Header 或 `?token=`/`?api_token=` URL 参数 |
 
 ## 8. 可选：Google Drive sidecar
 

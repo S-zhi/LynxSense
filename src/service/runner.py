@@ -163,34 +163,39 @@ def cancel_pipeline(task_id: str) -> bool:
     if rec is None:
         return False
 
-    _store.update(task_id, status="CANCELLED", error="用户取消")
+    _store.update(task_id, is_cancelling=1)
+    try:
+        _store.update(task_id, status="CANCELLED", error="用户取消")
 
-    with _procs_lock:
-        procs = _procs.pop(task_id, [])
+        with _procs_lock:
+            procs = _procs.pop(task_id, [])
 
-    for proc in procs:
-        _terminate_process(proc, task_id=task_id)
+        for proc in procs:
+            _terminate_process(proc, task_id=task_id)
 
-    _cleanup_partial_artifacts(task_id)
+        _cleanup_partial_artifacts(task_id)
 
-    for proc in procs:
-        try:
-            proc.wait(timeout=2.0)
-        except subprocess.TimeoutExpired:
+        for proc in procs:
             try:
-                proc.kill()
-                proc.wait(timeout=1.0)
-            except Exception as e:
-                logger.warning("强制杀死子进程失败: task=%s, err=%s", task_id, e)
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=1.0)
+                except Exception as e:
+                    logger.warning("强制杀死子进程失败: task=%s, err=%s", task_id, e)
 
-    AssetResolver.cleanup_cancelled_artifacts(
-        task_id,
-        current_step=rec.current_step,
-        source_type=rec.source_type,
-    )
+        AssetResolver.cleanup_cancelled_artifacts(
+            task_id,
+            current_step=rec.current_step,
+            source_type=rec.source_type,
+        )
 
-    logger.info("任务已取消并清理产物: %s", task_id)
-    return True
+        logger.info("任务已取消并清理产物: %s", task_id)
+        return True
+    finally:
+        # 删除接口依赖此标记避开整个取消清理窗口；异常也不能留下永久阻塞。
+        _store.update(task_id, is_cancelling=0)
 
 
 def enqueue_pipeline(task_id: str) -> None:
