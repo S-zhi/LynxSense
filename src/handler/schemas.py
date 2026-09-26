@@ -28,6 +28,10 @@ def _probe_record_to_out(rec: ProbeRecord) -> "ProbeRecordOut":
         detail=rec.detail,
         createdAt=rec.created_at,
         language=rec.language,
+        availableQualities=rec.available_qualities,
+        formats=rec.parsed_formats,
+        thumbnail=rec.thumbnail,
+        uploader=rec.uploader,
     )
 
 
@@ -43,6 +47,7 @@ class TaskCreate(BaseModel):
     # 配置实例 ID；保留 deepseek 以兼容旧版环境变量配置。
     engine: str = Field(default="deepseek", min_length=1)
     needSubtitle: bool = True  # False = 仅下载视频，跳过识别/翻译/烧录
+    quality: Optional[str] = Field(default=None, description="下载画质策略：best/1080p/720p/480p/360p/audio_only")
 
 
 class ErrorDetail(BaseModel):
@@ -73,6 +78,10 @@ class TaskProbeOut(BaseModel):
     detail: Optional[str] = None
     cached: bool = False
     language: Optional[str] = None
+    availableQualities: list[str] = Field(default_factory=list)
+    formats: list[dict[str, Any]] = Field(default_factory=list)
+    thumbnail: Optional[str] = None
+    uploader: Optional[str] = None
 
 
 class ProbeRecordOut(BaseModel):
@@ -90,6 +99,10 @@ class ProbeRecordOut(BaseModel):
     detail: Optional[str] = None
     createdAt: int
     language: Optional[str] = None
+    availableQualities: list[str] = Field(default_factory=list)
+    formats: list[dict[str, Any]] = Field(default_factory=list)
+    thumbnail: Optional[str] = None
+    uploader: Optional[str] = None
 
 
 class ProbeRecordsClearOut(BaseModel):
@@ -122,6 +135,7 @@ class TaskOut(BaseModel):
     downgradeReason: Optional[str] = None
     downgradeErrno: Optional[int] = None
     downgradedAt: Optional[int] = None
+    quality: Optional[str] = None
     createdAt: int
     updatedAt: int
 
@@ -163,6 +177,7 @@ def to_out(rec: TaskRecord) -> TaskOut:
         downgradeReason=rec.downgrade_reason,
         downgradeErrno=rec.downgrade_errno,
         downgradedAt=rec.downgraded_at,
+        quality=getattr(rec, "quality", None),
         createdAt=rec.created_at,
         updatedAt=rec.updated_at,
     )

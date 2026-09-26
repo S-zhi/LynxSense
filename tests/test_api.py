@@ -932,6 +932,10 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
         duration=9.0,
         formats_count=2,
         webpage_url="https://x/v",
+        available_qualities=["1080p", "720p"],
+        formats=[{"formatId": "f1", "resolution": "1080p"}],
+        thumbnail="https://x/thumb.jpg",
+        uploader="Test Creator",
     )
     monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
 
@@ -944,6 +948,10 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert data["duration"] == 9.0
     assert data["formatsCount"] == 2
     assert data["webpageUrl"] == "https://x/v"
+    assert data["availableQualities"] == ["1080p", "720p"]
+    assert len(data["formats"]) == 1
+    assert data["thumbnail"] == "https://x/thumb.jpg"
+    assert data["uploader"] == "Test Creator"
     assert data["reason"] is None and data["detail"] is None
     assert data["cached"] is False
     # 落库：调用一次后历史记录里应能查到此条
@@ -953,6 +961,20 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert bool(records[0].ok) is True
     assert records[0].title == "P"
     assert records[0].formats_count == 2
+    assert records[0].available_qualities == ["1080p", "720p"]
+    assert records[0].thumbnail == "https://x/thumb.jpg"
+    assert records[0].uploader == "Test Creator"
+
+
+def test_create_task_with_custom_quality(client):
+    """POST /api/tasks 支持指定 quality 参数。"""
+    payload = _payload(quality="1080p")
+    r = client.post("/api/tasks", json=payload)
+    assert r.status_code == 201
+    data = r.json()
+    assert data["quality"] == "1080p"
+    rec = client._store.get(data["id"])
+    assert rec.quality == "1080p"
 
 
 def test_probe_failure_response(client, monkeypatch):
@@ -1005,7 +1027,7 @@ def test_list_probe_records_default_limit(client, monkeypatch):
     assert set(data[0].keys()) == {
         "id", "url", "ok", "title", "extractor", "duration",
         "formatsCount", "webpageUrl", "reason", "detail", "createdAt",
-        "language",
+        "language", "availableQualities", "formats", "thumbnail", "uploader",
     }
 
 

@@ -134,10 +134,15 @@ def _ensure_translation_engine(
 ) -> None:
     if not need_subtitle:
         return
-    rec = engines.get(engine)
-    # 旧版 DeepSeek 环境变量仍可直接启动；其配置会在依赖初始化时同步进数据库。
-    if engine == "deepseek" and settings.deepseek_api_key and settings.deepseek_api_key.strip():
+    if engine == "deepseek":
+        if not (settings.deepseek_api_key and settings.deepseek_api_key.strip()):
+            raise HTTPException(
+                status_code=422,
+                detail="缺少 DeepSeek API Key，请在 .env 配置 SUBTRANS_DEEPSEEK_API_KEY",
+            )
         return
+
+    rec = engines.get(engine)
     if rec is None:
         raise HTTPException(status_code=422, detail="翻译引擎配置不存在")
     if not rec.enabled:
@@ -264,6 +269,7 @@ def create_task(
         model=body.model,
         engine=body.engine,
         need_subtitle=body.needSubtitle,
+        quality=body.quality,
     )
     if not created:
         raise HTTPException(
@@ -442,6 +448,10 @@ def probe_task(
         reason=result.reason,
         detail=result.detail,
         language=result.language,
+        available_qualities=result.available_qualities,
+        formats=result.formats,
+        thumbnail=result.thumbnail,
+        uploader=result.uploader,
     )
     return TaskProbeOut(
         ok=result.ok,
@@ -454,6 +464,10 @@ def probe_task(
         detail=result.detail,
         cached=result.cached,
         language=result.language,
+        availableQualities=result.available_qualities,
+        formats=result.formats,
+        thumbnail=result.thumbnail,
+        uploader=result.uploader,
     )
 
 
