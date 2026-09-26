@@ -1,15 +1,13 @@
 /* 浏览器路由：让每个工作区页面拥有稳定、可分享的 URL。 */
 
-import { state, subscribe, setView } from "./store.js";
+import { state, subscribe, setSettingsTab, setView } from "./store.js";
 
 export const ROUTES = Object.freeze({
   tasks: { path: "/tasks", title: "任务" },
   preview: { path: "/preview", title: "视频预览" },
   editor: { path: "/editor", title: "字幕编辑" },
-  probe: { path: "/probe", title: "下载测试" },
   storage: { path: "/storage", title: "本地资源" },
-  drive: { path: "/drive", title: "Google Drive" },
-  "translation-settings": { path: "/settings", title: "高级设置" },
+  "other-settings": { path: "/settings", title: "其他设置" },
 });
 
 const VIEW_BY_PATH = Object.freeze(
@@ -17,7 +15,9 @@ const VIEW_BY_PATH = Object.freeze(
 );
 
 export function viewFromPath(pathname = window.location.pathname) {
-  return VIEW_BY_PATH[pathname.replace(/\/$/, "") || "/tasks"] || "tasks";
+  const path = pathname.replace(/\/$/, "") || "/tasks";
+  if (["/probe", "/drive", "/settings"].includes(path)) return "other-settings";
+  return VIEW_BY_PATH[path] || "tasks";
 }
 
 export function pathForView(view) {
@@ -31,23 +31,29 @@ function updateDocument(view) {
 }
 
 export function initRouter() {
+  const originalPath = window.location.pathname.replace(/\/$/, "") || "/tasks";
   const initialView = viewFromPath();
   if (window.location.pathname !== pathForView(initialView)) {
     window.history.replaceState({ view: initialView }, "", pathForView(initialView));
   }
+  if (originalPath === "/probe") setSettingsTab("probe");
+  if (originalPath === "/drive") setSettingsTab("drive");
   setView(initialView, { history: false });
   updateDocument(initialView);
 
   window.addEventListener("popstate", () => {
+    const path = window.location.pathname;
+    if (path === "/probe") setSettingsTab("probe");
+    if (path === "/drive") setSettingsTab("drive");
     setView(viewFromPath(), { history: false });
   });
 
-  subscribe(({ type }) => {
+  subscribe(({ type, history }) => {
     if (type !== "view") return;
     const view = state.view;
     const path = pathForView(view);
     updateDocument(view);
-    if (window.location.pathname !== path) {
+    if (window.location.pathname !== path && history !== false) {
       window.history.pushState({ view }, "", path);
     }
   });

@@ -7,7 +7,8 @@ import { createNotifications } from "./notifications.js";
 export const state = {
   tasks: [],
   filter: "all",       // all | active | done | failed
-  view: "tasks",       // tasks | preview | editor | probe | storage | drive | translation-settings
+  view: "tasks",       // tasks | preview | editor | storage | other-settings
+  settingsTab: "engines", // engines | audio | probe | drive
   previewId: null,
   loading: true,
   loadError: null,
@@ -40,6 +41,11 @@ export function setView(v, options = {}) {
   if (!v || state.view === v) return;
   state.view = v;
   emit({ type: "view", history: options.history !== false });
+}
+export function setSettingsTab(tab) {
+  if (!tab || state.settingsTab === tab) return;
+  state.settingsTab = tab;
+  emit({ type: "settings-tab", settingsTab: tab });
 }
 export function setPreviewId(id) { state.previewId = id; emit({ type: "preview" }); }
 

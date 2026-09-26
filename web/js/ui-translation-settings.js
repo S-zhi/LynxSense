@@ -187,7 +187,7 @@ export function initTranslationSettings() {
   list.addEventListener("click", onAction);
   let startupCheckPromise = refresh(true);
   document.addEventListener("viewchange", (event) => {
-    if (event.detail?.view !== "translation-settings" || state.view !== "translation-settings") return;
+    if (event.detail?.view !== "other-settings" || event.detail?.settingsTab !== "engines" || state.view !== "other-settings") return;
     // 如果用户在启动检测完成前打开设置页，等待它结束，避免旧列表覆盖检测中的状态。
     startupCheckPromise.then(() => refresh(false));
   });

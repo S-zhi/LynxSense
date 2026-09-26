@@ -206,7 +206,9 @@ function buildRow(i) {
   if (originalText) originalText.value = original?.text || "";
   if (translatedText) translatedText.value = translated?.text || "";
   row.querySelectorAll(".subrow__text").forEach((textArea) => {
+    resizeTextarea(textArea);
     textArea.addEventListener("input", () => {
+      resizeTextarea(textArea);
       const locale = textArea.dataset.locale;
       const entry = entryAt(locale, i);
       if (!entry) return;
@@ -252,6 +254,11 @@ function languageField(locale, label, index, missing) {
       <span class="subrow__fieldlabel">${label}</span>
       <textarea class="subrow__text" data-locale="${locale}" rows="2" placeholder="${hint}" aria-label="${hint}" spellcheck="false"${disabled}></textarea>
     </label>`;
+}
+
+function resizeTextarea(textArea) {
+  textArea.style.height = "auto";
+  textArea.style.height = `${textArea.scrollHeight}px`;
 }
 
 function validateRow(row) {
