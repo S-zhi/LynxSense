@@ -56,8 +56,8 @@ def test_run_writes_progress_and_success(store, monkeypatch):
     assert rec.status == "SUCCESS"
     assert rec.progress == 100
     assert rec.title == "My Video"
-    assert rec.output_video == "/d/output.mp4"
-    assert rec.output_subtitle == "/d/translated.srt"
+    assert rec.output_video == "output.mp4"
+    assert rec.output_subtitle == "translated.srt"
 
 
 def test_run_passes_params_from_record(store, monkeypatch):

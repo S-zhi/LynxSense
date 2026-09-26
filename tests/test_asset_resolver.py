@@ -4,7 +4,14 @@ import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.service.asset_resolver import AssetResolver, ResourceState, ResourceError
+from src.config.storage import ArtifactStore
+from src.service.asset_resolver import (
+    ArtifactStatus,
+    AssetResolver,
+    ProcessingArtifact,
+    ResourceState,
+    ResourceError,
+)
 from src.service import orchestrator
 from src.service.orchestrator import PipelineParams, run_pipeline
 
@@ -28,6 +35,40 @@ def test_asset_resolver_check_file_state(tmp_path):
     valid_file = tmp_path / "valid.mp4"
     valid_file.write_bytes(b"content")
     assert AssetResolver.check_file_state(valid_file) == ResourceState.AVAILABLE
+
+
+def test_processing_artifact_preflight_and_storage_operations(tmp_path):
+    store = ArtifactStore(tmp_path)
+    artifact = AssetResolver.artifact("task_1", "translated.srt", store=store)
+
+    assert isinstance(artifact, ProcessingArtifact)
+    missing = artifact.preflight()
+    assert isinstance(missing, ArtifactStatus)
+    assert missing.state == ResourceState.DELETED
+    assert missing.address is None
+
+    artifact.write_bytes(b"1\n00:00:00,000 --> 00:00:01,000\nhello\n")
+    ready = artifact.preflight()
+    assert ready.available
+    assert ready.address == tmp_path / "task_1" / "translated.srt"
+    assert artifact.require() == ready.address
+    with artifact.open() as handle:
+        assert handle.read().startswith(b"1")
+
+    artifact.delete()
+    assert artifact.preflight().state == ResourceState.DELETED
+
+
+def test_processing_artifact_source_preflight_ignores_partial_download(tmp_path):
+    store = ArtifactStore(tmp_path)
+    task_dir = store.task_dir("task_1", create=True)
+    (task_dir / "source.mp4.part").write_bytes(b"partial")
+    assert AssetResolver.preflight_source("task_1", store=store).state == ResourceState.DELETED
+
+    (task_dir / "source.mp4").write_bytes(b"video")
+    status = AssetResolver.preflight_source("task_1", store=store)
+    assert status.available
+    assert status.address == task_dir / "source.mp4"
 
 
 def test_asset_resolver_resolve_source(tmp_path, monkeypatch):
