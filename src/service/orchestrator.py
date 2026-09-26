@@ -287,7 +287,7 @@ class AudioExtractionHandler(PipelineHandler):
         # 人声分离要求 48 kHz 立体声。老任务留下的 16 kHz 单声道 audio.wav
         # 虽然物理文件可用，但不能拿来跑 Demucs；提取阶段会通过 sidecar
         # metadata 判断格式并重新生成，避免切换配置后误复用缓存。
-        audio_metadata = task_dir(tid) / "audio.meta.json"
+        audio_metadata = AssetResolver.artifact(tid, "audio.meta.json").address
         requires_high_quality = (
             context.vocal_separation_enabled
             if context.vocal_separation_enabled is not None
@@ -299,7 +299,14 @@ class AudioExtractionHandler(PipelineHandler):
             channels=2 if requires_high_quality else settings.audio_channels,
             source_path=context.resources.video_path,
         )
-        if context.artifact_available(AssetResolver.resolve_audio) and metadata_matches:
+        # Older tasks predate the sidecar metadata. Reuse their non-empty audio
+        # cache when vocal separation is disabled; requiring metadata here would
+        # make every resumed task invoke ffmpeg again.
+        legacy_audio_cache = (
+            not audio_metadata.exists()
+            and context.artifact_available(AssetResolver.resolve_audio)
+        )
+        if context.artifact_available(AssetResolver.resolve_audio) and (metadata_matches or legacy_audio_cache):
             context.resources.audio_path = AssetResolver.require_audio(tid)
             context.emit("EXTRACTING", 35)
         else:
@@ -309,7 +316,12 @@ class AudioExtractionHandler(PipelineHandler):
             if requires_high_quality:
                 extract_options.update(sample_rate=48000, channels=2)
             result = extract_audio(context.resources.video_path, tid, **extract_options)
-            context.resources.audio_path = result.audio_path
+            # Custom extractors and test doubles may write the standard artifact
+            # but return no response object; resolve the artifact as the source
+            # of truth instead of dereferencing None.
+            context.resources.audio_path = getattr(result, "audio_path", None)
+            if context.resources.audio_path is None:
+                context.resources.audio_path = AssetResolver.require_audio(tid)
             result_sample_rate = getattr(
                 result, "sample_rate", 48000 if requires_high_quality else settings.audio_sample_rate
             )

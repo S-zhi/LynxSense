@@ -104,10 +104,15 @@ class AssetResolver:
     @staticmethod
     def artifact(task_id: str, name: str, *, store: Optional[ArtifactStore] = None) -> ProcessingArtifact:
         """Build a processing artifact without touching the filesystem."""
+        if store is None:
+            # Keep the resolver's injected task directory as the source of
+            # truth for tests and deployments that provide a custom root.
+            directory = task_dir(task_id)
+            store = ArtifactStore(directory.parent)
         return ProcessingArtifact(
             task_id=task_id,
             name=name,
-            store=store or artifact_store(),
+            store=store,
         )
 
     @classmethod
