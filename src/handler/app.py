@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -62,6 +63,18 @@ def create_app() -> FastAPI:
     app.include_router(replicate.router)
     app.include_router(translation_engines.router)
     app.include_router(audio_settings.router)
+
+    # SPA 路由需要在静态目录挂载前显式回退到 index.html，否则直接打开
+    # /tasks、/preview 等深链接时 StaticFiles 会按目录查找并返回 404。
+    if _WEB_DIR.is_dir():
+        spa_routes = ("/tasks", "/preview", "/editor", "/probe", "/storage", "/drive", "/settings")
+        for route_path in spa_routes:
+            app.add_api_route(
+                route_path,
+                lambda: FileResponse(_WEB_DIR / "index.html"),
+                methods=["GET"],
+                include_in_schema=False,
+            )
 
     # 最后挂载前端静态文件（必须放在 API router 之后，否则会拦截 /api/*）。
     # html=True 让根路径直接返回 web/index.html，避免再开一个 http.server。

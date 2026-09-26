@@ -36,7 +36,11 @@ function emit(detail) {
 
 /* ---- 视图 / 筛选 / 预览选择 ---- */
 export function setFilter(f) { state.filter = f; emit({ type: "filter" }); }
-export function setView(v) { state.view = v; emit({ type: "view" }); }
+export function setView(v, options = {}) {
+  if (!v || state.view === v) return;
+  state.view = v;
+  emit({ type: "view", history: options.history !== false });
+}
 export function setPreviewId(id) { state.previewId = id; emit({ type: "preview" }); }
 
 /* ---- 数据动作 ---- */
