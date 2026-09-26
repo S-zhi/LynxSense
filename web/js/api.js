@@ -170,6 +170,20 @@ const RealApi = {
     return res.json();
   },
 
+  async getAudioSettings() {
+    const res = await request(this.base, "/api/settings/audio");
+    if (!res.ok) throw new Error(await readError(res, "读取音频设置失败"));
+    return res.json();
+  },
+
+  async updateAudioSettings(payload) {
+    const res = await request(this.base, "/api/settings/audio", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readError(res, "保存音频设置失败"));
+    return res.json();
+  },
+
   async createTranslationEngine(payload) {
     const res = await request(this.base, "/api/settings/translation-engines", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -583,6 +597,16 @@ const MockApi = (() => {
     },
     // 示例模式下返回 Replicate Whisper 模型权重选项。
     async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
+    async getAudioSettings() {
+      await delay(40);
+      try { return JSON.parse(localStorage.getItem("subtrans_mock_audio_settings_v1")) || { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; } catch (_) { return { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; }
+    },
+    async updateAudioSettings(payload) {
+      const current = await this.getAudioSettings();
+      const next = { ...current, ...payload };
+      localStorage.setItem("subtrans_mock_audio_settings_v1", JSON.stringify(next));
+      return next;
+    },
     async getReplicateBalance() {
       await delay(80);
       return {

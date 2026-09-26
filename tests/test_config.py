@@ -82,6 +82,36 @@ def test_dynamic_settings_read_from_env(monkeypatch):
     assert settings.probe_cache_ttl_sec == 600
 
 
+def test_vocal_separation_settings_read_from_env(monkeypatch):
+    """人声分离配置应按请求动态读取，并规范化 backend / command。"""
+    monkeypatch.setenv("SUBTRANS_VOCAL_SEPARATION", "yes")
+    monkeypatch.setenv("SUBTRANS_VOCAL_SEPARATION_BACKEND", " DEMUCS ")
+    monkeypatch.setenv("SUBTRANS_VOCAL_SEPARATION_COMMAND", "python -m demucs.separate")
+    monkeypatch.setenv("SUBTRANS_VOCAL_SEPARATION_TIMEOUT", "45")
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+
+    settings = config.Settings()
+
+    assert settings.vocal_separation_enabled is True
+    assert settings.vocal_separation_backend == "demucs"
+    assert settings.vocal_separation_command == "python -m demucs.separate"
+    # 分离超时不能低于安全下限，避免误配置成几秒导致批任务反复失败。
+    assert settings.vocal_separation_timeout == 60
+
+
+def test_vocal_separation_settings_have_safe_fallbacks(monkeypatch):
+    monkeypatch.setenv("SUBTRANS_VOCAL_SEPARATION", "off")
+    monkeypatch.setenv("SUBTRANS_VOCAL_SEPARATION_TIMEOUT", "not-a-number")
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+
+    settings = config.Settings()
+
+    assert settings.vocal_separation_enabled is False
+    assert settings.vocal_separation_backend == "demucs"
+    assert settings.vocal_separation_command == "python -m demucs.separate"
+    assert settings.vocal_separation_timeout == 1800
+
+
 def test_transcriber_settings_read_from_env(monkeypatch):
     monkeypatch.setenv("SUBTRANS_TRANSCRIBER_BACKEND", "http")
     monkeypatch.setenv("SUBTRANS_TRANSCRIBER_URL", "https://stt.example.test/transcribe")
@@ -125,12 +155,16 @@ def test_dataclasses_replace_compatibility(monkeypatch):
         _max_upload_mb=1024,
         _target_languages=("zh-CN", "ja"),
         _data_dir=Path("/custom/data"),
+        _vocal_separation_enabled=True,
+        _vocal_separation_timeout=900,
     )
 
     assert replaced.deepseek_api_key == "sk-override-key"
     assert replaced.max_upload_mb == 1024
     assert replaced.target_languages == ("zh-CN", "ja")
     assert replaced.data_dir == Path("/custom/data")
+    assert replaced.vocal_separation_enabled is True
+    assert replaced.vocal_separation_timeout == 900
 
     # 原始 settings 实例不受影响
     assert settings.max_upload_mb == 2048

@@ -10,6 +10,7 @@ import { initProbe } from "./ui-probe.js";
 import { initStorage } from "./ui-storage.js";
 import { initDrive } from "./ui-drive.js";
 import { initTranslationSettings } from "./ui-translation-settings.js";
+import { initAudioSettings } from "./ui-audio-settings.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
 
 initTheme();
@@ -22,6 +23,7 @@ initProbe();
 initStorage();
 initDrive();
 initTranslationSettings();
+initAudioSettings();
 
 loadTasks();
 

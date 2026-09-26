@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -90,6 +91,76 @@ _bootstrap_env()
 
 _last_env_mtime: float = -1.0
 
+# Settings are normally sourced from environment variables.  The web UI also
+# needs a safe, persistent runtime override so changing an audio option does
+# not require restarting the process (and does not get lost when the process
+# has already loaded .env into os.environ).
+_RUNTIME_SETTINGS_LOCK = threading.RLock()
+_RUNTIME_SETTINGS_LOADED = False
+_RUNTIME_SETTINGS_SOURCE: Optional[Path] = None
+_RUNTIME_SETTINGS: dict[str, Any] = {}
+_RUNTIME_SETTING_KEYS = {
+    "vocal_separation_enabled",
+    "vocal_separation_backend",
+    "vocal_separation_model",
+    "vocal_separation_threads",
+    "vocal_separation_command",
+    "vocal_separation_timeout",
+}
+
+
+def _runtime_settings_path() -> Path:
+    raw = os.getenv("SUBTRANS_RUNTIME_SETTINGS_FILE")
+    if raw:
+        return Path(raw).expanduser()
+    data_dir = os.getenv("SUBTRANS_DATA_DIR")
+    root = Path(data_dir).expanduser() if data_dir else _BACKEND_DIR / "data"
+    return root / ".runtime-settings.json"
+
+
+def _load_runtime_settings() -> None:
+    global _RUNTIME_SETTINGS_LOADED, _RUNTIME_SETTINGS_SOURCE
+    with _RUNTIME_SETTINGS_LOCK:
+        path = _runtime_settings_path()
+        if _RUNTIME_SETTINGS_LOADED and _RUNTIME_SETTINGS_SOURCE == path:
+            return
+        _RUNTIME_SETTINGS_LOADED = True
+        _RUNTIME_SETTINGS_SOURCE = path
+        _RUNTIME_SETTINGS.clear()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                _RUNTIME_SETTINGS.update({k: data[k] for k in _RUNTIME_SETTING_KEYS if k in data})
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return
+
+
+def get_runtime_settings() -> dict[str, Any]:
+    """Return persisted runtime overrides (never includes secrets)."""
+    _load_runtime_settings()
+    with _RUNTIME_SETTINGS_LOCK:
+        return dict(_RUNTIME_SETTINGS)
+
+
+def update_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
+    """Persist validated runtime overrides and make them immediately effective."""
+    _load_runtime_settings()
+    clean = {k: values[k] for k in values if k in _RUNTIME_SETTING_KEYS}
+    with _RUNTIME_SETTINGS_LOCK:
+        _RUNTIME_SETTINGS.update(clean)
+        path = _runtime_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(json.dumps(_RUNTIME_SETTINGS, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(path)
+        return dict(_RUNTIME_SETTINGS)
+
+
+def _runtime_value(key: str) -> Any:
+    _load_runtime_settings()
+    with _RUNTIME_SETTINGS_LOCK:
+        return _RUNTIME_SETTINGS.get(key, _UNSET)
+
 
 def _sync_env_file() -> None:
     """如果 .env 文件存在且被修改，重新同步环境变量到 os.environ。"""
@@ -170,6 +241,12 @@ _ALIAS_MAP = {
     "ffprobe_bin": "_ffprobe_bin",
     "audio_sample_rate": "_audio_sample_rate",
     "audio_channels": "_audio_channels",
+    "vocal_separation_enabled": "_vocal_separation_enabled",
+    "vocal_separation_backend": "_vocal_separation_backend",
+    "vocal_separation_model": "_vocal_separation_model",
+    "vocal_separation_threads": "_vocal_separation_threads",
+    "vocal_separation_command": "_vocal_separation_command",
+    "vocal_separation_timeout": "_vocal_separation_timeout",
     "replicate_whisper_model": "_replicate_whisper_model",
     "replicate_timeout": "_replicate_timeout",
     "replicate_retries": "_replicate_retries",
@@ -219,6 +296,12 @@ class Settings:
     _ffprobe_bin: Any = field(default=_UNSET, repr=False)
     _audio_sample_rate: Any = field(default=_UNSET, repr=False)
     _audio_channels: Any = field(default=_UNSET, repr=False)
+    _vocal_separation_enabled: Any = field(default=_UNSET, repr=False)
+    _vocal_separation_backend: Any = field(default=_UNSET, repr=False)
+    _vocal_separation_model: Any = field(default=_UNSET, repr=False)
+    _vocal_separation_threads: Any = field(default=_UNSET, repr=False)
+    _vocal_separation_command: Any = field(default=_UNSET, repr=False)
+    _vocal_separation_timeout: Any = field(default=_UNSET, repr=False)
     _replicate_whisper_model: Any = field(default=_UNSET, repr=False)
     _replicate_timeout: Any = field(default=_UNSET, repr=False)
     _replicate_retries: Any = field(default=_UNSET, repr=False)
@@ -263,6 +346,12 @@ class Settings:
         _ffprobe_bin: Any = _UNSET,
         _audio_sample_rate: Any = _UNSET,
         _audio_channels: Any = _UNSET,
+        _vocal_separation_enabled: Any = _UNSET,
+        _vocal_separation_backend: Any = _UNSET,
+        _vocal_separation_model: Any = _UNSET,
+        _vocal_separation_threads: Any = _UNSET,
+        _vocal_separation_command: Any = _UNSET,
+        _vocal_separation_timeout: Any = _UNSET,
         _replicate_whisper_model: Any = _UNSET,
         _replicate_timeout: Any = _UNSET,
         _replicate_retries: Any = _UNSET,
@@ -307,6 +396,12 @@ class Settings:
             "_ffprobe_bin": _ffprobe_bin,
             "_audio_sample_rate": _audio_sample_rate,
             "_audio_channels": _audio_channels,
+            "_vocal_separation_enabled": _vocal_separation_enabled,
+            "_vocal_separation_backend": _vocal_separation_backend,
+            "_vocal_separation_model": _vocal_separation_model,
+            "_vocal_separation_threads": _vocal_separation_threads,
+            "_vocal_separation_command": _vocal_separation_command,
+            "_vocal_separation_timeout": _vocal_separation_timeout,
             "_replicate_whisper_model": _replicate_whisper_model,
             "_replicate_timeout": _replicate_timeout,
             "_replicate_retries": _replicate_retries,
@@ -538,6 +633,85 @@ class Settings:
             return int(val)
         except (ValueError, TypeError):
             return 1
+
+    @property
+    def vocal_separation_enabled(self) -> bool:
+        """是否在识别前抽取人声；默认关闭，保持现有 CPU 流程。"""
+        if self._vocal_separation_enabled is not _UNSET:
+            return bool(self._vocal_separation_enabled)
+        runtime = _runtime_value("vocal_separation_enabled")
+        if runtime is not _UNSET:
+            return bool(runtime)
+        _sync_env_file()
+        return (os.getenv("SUBTRANS_VOCAL_SEPARATION", "0") or "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+
+    @property
+    def vocal_separation_backend(self) -> str:
+        if self._vocal_separation_backend is not _UNSET:
+            return str(self._vocal_separation_backend).strip().lower() or "demucs"
+        runtime = _runtime_value("vocal_separation_backend")
+        if runtime is not _UNSET:
+            return str(runtime).strip().lower() or "demucs"
+        _sync_env_file()
+        return (os.getenv("SUBTRANS_VOCAL_SEPARATION_BACKEND", "demucs") or "demucs").strip().lower()
+
+    @property
+    def vocal_separation_model(self) -> str:
+        allowed = {"htdemucs", "mdx_q"}
+        if self._vocal_separation_model is not _UNSET:
+            value = str(self._vocal_separation_model).strip().lower()
+            return value if value in allowed else "htdemucs"
+        runtime = _runtime_value("vocal_separation_model")
+        if runtime is not _UNSET:
+            value = str(runtime).strip().lower()
+            return value if value in allowed else "htdemucs"
+        _sync_env_file()
+        value = (os.getenv("SUBTRANS_VOCAL_SEPARATION_MODEL", "htdemucs") or "htdemucs").strip().lower()
+        return value if value in allowed else "htdemucs"
+
+    @property
+    def vocal_separation_threads(self) -> int:
+        if self._vocal_separation_threads is not _UNSET:
+            return max(1, min(8, int(self._vocal_separation_threads)))
+        runtime = _runtime_value("vocal_separation_threads")
+        if runtime is not _UNSET:
+            try:
+                return max(1, min(8, int(runtime)))
+            except (TypeError, ValueError):
+                pass
+        _sync_env_file()
+        try:
+            return max(1, min(8, int(os.getenv("SUBTRANS_VOCAL_SEPARATION_THREADS", "1"))))
+        except (TypeError, ValueError):
+            return 1
+
+    @property
+    def vocal_separation_command(self) -> str:
+        if self._vocal_separation_command is not _UNSET:
+            return str(self._vocal_separation_command).strip() or "python -m demucs.separate"
+        runtime = _runtime_value("vocal_separation_command")
+        if runtime is not _UNSET:
+            return str(runtime).strip() or "python -m demucs.separate"
+        _sync_env_file()
+        return os.getenv("SUBTRANS_VOCAL_SEPARATION_COMMAND", "python -m demucs.separate") or "python -m demucs.separate"
+
+    @property
+    def vocal_separation_timeout(self) -> int:
+        if self._vocal_separation_timeout is not _UNSET:
+            return max(60, min(86400, int(self._vocal_separation_timeout)))
+        runtime = _runtime_value("vocal_separation_timeout")
+        if runtime is not _UNSET:
+            try:
+                return max(60, min(86400, int(runtime)))
+            except (ValueError, TypeError):
+                pass
+        _sync_env_file()
+        try:
+            return max(60, min(86400, int(os.getenv("SUBTRANS_VOCAL_SEPARATION_TIMEOUT", "1800"))))
+        except (ValueError, TypeError):
+            return 1800
 
     # --- ③ 语音识别（Replicate-hosted Whisper）---
     # Replicate 模型标识（版本锁定）
