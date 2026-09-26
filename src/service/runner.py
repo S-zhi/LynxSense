@@ -16,7 +16,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from src.config import OUTPUT_VIDEO, settings, task_dir
+from src.config import OUTPUT_VIDEO, artifact_name, settings, task_dir
 from src.service.orchestrator import (
     PipelineEvent,
     PipelineParams,
@@ -290,8 +290,10 @@ def _run(task_id: str) -> None:
         if ev.error_code is not None:
             fields["error_code"] = ev.error_code
         if ev.outputs:
-            fields["output_video"] = ev.outputs.get("video")
-            fields["output_subtitle"] = ev.outputs.get("subtitle")
+            video = ev.outputs.get("video")
+            subtitle = ev.outputs.get("subtitle")
+            fields["output_video"] = artifact_name(video) if video else None
+            fields["output_subtitle"] = artifact_name(subtitle) if subtitle else None
 
         _store.update(task_id, **fields)
         last_state["status"] = ev.status

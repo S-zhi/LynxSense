@@ -65,6 +65,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
+_BROWSER_PREVIEW_EXTENSIONS = {
+    ".txt", ".srt", ".vtt", ".json", ".md", ".log", ".csv",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".webm", ".mov",
+}
+
 _TERMINAL = {"SUCCESS", "FAILED", "CANCELLED"}
 
 # 资源已丢失时给用户的简短、稳定错误文案，避免把文件系统异常 / 堆栈漏到 UI
@@ -641,6 +646,57 @@ def open_task_folder(task_id: str, store: TaskStore = Depends(get_store)) -> dic
         raise HTTPException(status_code=409, detail="任务目录尚未生成")
     _open_folder(path)
     return {"ok": True}
+
+
+def _task_path(task_id: str, relative_path: str = "") -> Path:
+    """Resolve a path below a task directory and reject traversal."""
+    base = task_dir(task_id).resolve()
+    candidate = (base / relative_path).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="文件路径非法") from exc
+    return candidate
+
+
+@router.get("/{task_id}/folder-capability", summary="查询文件夹预览能力", dependencies=[Depends(require_api_token)])
+def folder_capability(task_id: str, store: TaskStore = Depends(get_store)) -> dict:
+    """告诉前端当前服务器是否有可用的图形化文件管理器。"""
+    _require(store, task_id)
+    graphical = sys.platform in {"darwin", "win32"} or bool(
+        sys.platform.startswith("linux") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    )
+    return {"mode": "system" if graphical else "browser"}
+
+
+@router.get("/{task_id}/files", summary="浏览任务文件", dependencies=[Depends(require_api_token)])
+def list_task_files(task_id: str, path: str = "", store: TaskStore = Depends(get_store)) -> dict:
+    """返回任务目录下的文件列表，供无图形界面的 Linux 预览。"""
+    _require(store, task_id)
+    directory = _task_path(task_id, path)
+    if not directory.exists() or not directory.is_dir():
+        raise HTTPException(status_code=404, detail="目录不存在")
+    base = task_dir(task_id).resolve()
+    entries = []
+    for item in sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
+        try:
+            size = item.stat().st_size if item.is_file() else 0
+        except OSError:
+            size = 0
+        entries.append({"name": item.name, "path": str(item.relative_to(base)), "directory": item.is_dir(), "size": size})
+    return {"path": path, "entries": entries}
+
+
+@router.get("/{task_id}/file", summary="读取任务文件", dependencies=[Depends(require_api_token)])
+def get_task_file(task_id: str, path: str, store: TaskStore = Depends(get_store)):
+    """提供浏览器预览所需的安全文件响应。"""
+    _require(store, task_id)
+    file_path = _task_path(task_id, path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if file_path.suffix.lower() not in _BROWSER_PREVIEW_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="该文件类型暂不支持网页预览")
+    return FileResponse(file_path)
 
 
 def _open_folder(path: Path | str) -> None:

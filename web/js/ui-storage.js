@@ -2,7 +2,7 @@
  * 复用 store.loadTasks() 在清理后刷新任务列表，保持任务 Tab 一致。
  */
 
-import { $, $$, el } from "./utils.js";
+import { $, $$, el, escapeHtml } from "./utils.js";
 import { Api } from "./api.js";
 import { state, loadTasks } from "./store.js";
 import { toast } from "./toast.js";
@@ -294,13 +294,73 @@ function renderTable() {
     const ageTd = el("td", "storage-table__age");
     ageTd.textContent = "—";
 
-    tr.append(checkTd, titleTd, statusTd, artTd, sizeTd, ageTd);
+    const actionTd = el("td", "storage-table__action");
+    const preview = el("button", "btn btn--ghost btn--sm");
+    preview.type = "button";
+    preview.innerHTML = `<i class="ph ph-folder-open"></i><span>预览</span>`;
+    preview.addEventListener("click", () => openTaskResource(t.taskId, t.title || t.taskId));
+    actionTd.append(preview);
+    tr.append(checkTd, titleTd, statusTd, artTd, sizeTd, ageTd, actionTd);
     tbody.append(tr);
   }
 
   // 用本地 store 的 tasks 兜底填入创建时间
   fillAges();
   updateActions();
+}
+
+async function openTaskResource(taskId, title) {
+  try {
+    const capability = await Api.folderCapability(taskId);
+    if (capability.mode === "system") {
+      await Api.openFolder(taskId);
+      toast("已打开服务器文件夹", "ph-folder-open");
+      return;
+    }
+    showTaskBrowser(taskId, title);
+  } catch (error) {
+    toast(error.message || "打开文件夹失败", "ph-warning-circle");
+  }
+}
+
+function showTaskBrowser(taskId, title) {
+  const overlay = el("div", "resource-browser");
+  overlay.innerHTML = `<div class="resource-browser__panel" role="dialog" aria-modal="true">
+    <div class="resource-browser__head"><strong>${escapeHtml(title)}</strong><button class="iconbtn" aria-label="关闭"><i class="ph ph-x"></i></button></div>
+    <div class="resource-browser__crumb">任务产物 / <span></span></div>
+    <div class="resource-browser__body"><span>正在读取…</span></div>
+  </div>`;
+  const body = overlay.querySelector(".resource-browser__body");
+  const crumb = overlay.querySelector(".resource-browser__crumb span");
+  let currentPath = "";
+  const close = () => overlay.remove();
+  overlay.querySelector(".iconbtn").addEventListener("click", close);
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  document.body.append(overlay);
+  const load = async (path) => {
+    currentPath = path;
+    try {
+      const data = await Api.listTaskFiles(taskId, path);
+      crumb.textContent = path || "根目录";
+      body.replaceChildren();
+      if (path) {
+        const up = el("button", "resource-browser__entry resource-browser__up");
+        up.textContent = "↑ 返回上级";
+        up.addEventListener("click", () => load(path.split("/").slice(0, -1).join("/")));
+        body.append(up);
+      }
+      for (const entry of data.entries) {
+        const button = el("button", "resource-browser__entry");
+        button.innerHTML = `<i class="ph ${entry.directory ? "ph-folder" : "ph-file"}"></i><span>${escapeHtml(entry.name)}</span><small>${entry.directory ? "目录" : formatBytes(entry.size)}</small>`;
+        button.addEventListener("click", () => entry.directory
+          ? load(entry.path)
+          : window.open(Api.taskFileUrl(taskId, entry.path), "_blank"));
+        body.append(button);
+      }
+      if (!data.entries.length) body.textContent = "目录为空";
+    } catch (error) { body.textContent = error.message || "读取失败"; }
+  };
+  void load(currentPath);
 }
 
 function fillAges() {
