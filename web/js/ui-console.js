@@ -321,6 +321,7 @@ export function initConsole() {
       model: $("#model").value,
       engine: $("#engine").value,
       needSubtitle: form.elements.needSubtitle.value === "on",
+      quality: $("#quality")?.value || "480p",
     };
   }
 
@@ -385,12 +386,13 @@ export function initConsole() {
     setProbeState("failed", "请拖入视频文件，或粘贴有效的视频链接", true);
   });
 
-  // 「是否需要字幕」：选“仅下载”时禁用字幕相关参数（源/目标语言、模式、烧录、模型、引擎）
+  // 「是否需要字幕」：选“仅下载”时禁用字幕相关参数（源/目标语言、模式、烧录、模型、引擎），但保留画质选项
   const paramsBox = form.querySelector(".params");
   function syncSubtitleParams() {
     const need = form.elements.needSubtitle.value === "on";
     paramsBox.querySelectorAll(".param").forEach((p) => {
       if (p.querySelector('[name="needSubtitle"]')) return; // 跳过开关自身
+      if (p.id === "qualityParam") return; // 下载画质始终保持可用
       p.classList.toggle("is-disabled", !need);
       p.querySelectorAll("select, input").forEach((c) => (c.disabled = !need));
     });

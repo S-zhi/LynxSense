@@ -209,6 +209,17 @@
                 <span class="param__label">翻译引擎</span>
                 <select class="select" id="engine" name="engine" aria-label="翻译引擎"></select>
               </div>
+              <div class="param" id="qualityParam">
+                <span class="param__label">下载画质</span>
+                <select class="select" id="quality" name="quality" aria-label="下载画质">
+                  <option value="best">原画最佳 (best)</option>
+                  <option value="1080p">1080P 高清</option>
+                  <option value="720p">720P 标清</option>
+                  <option value="480p" selected>480P 省流 (默认)</option>
+                  <option value="360p">360P 极速</option>
+                  <option value="audio_only">仅提取音频 (极速)</option>
+                </select>
+              </div>
             </div>
           </form>
 
