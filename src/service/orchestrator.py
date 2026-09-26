@@ -15,12 +15,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from src.config import task_dir
+from src.config import settings, task_dir
 from src.core.audio_extractor import extract_audio
 from src.core.downloader import download_video
 from src.core.subtitle_burner import burn_subtitles
 from src.core.transcriber import TranscribeCancelledError, transcribe
 from src.core.translator import translate_srt
+from src.core.vocal_separator import (
+    VocalSeparationCancelledError,
+    VocalSeparationError,
+    cached_vocals_are_current,
+    separate_vocals,
+)
 from src.service.asset_resolver import AssetResolver, ResourceError, ResourceState
 
 logger = logging.getLogger(__name__)
@@ -142,6 +148,7 @@ class PipelineResources:
 
     video_path: Optional[Path] = None
     audio_path: Optional[Path] = None
+    vocal_audio_path: Optional[Path] = None
     original_srt_path: Optional[Path] = None
     translated_srt_path: Optional[Path] = None
     output_video_path: Optional[Path] = None
@@ -160,6 +167,10 @@ class PipelineContext:
     current_step: Optional[str] = None
     title: Optional[str] = None
     terminal_event: Optional[PipelineEvent] = None
+    # 配置在任务启动时快照，避免用户在任务运行中切换开关导致音频格式
+    # 与后续分离阶段不一致。直接构造 Context 的旧调用方可留 None，回退
+    # 到动态 settings（主要用于单元测试和自定义责任链）。
+    vocal_separation_enabled: Optional[bool] = None
 
     @property
     def task_id(self) -> str:
@@ -273,16 +284,90 @@ class AudioExtractionHandler(PipelineHandler):
         tid = context.task_id
         context.emit("EXTRACTING", 20)
         context.resources.video_path = AssetResolver.require_source(tid)
-        if context.artifact_available(AssetResolver.resolve_audio):
+        # 人声分离要求 48 kHz 立体声。老任务留下的 16 kHz 单声道 audio.wav
+        # 虽然物理文件可用，但不能拿来跑 Demucs；提取阶段会通过 sidecar
+        # metadata 判断格式并重新生成，避免切换配置后误复用缓存。
+        audio_metadata = task_dir(tid) / "audio.meta.json"
+        requires_high_quality = (
+            context.vocal_separation_enabled
+            if context.vocal_separation_enabled is not None
+            else settings.vocal_separation_enabled
+        )
+        metadata_matches = _audio_metadata_matches(
+            audio_metadata,
+            sample_rate=48000 if requires_high_quality else settings.audio_sample_rate,
+            channels=2 if requires_high_quality else settings.audio_channels,
+            source_path=context.resources.video_path,
+        )
+        if context.artifact_available(AssetResolver.resolve_audio) and metadata_matches:
             context.resources.audio_path = AssetResolver.require_audio(tid)
             context.emit("EXTRACTING", 35)
         else:
-            extract_audio(
-                context.resources.video_path,
-                tid,
-                on_progress=context.step_callback("EXTRACTING"),
+            extract_options = {
+                "on_progress": context.step_callback("EXTRACTING"),
+            }
+            if requires_high_quality:
+                extract_options.update(sample_rate=48000, channels=2)
+            result = extract_audio(context.resources.video_path, tid, **extract_options)
+            context.resources.audio_path = result.audio_path
+            result_sample_rate = getattr(
+                result, "sample_rate", 48000 if requires_high_quality else settings.audio_sample_rate
             )
-            context.resources.audio_path = AssetResolver.require_audio(tid)
+            result_channels = getattr(
+                result, "channels", 2 if requires_high_quality else settings.audio_channels
+            )
+            try:
+                audio_metadata.write_text(
+                    _audio_metadata_json(
+                        sample_rate=result_sample_rate,
+                        channels=result_channels,
+                        source_path=context.resources.video_path,
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError:
+                # 测试替身或外部 extractor 可能把音频写到其它目录；sidecar
+                # 只是缓存校验辅助信息，不能让已成功的提取失败。
+                logger.debug("无法写入音频 sidecar: %s", audio_metadata, exc_info=True)
+
+
+class VocalSeparationHandler(PipelineHandler):
+    """可选的人声抽取阶段；关闭时零成本透传原始音频。"""
+
+    def process(self, context: PipelineContext) -> None:
+        enabled = (
+            context.vocal_separation_enabled
+            if context.vocal_separation_enabled is not None
+            else settings.vocal_separation_enabled
+        )
+        if not enabled:
+            return
+        tid = context.task_id
+        context.emit("EXTRACTING", 35)
+        output = task_dir(tid) / "vocal.wav"
+        if cached_vocals_are_current(context.resources.audio_path, tid):
+            context.resources.vocal_audio_path = output
+            return
+        try:
+            try:
+                context.resources.vocal_audio_path = separate_vocals(
+                    context.resources.audio_path,
+                    tid,
+                    cancel_check=lambda: _check_cancelled(tid),
+                )
+            except TypeError as exc:
+                # 兼容旧版自定义 backend / 测试替身的二参数签名；真实
+                # separator 的 TypeError 仍会继续向外抛出。
+                if "cancel_check" not in str(exc):
+                    raise
+                context.resources.vocal_audio_path = separate_vocals(
+                    context.resources.audio_path, tid
+                )
+        except VocalSeparationCancelledError as exc:
+            raise PipelineCancelledError("任务已被用户取消") from exc
+        except VocalSeparationError:
+            logger.exception("人声分离失败: task=%s", tid)
+            raise
 
 
 class TranscriptionHandler(PipelineHandler):
@@ -298,7 +383,7 @@ class TranscriptionHandler(PipelineHandler):
             return
         try:
             transcribe(
-                context.resources.audio_path,
+                context.resources.vocal_audio_path or context.resources.audio_path,
                 tid,
                 language=params.source_lang,
                 model_name=params.model,
@@ -379,6 +464,7 @@ def build_default_pipeline_chain() -> PipelineHandler:
     return build_pipeline_chain(
         DownloadHandler(),
         AudioExtractionHandler(),
+        VocalSeparationHandler(),
         TranscriptionHandler(),
         TranslationHandler(),
         SubtitleBurningHandler(),
@@ -399,6 +485,7 @@ def run_pipeline(
         on_event=on_event,
         api_key=api_key,
         engine_config=engine_config,
+        vocal_separation_enabled=settings.vocal_separation_enabled,
     )
     _check_cancelled(params.task_id)
 
@@ -463,3 +550,45 @@ def _locate_uploaded_source(task_id: str) -> Path:
         return AssetResolver.require_source(task_id)
     except ResourceError as e:
         raise PipelineError(str(e)) from e
+
+
+def _audio_metadata_json(*, sample_rate: int, channels: int, source_path: Optional[Path]) -> str:
+    import json
+    payload = {"sample_rate": int(sample_rate), "channels": int(channels)}
+    if source_path is not None:
+        try:
+            stat = source_path.stat()
+            payload.update({
+                "source": str(source_path.resolve()),
+                "source_size": stat.st_size,
+                "source_mtime_ns": stat.st_mtime_ns,
+            })
+        except OSError:
+            pass
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _audio_metadata_matches(
+    path: Path,
+    *,
+    sample_rate: int,
+    channels: int,
+    source_path: Optional[Path] = None,
+) -> bool:
+    """检查音频 sidecar；不存在时返回 False，让本次提取建立元数据。"""
+    if not path.is_file():
+        return False
+    try:
+        import json
+        data = json.loads(path.read_text(encoding="utf-8"))
+        matches = int(data.get("sample_rate")) == int(sample_rate) and int(data.get("channels")) == int(channels)
+        if not matches or source_path is None:
+            return matches
+        stat = source_path.stat()
+        return (
+            data.get("source") == str(source_path.resolve())
+            and int(data.get("source_size", -1)) == stat.st_size
+            and int(data.get("source_mtime_ns", -1)) == stat.st_mtime_ns
+        )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False

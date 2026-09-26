@@ -298,7 +298,8 @@ flowchart LR
     API --> Runner["后台任务队列"]
     Runner --> Download["yt-dlp 下载"]
     Download --> Audio["FFmpeg 提取音频"]
-    Audio --> ASR["Replicate Whisper 识别"]
+    Audio --> Separate["可选：CPU 人声分离"]
+    Separate --> ASR["Replicate Whisper 识别"]
     ASR --> Translate["DeepSeek 翻译"]
     Translate --> Burn["FFmpeg 字幕封装"]
     Burn --> Store["视频 + SRT + SQLite 状态"]
@@ -314,6 +315,19 @@ PENDING → DOWNLOADING → EXTRACTING → TRANSCRIBING
 任一步失败会进入 `FAILED`，并保存失败阶段与错误信息。任务产物默认位于 `data/{task_id}/`。
 
 ## ⚙️ 常用配置
+
+### 可选的人声分离（CPU）
+
+默认关闭人声分离，保持现有的“提取音频 → Whisper”流程。视频包含明显配乐或音效、需要优先抽取 vocals 时，可安装 Demucs 并启用 CPU 二分模式：
+
+```bash
+uv pip install demucs
+export SUBTRANS_VOCAL_SEPARATION=1
+export SUBTRANS_VOCAL_SEPARATION_BACKEND=demucs
+export SUBTRANS_VOCAL_SEPARATION_COMMAND="python -m demucs.separate"
+```
+
+流水线会先以 48 kHz 立体声提取音频，再执行 `--two-stems=vocals --device cpu --jobs N --shifts 0`，最后把 `vocals.wav` 转成 16 kHz 单声道交给 Whisper。模型、CPU 线程数和单任务超时可在网页的“高级设置 → 音频增强”中动态保存；网页只允许修改安全参数，Demucs 命令仍由部署环境控制。CPU 分离比原流程更慢，若 Demucs 不可用，启用后的任务会明确失败，不会静默回退到混合音频。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |

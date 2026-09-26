@@ -162,6 +162,7 @@ def test_default_pipeline_chain_has_expected_handler_order():
     assert names == [
         "DownloadHandler",
         "AudioExtractionHandler",
+        "VocalSeparationHandler",
         "TranscriptionHandler",
         "TranslationHandler",
         "SubtitleBurningHandler",
@@ -283,6 +284,79 @@ def test_pipeline_passes_options(monkeypatch):
         "model": "medium", "language": "en",
         "target": "ja", "mode": "bilingual", "burn": "soft",
     }
+
+
+def test_vocal_separation_handler_uses_cached_vocal_artifact(monkeypatch, tmp_path):
+    """已有 vocal.wav 时，断点续跑不重复调用 Demucs。"""
+    context = orchestrator.PipelineContext(params=_params(), on_event=lambda event: None)
+    context.resources.audio_path = tmp_path / "audio.wav"
+    vocal = tmp_path / "vocal.wav"
+    vocal.write_bytes(b"cached vocals")
+    monkeypatch.setattr(orchestrator, "settings", SimpleNamespace(vocal_separation_enabled=True))
+    monkeypatch.setattr(orchestrator, "task_dir", lambda task_id: tmp_path)
+    monkeypatch.setattr(orchestrator, "cached_vocals_are_current", lambda *args: True)
+    monkeypatch.setattr(orchestrator, "separate_vocals", lambda *args: pytest.fail("不应重复分离"))
+
+    orchestrator.VocalSeparationHandler().process(context)
+
+    assert context.resources.vocal_audio_path == vocal
+
+
+def test_vocal_separation_handler_passes_audio_to_separator(monkeypatch, tmp_path):
+    """分离的输出路径应成为下个识别阶段的人声资源。"""
+    context = orchestrator.PipelineContext(params=_params(), on_event=lambda event: None)
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    output = tmp_path / "vocal.wav"
+    calls = []
+    monkeypatch.setattr(orchestrator, "settings", SimpleNamespace(vocal_separation_enabled=True))
+    monkeypatch.setattr(orchestrator, "task_dir", lambda task_id: tmp_path)
+
+    def fake_separator(audio_path, task_id, *, cancel_check=None):
+        calls.append((audio_path, task_id))
+        return output
+
+    monkeypatch.setattr(orchestrator, "separate_vocals", fake_separator)
+    context.resources.audio_path = audio
+
+    orchestrator.VocalSeparationHandler().process(context)
+
+    assert calls == [(audio, "t1")]
+    assert context.resources.vocal_audio_path == output
+
+
+def test_vocal_separation_handler_is_zero_cost_when_disabled(monkeypatch, tmp_path):
+    """关闭分离不创建目录、不调用外部模型，也不改变音频资源。"""
+    context = orchestrator.PipelineContext(params=_params(), on_event=lambda event: None)
+    audio = tmp_path / "audio.wav"
+    context.resources.audio_path = audio
+    monkeypatch.setattr(orchestrator, "settings", SimpleNamespace(vocal_separation_enabled=False))
+    monkeypatch.setattr(orchestrator, "task_dir", lambda task_id: pytest.fail("关闭时不应访问任务目录"))
+    monkeypatch.setattr(orchestrator, "separate_vocals", lambda *args: pytest.fail("关闭时不应调用分离"))
+
+    orchestrator.VocalSeparationHandler().process(context)
+
+    assert context.resources.vocal_audio_path is None
+    assert context.resources.audio_path == audio
+
+
+def test_vocal_separation_handler_converts_cancellation(monkeypatch, tmp_path):
+    """外部分离进程取消时，流水线应转换为统一的 PipelineCancelledError。"""
+    context = orchestrator.PipelineContext(params=_params(), on_event=lambda event: None)
+    context.resources.audio_path = tmp_path / "audio.wav"
+    monkeypatch.setattr(orchestrator, "settings", SimpleNamespace(vocal_separation_enabled=True))
+    monkeypatch.setattr(orchestrator, "task_dir", lambda task_id: tmp_path)
+    monkeypatch.setattr(orchestrator, "cached_vocals_are_current", lambda *args: False)
+    monkeypatch.setattr(
+        orchestrator,
+        "separate_vocals",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            orchestrator.VocalSeparationCancelledError("任务已被用户取消")
+        ),
+    )
+
+    with pytest.raises(orchestrator.PipelineCancelledError, match="任务已被用户取消"):
+        orchestrator.VocalSeparationHandler().process(context)
 
 
 def test_pipeline_upload_skips_download_and_honors_options(monkeypatch, tmp_path):

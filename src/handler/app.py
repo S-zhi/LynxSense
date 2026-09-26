@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from src.config import settings
 
 
-from src.handler import health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
+from src.handler import audio_settings, health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
 
 from src.handler.deps import get_store
 
@@ -61,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(replicate.router)
     app.include_router(translation_engines.router)
+    app.include_router(audio_settings.router)
 
     # 最后挂载前端静态文件（必须放在 API router 之后，否则会拦截 /api/*）。
     # html=True 让根路径直接返回 web/index.html，避免再开一个 http.server。

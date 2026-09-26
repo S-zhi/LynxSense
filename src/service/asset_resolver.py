@@ -142,8 +142,8 @@ class AssetResolver:
             "BURNING": [OUTPUT_VIDEO],
             "TRANSLATING": [TRANSLATED_SRT, OUTPUT_VIDEO],
             "TRANSCRIBING": [ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
-            "EXTRACTING": [AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
-            "DOWNLOADING": [AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
+            "EXTRACTING": [AUDIO_FILENAME, "audio.meta.json", "vocal.wav", "vocal.meta.json", ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
+            "DOWNLOADING": [AUDIO_FILENAME, "audio.meta.json", "vocal.wav", "vocal.meta.json", ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
         }
 
         to_remove_names = set(step_artifacts_map.get(current_step, [
@@ -151,6 +151,7 @@ class AssetResolver:
         ]))
 
         to_remove_names.add("tmp_burn.srt")
+        to_remove_names.add(".vocal.wav.tmp")
 
         for name in to_remove_names:
             p = d / name
@@ -167,6 +168,16 @@ class AssetResolver:
                 logger.info("已清理取消任务的 .part 文件: task=%s, file=%s", task_id, p.name)
             except OSError as e:
                 logger.warning("清理 .part 文件失败: task=%s, file=%s, err=%s", task_id, p.name, e)
+
+        # Demucs 会在该目录下生成模型名子目录；取消时整目录删除，避免
+        # 下一次重试误拾取半截 stems 或长期占用大量磁盘。
+        separation_dir = d / "vocal-separation"
+        if separation_dir.exists():
+            import shutil
+            try:
+                shutil.rmtree(separation_dir)
+            except OSError as e:
+                logger.warning("清理人声分离临时目录失败: task=%s, err=%s", task_id, e)
 
         if (current_step in (None, "DOWNLOADING")) and source_type != "upload":
             for p in d.glob(f"{SOURCE_VIDEO_STEM}.*"):
