@@ -236,6 +236,23 @@ const RealApi = {
     if (!res.ok) throw new Error(await readError(res, "打开文件夹失败"));
   },
 
+  async folderCapability(id) {
+    const res = await request(this.base, `/api/tasks/${encodeURIComponent(id)}/folder-capability`);
+    if (!res.ok) throw new Error(await readError(res, "查询文件夹能力失败"));
+    return res.json();
+  },
+
+  async listTaskFiles(id, path = "") {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    const res = await request(this.base, `/api/tasks/${encodeURIComponent(id)}/files${query}`);
+    if (!res.ok) throw new Error(await readError(res, "读取任务文件失败"));
+    return res.json();
+  },
+
+  taskFileUrl(id, path) {
+    return `${this.base}/api/tasks/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`;
+  },
+
   // ---------- 本地资源治理 ----------
   async startDriveUpload(taskId, artifactNames = []) {
     const res = await request(this.base, `/api/storage/tasks/${encodeURIComponent(taskId)}/drive/upload`, {
@@ -646,6 +663,9 @@ const MockApi = (() => {
     },
     // 示例模式下模拟打开任务文件夹。
     async openFolder() { await delay(80); },
+    async folderCapability() { return { mode: "browser" }; },
+    async listTaskFiles() { return { path: "", entries: [] }; },
+    taskFileUrl() { return "#"; },
     // 示例模式下返回空统计 / 空预览，方便 UI 演练。
     async getStorageStats() {
       await delay(60);
