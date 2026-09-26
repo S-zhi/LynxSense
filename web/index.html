@@ -237,8 +237,14 @@
           <div class="editor">
             <aside class="editor__rail" aria-label="可选任务">
               <div class="editor__railhead">
-                <h2>任务</h2>
-                <span class="editor__hint" id="editorHint">选一个任务开始编辑</span>
+                <div class="editor__railtitle">
+                  <h2>任务</h2>
+                  <span class="editor__hint" id="editorHint">选一个任务开始编辑</span>
+                </div>
+                <button class="iconbtn editor__railtoggle" id="editorRailToggle" type="button" aria-expanded="true" aria-controls="editorList" title="收起任务面板">
+                  <i class="ph ph-caret-left" aria-hidden="true"></i>
+                  <span class="sr-only">收起任务面板</span>
+                </button>
               </div>
               <div class="editor__list" id="editorList"></div>
             </aside>
