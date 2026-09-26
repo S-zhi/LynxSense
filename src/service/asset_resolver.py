@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import BinaryIO, Optional, Tuple
 
 from src.config import (
+    ArtifactStore,
     AUDIO_FILENAME,
     OUTPUT_VIDEO,
     SOURCE_VIDEO_STEM,
     TRANSLATED_SRT,
     ORIGINAL_SRT,
+    artifact_store,
     task_dir,
 )
 
@@ -24,6 +27,72 @@ class ResourceState(str, Enum):
     UNREADABLE = "UNREADABLE"
 
 
+@dataclass(frozen=True)
+class ArtifactStatus:
+    """结果 of a non-throwing artifact preflight."""
+
+    state: ResourceState
+    address: Optional[Path]
+    reason: str = ""
+
+    @property
+    def available(self) -> bool:
+        return self.state == ResourceState.AVAILABLE and self.address is not None
+
+
+@dataclass(frozen=True)
+class ProcessingArtifact:
+    """Domain entity for one pipeline artifact.
+
+    The entity owns identity and storage operations. Callers can preflight it
+    before exposing or consuming the file, while ``path`` remains available to
+    legacy libraries through ``os.fspath``.
+    """
+
+    task_id: str
+    name: str
+    store: ArtifactStore
+
+    @property
+    def address(self) -> Path:
+        return self.store.artifact(self.task_id, self.name).path
+
+    @property
+    def path(self) -> Path:
+        return self.address
+
+    def __fspath__(self) -> str:
+        return os.fspath(self.address)
+
+    def preflight(self) -> ArtifactStatus:
+        state = AssetResolver.check_file_state(self.address)
+        if state == ResourceState.AVAILABLE:
+            return ArtifactStatus(state, self.address)
+        if state == ResourceState.DELETED:
+            return ArtifactStatus(state, None, f"资源缺失: {self.name}")
+        return ArtifactStatus(state, self.address, f"资源不可读: {self.name}")
+
+    def require(self) -> Path:
+        result = self.preflight()
+        if not result.available:
+            raise ResourceError(result.reason, result.state)
+        return result.address  # type: ignore[return-value]
+
+    def exists(self) -> bool:
+        return self.preflight().available
+
+    def open(self, mode: str = "rb", **kwargs) -> BinaryIO:
+        return self.address.open(mode, **kwargs)
+
+    def write_bytes(self, data: bytes) -> Path:
+        self.address.parent.mkdir(parents=True, exist_ok=True)
+        self.address.write_bytes(data)
+        return self.address
+
+    def delete(self, *, missing_ok: bool = True) -> None:
+        self.address.unlink(missing_ok=missing_ok)
+
+
 class ResourceError(RuntimeError):
     """资源完整性校验或依赖中断异常"""
     def __init__(self, message: str, state: ResourceState):
@@ -32,6 +101,36 @@ class ResourceError(RuntimeError):
 
 
 class AssetResolver:
+    @staticmethod
+    def artifact(task_id: str, name: str, *, store: Optional[ArtifactStore] = None) -> ProcessingArtifact:
+        """Build a processing artifact without touching the filesystem."""
+        return ProcessingArtifact(
+            task_id=task_id,
+            name=name,
+            store=store or artifact_store(),
+        )
+
+    @classmethod
+    def preflight(
+        cls, task_id: str, name: str, *, store: Optional[ArtifactStore] = None
+    ) -> ArtifactStatus:
+        """Validate an artifact before it is consumed or exposed."""
+        return cls.artifact(task_id, name, store=store).preflight()
+
+    @classmethod
+    def preflight_source(cls, task_id: str, *, store: Optional[ArtifactStore] = None) -> ArtifactStatus:
+        """Preflight the first completed source video, excluding download parts."""
+        storage = store or artifact_store()
+        directory = storage.task_dir(task_id)
+        if not directory.is_dir():
+            return ArtifactStatus(ResourceState.DELETED, None, "源视频文件缺失，资源已删除")
+        candidates = sorted(
+            p for p in directory.glob(f"{SOURCE_VIDEO_STEM}.*") if not p.name.endswith(".part")
+        )
+        if not candidates:
+            return ArtifactStatus(ResourceState.DELETED, None, "源视频文件缺失，资源已删除")
+        return cls.artifact(task_id, candidates[0].name, store=storage).preflight()
+
     @staticmethod
     def check_file_state(path: Path) -> ResourceState:
         """检查物理文件的完整性状态。"""

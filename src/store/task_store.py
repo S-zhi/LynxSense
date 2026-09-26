@@ -11,7 +11,7 @@ import sqlite3
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import List, Optional
 
 # 与流水线状态机一致
@@ -90,6 +90,22 @@ def _calc_url_hash(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
 
 
+def _portable_artifact_name(value: Optional[str], task_id: str) -> Optional[str]:
+    """Persist only a task-local filename, regardless of the host OS."""
+    if not value:
+        return None
+    raw = str(value)
+    posix = PurePosixPath(raw)
+    windows = PureWindowsPath(raw)
+    name = windows.name if windows.name != raw else posix.name
+    if not name or name in {".", ".."}:
+        return None
+    parts = {part for part in (*posix.parts, *windows.parts) if part not in {"/", "\\"}}
+    if (posix.is_absolute() or windows.is_absolute()) and task_id not in parts:
+        return None
+    return name
+
+
 class TaskStore:
     """任务表的增删改查。每次操作开一个短连接，交给 SQLite 处理文件锁。"""
 
@@ -166,6 +182,19 @@ class TaskStore:
                 conn.execute("ALTER TABLE tasks ADD COLUMN is_cancelling INTEGER NOT NULL DEFAULT 0")
             if "downgraded_at" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN downgraded_at INTEGER")
+            # Older versions persisted absolute output paths. Keep only the
+            # task-local name so the database survives volume and OS changes.
+            for row in conn.execute(
+                "SELECT id, output_video, output_subtitle FROM tasks "
+                "WHERE output_video IS NOT NULL OR output_subtitle IS NOT NULL"
+            ):
+                video = _portable_artifact_name(row["output_video"], row["id"])
+                subtitle = _portable_artifact_name(row["output_subtitle"], row["id"])
+                if video != row["output_video"] or subtitle != row["output_subtitle"]:
+                    conn.execute(
+                        "UPDATE tasks SET output_video = ?, output_subtitle = ? WHERE id = ?",
+                        (video, subtitle, row["id"]),
+                    )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_created_at "
                 "ON tasks (created_at DESC, id DESC)"
