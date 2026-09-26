@@ -11,6 +11,7 @@ SSE 端点轮询库表即可拿到实时进度。
 from __future__ import annotations
 
 import logging
+import inspect
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -299,21 +300,23 @@ def _run(task_id: str) -> None:
         last_state["status"] = ev.status
         last_state["progress"] = ev.progress
 
-    engine_config = None
-    if rec.engine != "deepseek":
-        engine_config = _engine_store.get(rec.engine)
-        if engine_config is None:
-            _store.update(task_id, status="FAILED", error="翻译引擎配置不存在", error_code="engine_not_found")
-            unregister_cancellation_signal(task_id)
-            return
+    # 所有任务都从持久化配置读取引擎。DeepSeek 只是旧版默认配置 ID，
+    # 由启动时的 seed 记录兼容环境变量，不再绕过数据库配置。
+    engine_config = _engine_store.get(rec.engine)
+    if engine_config is None:
+        _store.update(task_id, status="FAILED", error="翻译引擎配置不存在", error_code="engine_not_found")
+        unregister_cancellation_signal(task_id)
+        return
     try:
         pipeline_kwargs = {
-            "api_key": settings.deepseek_api_key if rec.engine == "deepseek" else None,
+            "api_key": None,
         }
-        # 仅在新引擎配置存在时传入扩展参数，保持旧版测试/调用方兼容。
-        if engine_config is not None:
-            pipeline_kwargs["engine_config"] = engine_config
-        run_pipeline(params, on_event, **pipeline_kwargs)
+        pipeline_kwargs["engine_config"] = engine_config
+        # 保持第三方/旧测试注入的简化 runner 可用；正式编排器支持 engine_config。
+        if "engine_config" in inspect.signature(run_pipeline).parameters:
+            run_pipeline(params, on_event, **pipeline_kwargs)
+        else:
+            run_pipeline(params, on_event, api_key=None)
     except ResourceError as e:
         if is_cancelled_signal(task_id):
             logger.info("任务已被取消: %s", task_id)

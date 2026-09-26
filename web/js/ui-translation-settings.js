@@ -82,7 +82,7 @@ function cardTemplate(engine) {
         <span class="engine-card__icon"><i class="ph ${engine.apiType === "anthropic_compatible" ? "ph-aperture" : "ph-brackets-curly"}"></i></span>
         <div><h3 class="engine-card__name">${escapeHtml(engine.name || "新翻译引擎")}</h3><div class="engine-card__type">${typeLabel(engine.apiType)}</div></div>
       </div>
-      <span class="engine-status engine-status--${status[0]}">${status[1]}</span>
+        <span class="engine-status engine-status--${status[0]}">${engine.active ? "当前运行配置 · " : ""}${status[1]}</span>
     </div>
     <div class="engine-card__form">
       <div class="engine-field"><label>显示名称</label><input data-field="name" value="${escapeHtml(engine.name || "")}" placeholder="例如：DeepSeek 主力" /></div>
@@ -147,8 +147,8 @@ async function onAction(event) {
       const payload = values(card);
       if (!payload.name || !payload.baseUrl || !payload.model) throw new Error("请填写名称、Base URL 和模型");
       const saved = id === "new" ? await Api.createTranslationEngine(payload) : await Api.updateTranslationEngine(id, payload);
-      engines = id === "new" ? [...engines, saved] : engines.map((e) => e.id === id ? saved : e);
-      render();
+      // 重新读取列表，拿到后端计算的当前运行配置标记。
+      await refresh(false);
       if (saved.hasApiKey) {
         const result = await validateEngine(saved.id);
         notifyValidation(result);

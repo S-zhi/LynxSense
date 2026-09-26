@@ -39,6 +39,7 @@ class EngineOut(BaseModel):
     lastCheckedAt: Optional[int] = None
     lastError: Optional[str] = None
     apiKeyRotatedAt: Optional[int] = None
+    active: bool = False
 
 
 class EngineCheckOut(BaseModel):
@@ -55,13 +56,14 @@ def _validate_type(api_type: str) -> None:
         raise HTTPException(status_code=422, detail="不支持的 API 接入类型")
 
 
-def _out(rec: TranslationEngine) -> EngineOut:
+def _out(rec: TranslationEngine, *, active: bool = False) -> EngineOut:
     return EngineOut(
         id=rec.id, name=rec.name, apiType=rec.api_type, baseUrl=rec.base_url,
         model=rec.model, enabled=bool(rec.enabled), hasApiKey=rec.has_api_key,
         availability=rec.availability, lastCheckedAt=rec.last_checked_at,
         lastError=rec.last_error,
         apiKeyRotatedAt=rec.api_key_rotated_at,
+        active=active,
     )
 
 
@@ -74,7 +76,12 @@ def _require(store: TranslationEngineStore, engine_id: str) -> TranslationEngine
 
 @router.get("", response_model=List[EngineOut])
 def list_engines(store: TranslationEngineStore = Depends(get_translation_engine_store)) -> List[EngineOut]:
-    return [_out(rec) for rec in store.list()]
+    records = store.list()
+    # 页面需要明确显示默认运行配置：优先使用已检测可用的引擎，否则回退到首个启用项。
+    active_id = next((r.id for r in records if r.enabled and r.availability == "AVAILABLE"), None)
+    if active_id is None:
+        active_id = next((r.id for r in records if r.enabled), None)
+    return [_out(rec, active=rec.id == active_id) for rec in records]
 
 
 @router.post("", response_model=EngineOut, status_code=201, dependencies=[Depends(require_api_token)])
