@@ -19,26 +19,9 @@ function selectTab(tabName, tabs, panels, syncState = true) {
   if (syncState && state.settingsTab !== tabName) setSettingsTab(tabName);
 }
 
-function moveStandaloneViews(root) {
-  const targets = [
-    ["probe", "#view-probe"],
-    ["drive", "#view-drive"],
-  ];
-  targets.forEach(([tabName, selector]) => {
-    const panel = root.querySelector(`[data-settings-panel="${tabName}"]`);
-    const view = $(selector);
-    if (!panel || !view || view.parentElement === panel) return;
-    view.classList.remove("view");
-    view.classList.add("settings-view");
-    view.removeAttribute("data-view");
-    panel.appendChild(view);
-  });
-}
-
 export function initAdvancedSettings() {
   const root = $("#advancedSettings");
   if (!root) return;
-  moveStandaloneViews(root);
   const tabs = $$('[data-settings-tab]', root);
   const panels = $$('[data-settings-panel]', root);
   if (!tabs.length || !panels.length) return;
