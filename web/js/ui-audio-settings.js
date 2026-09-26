@@ -61,7 +61,7 @@ export function initAudioSettings() {
   if (!form) return;
   form.addEventListener("submit", save);
   document.addEventListener("viewchange", (event) => {
-    if (event.detail?.view === "translation-settings") refresh();
+    if (event.detail?.view === "other-settings" && event.detail?.settingsTab === "audio") refresh();
   });
   refresh();
 }

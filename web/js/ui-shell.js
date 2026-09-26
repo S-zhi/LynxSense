@@ -61,5 +61,5 @@ function syncShell() {
   $$(".nav__item").forEach((n) => n.classList.toggle("is-active", n.dataset.view === state.view));
   $$("#filters .chip").forEach((c) => c.classList.toggle("is-active", c.dataset.filter === state.filter));
   // 广播视图切换事件（各 Tab 自取所需）
-  document.dispatchEvent(new CustomEvent("viewchange", { detail: { view: state.view } }));
+  document.dispatchEvent(new CustomEvent("viewchange", { detail: { view: state.view, settingsTab: state.settingsTab } }));
 }

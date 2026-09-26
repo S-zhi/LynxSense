@@ -173,6 +173,7 @@
   background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px;
   resize: vertical;
+  overflow-y: hidden;
   font-family: var(--font-sans);
 }
 .subrow__text:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

@@ -77,11 +77,7 @@ export function initReplicateBilling() {
   if (!root || !button) return;
   button.addEventListener("click", () => refresh(button));
   document.addEventListener("viewchange", (event) => {
-    if (event.detail?.view === "translation-settings") refresh(button);
+    if (event.detail?.view === "other-settings" && event.detail?.settingsTab === "replicate") refresh(button);
   });
-  if (state.view === "translation-settings") refresh(button);
-}
-
-if (typeof document !== "undefined") {
-  initReplicateBilling();
+  if (state.view === "other-settings" && state.settingsTab === "replicate") refresh(button);
 }
