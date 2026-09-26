@@ -1,7 +1,7 @@
 /* 其他设置的二级标签页。使用 data 映射，方便未来继续扩展更多设置页。 */
 
 import { $, $$ } from "./utils.js";
-import { state, setSettingsTab } from "./store.js";
+import { state, subscribe, setSettingsTab } from "./store.js";
 
 const SETTINGS_TABS = new Set(["engines", "audio", "probe", "drive"]);
 
@@ -29,6 +29,11 @@ export function initAdvancedSettings() {
   const firstTab = tabs[0];
   const initial = SETTINGS_TABS.has(state.settingsTab) ? state.settingsTab : firstTab.dataset.settingsTab;
   selectTab(initial, tabs, panels, false);
+
+  // 路由初始化可能先于本模块设置 settingsTab，深链接需要立即选中对应面板。
+  subscribe(({ type }) => {
+    if (type === "settings-tab") selectTab(state.settingsTab, tabs, panels, false);
+  });
 
   // 让旧链接、浏览器前进后退以及其他模块触发的状态变更都能切换面板。
   document.addEventListener("viewchange", (event) => {
