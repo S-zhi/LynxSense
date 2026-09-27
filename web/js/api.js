@@ -158,6 +158,18 @@ const RealApi = {
     return res.json();
   },
 
+  async listLocalModels() {
+    const res = await request(this.base, "/api/srt/local-models");
+    if (!res.ok) throw new Error(await readError(res, "获取本地模型失败"));
+    return res.json();
+  },
+
+  async downloadLocalModel(name) {
+    const res = await request(this.base, `/api/srt/local-models/${encodeURIComponent(name)}/download`, { method: "POST" });
+    if (!res.ok) throw new Error(await readError(res, "下载本地模型失败"));
+    return res.json();
+  },
+
   async getReplicateBalance() {
     const res = await request(this.base, "/api/replicate/balance");
     if (!res.ok) throw new Error(await readError(res, "获取 Replicate 账户状态失败"));
@@ -627,7 +639,23 @@ const MockApi = (() => {
       );
     },
     // 示例模式下返回带后端标识的 Whisper 模型权重选项。
-    async listModelWeights() { await delay(80); return ["local:tiny", "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2"]; },
+    async listModelWeights() { await delay(80); return ["local:tiny", "local:base", "local:small", "local:medium", "local:large-v3", "local:large-v3-turbo", "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2"]; },
+    async listLocalModels() {
+      await delay(40);
+      let downloaded = [];
+      try { downloaded = JSON.parse(localStorage.getItem("subtrans_mock_local_models_v1") || "[]"); } catch (_) {}
+      const ready = new Set(["tiny", ...(Array.isArray(downloaded) ? downloaded : [])]);
+      return ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"].map((name) => ({ name, label: `Whisper ${name}`, size: "", status: ready.has(name) ? "READY" : "NOT_INSTALLED", progress: ready.has(name) ? 100 : 0, phase: ready.has(name) ? "ready" : "idle" }));
+    },
+    async downloadLocalModel(name) {
+      await delay(40);
+      let downloaded = [];
+      try { downloaded = JSON.parse(localStorage.getItem("subtrans_mock_local_models_v1") || "[]"); } catch (_) {}
+      if (!Array.isArray(downloaded)) downloaded = [];
+      if (!downloaded.includes(name)) downloaded.push(name);
+      try { localStorage.setItem("subtrans_mock_local_models_v1", JSON.stringify(downloaded)); } catch (_) {}
+      return { name, status: "READY", progress: 100, phase: "ready" };
+    },
     async getAudioSettings() {
       await delay(40);
       try { return JSON.parse(localStorage.getItem("subtrans_mock_audio_settings_v1")) || { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; } catch (_) { return { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; }

@@ -12,6 +12,7 @@ import { initDrive } from "./ui-drive.js";
 import { initTranslationSettings } from "./ui-translation-settings.js";
 import { initAudioSettings } from "./ui-audio-settings.js";
 import { initReplicateSettings } from "./ui-replicate-settings.js";
+import { initLocalModels } from "./ui-local-models.js";
 import { initReplicateBilling } from "./ui-replicate-billing.js";
 import { initAdvancedSettings } from "./ui-advanced-settings.js";
 import { initRouter } from "./router.js";
@@ -32,6 +33,7 @@ initDrive();
 initTranslationSettings();
 initAudioSettings();
 initReplicateSettings();
+initLocalModels();
 initReplicateBilling();
 
 loadTasks();

@@ -9,6 +9,7 @@ from src.service.srt.replicate_schema import (
     get_video_language_options,
     get_whisper_model_weight_options,
 )
+from src.service.model_manager import MODEL_CATALOG, MODEL_NAMES, model_manager
 
 router = APIRouter(prefix="/api/srt", tags=["srt"])
 
@@ -36,12 +37,27 @@ def list_model_options() -> list[str]:
     """返回带识别后端标识的 Whisper 模型选项。"""
     try:
         replicate_models = get_whisper_model_weight_options()
-        return ["local:tiny"] + [f"replicate:{model}" for model in replicate_models]
+        local_models = [f"local:{item['name']}" for item in MODEL_CATALOG if item["name"] != "tiny"]
+        return ["local:tiny"] + local_models + [f"replicate:{model}" for model in replicate_models]
     except ReplicateSchemaError as exc:
         # Local recognition is the default and must remain usable without a
         # Replicate token or network access. Keep the compatibility option when
         # Replicate is available, but degrade this listing to local:tiny.
         return ["local:tiny"]
+
+
+@router.get("/local-models")
+def list_local_models() -> list[dict]:
+    """返回本地 faster-whisper 模型目录及下载状态。"""
+    return model_manager.list_models()
+
+
+@router.post("/local-models/{model_name}/download")
+def download_local_model(model_name: str) -> dict:
+    """启动本地模型下载并返回可轮询的状态。"""
+    if model_name not in MODEL_NAMES:
+        raise HTTPException(status_code=404, detail=f"不支持的本地 Whisper 模型: {model_name}")
+    return model_manager.download(model_name)
 
 
 @router.get("/target-languages", response_model=list[str])

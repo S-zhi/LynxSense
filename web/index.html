@@ -470,6 +470,9 @@
               <button class="advanced-tab" id="settings-tab-replicate" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-replicate" data-settings-tab="replicate" tabindex="-1">
                 <i class="ph ph-cloud" aria-hidden="true"></i><span>Replicate</span>
               </button>
+              <button class="advanced-tab" id="settings-tab-models" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-models" data-settings-tab="models" tabindex="-1">
+                <i class="ph ph-cpu" aria-hidden="true"></i><span>本地模型</span>
+              </button>
               <button class="advanced-tab" id="settings-tab-probe" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-probe" data-settings-tab="probe" tabindex="-1">
                 <i class="ph ph-pulse" aria-hidden="true"></i><span>下载测试</span>
               </button>
@@ -477,6 +480,13 @@
                 <i class="ph ph-cloud-arrow-up" aria-hidden="true"></i><span>Google Drive</span>
               </button>
             </nav>
+
+            <div class="advanced-tab-panel" id="settings-panel-models" role="tabpanel" aria-labelledby="settings-tab-models" data-settings-panel="models" hidden>
+              <div class="audio-settings" id="localModelsSettings">
+                <header class="audio-settings__head"><div class="audio-settings__intro"><span class="eyebrow">LOCAL / FASTER WHISPER</span><h2>本地模型</h2><p>下载后即可在任务页使用本地 Whisper，下载过程不会阻塞其他任务。</p></div></header>
+                <div id="localModelsList" class="settings"></div>
+              </div>
+            </div>
 
             <div class="advanced-tab-panel" id="settings-panel-audio" role="tabpanel" aria-labelledby="settings-tab-audio" data-settings-panel="audio" hidden>
               <div class="audio-settings" id="audioSettings">
