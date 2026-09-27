@@ -50,6 +50,7 @@ from src.handler.schemas import (
 )
 from src.service.runner import _cleanup_partial_artifacts, cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
+from src.service.model_manager import MODEL_NAMES, model_manager
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
     DOWNGRADE_REASON_UNKNOWN,
@@ -63,6 +64,13 @@ from src.store import (
 )
 
 logger = logging.getLogger(__name__)
+
+def _ensure_local_model_ready(model: str) -> None:
+    value = str(model or "")
+    if value.startswith("local:"):
+        name = value.split(":", 1)[1]
+        if name not in MODEL_NAMES or not model_manager.is_ready(name):
+            raise HTTPException(status_code=409, detail={"code": "MODEL_NOT_READY", "message": f"本地模型尚未下载完成: {name}"})
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -261,6 +269,7 @@ def create_task(
     engines: TranslationEngineStore = Depends(get_translation_engine_store),
     task_origin: str = Header("web", alias="X-Task-Origin"),
 ) -> TaskOut:
+    _ensure_local_model_ready(body.model)
     _ensure_translation_engine(body.engine, body.needSubtitle, engines)
     rec, created = store.create_if_no_recent_active(
         url=body.url,
@@ -309,6 +318,7 @@ def create_upload_task(
     max_upload_bytes = settings.max_upload_mb * 1024 * 1024
     filename = (file.filename or "").strip()
     _ensure_translation_engine(engine, needSubtitle, engines)
+    _ensure_local_model_ready(model)
     ext = Path(filename).suffix.lower()
     if ext not in _UPLOAD_VIDEO_EXTS:
         supported_formats = sorted(_UPLOAD_VIDEO_EXTS)

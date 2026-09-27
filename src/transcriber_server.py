@@ -106,6 +106,7 @@ async def transcribe_audio(request: Request, authorization: Optional[str] = Head
                 compute_type=settings.local_whisper_compute_type,
                 download_root=settings.local_whisper_download_root,
                 beam_size=settings.local_whisper_beam_size,
+                require_model_ready=True,
             )
         service = _service
         response = await run_in_threadpool(

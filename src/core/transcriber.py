@@ -26,6 +26,7 @@ import replicate
 
 from src.config import settings, ensure_task_dir, ORIGINAL_SRT
 from src.core.srt_utils import Subtitle, decode_srt_bytes, write_srt
+from src.service.model_manager import MODEL_NAMES, model_manager
 
 logger = logging.getLogger(__name__)
 
@@ -521,12 +522,16 @@ class LocalWhisperTranscriber:
         compute_type: str = "int8",
         download_root: Optional[str] = None,
         beam_size: int = 5,
+        require_model_ready: bool = False,
     ):
         self.model_name = model_name
         self.device = device
         self.compute_type = compute_type
         self.download_root = download_root
         self.beam_size = max(1, int(beam_size))
+        # Direct callers historically allowed faster-whisper to resolve a
+        # model by name. Managed pipeline construction opts into the catalog.
+        self.require_model_ready = require_model_ready
         self._model = None
         self._loaded_model_name: Optional[str] = None
         self._model_lock = threading.Lock()
@@ -542,14 +547,21 @@ class LocalWhisperTranscriber:
                         "本地 Whisper 需要安装 faster-whisper",
                         code="missing_dependency",
                     ) from exc
+                model_ref = selected_model
                 kwargs = {
                     "device": self.device,
                     "compute_type": self.compute_type,
                 }
-                if self.download_root:
+                if selected_model in MODEL_NAMES and self.require_model_ready:
+                    try:
+                        model_ref = model_manager.resolve_path(selected_model)
+                        kwargs["local_files_only"] = True
+                    except Exception as exc:
+                        raise TranscribeError(str(exc), code="model_not_ready") from exc
+                elif self.download_root:
                     kwargs["download_root"] = self.download_root
                 try:
-                    self._model = WhisperModel(selected_model, **kwargs)
+                    self._model = WhisperModel(model_ref, **kwargs)
                 except Exception as exc:
                     raise TranscribeError(
                         f"本地 Whisper 模型加载失败: {exc}",
@@ -656,6 +668,7 @@ def _build_transcriber_service(backend: Optional[str] = None) -> TranscriberServ
                 compute_type=config[2],
                 download_root=config[3],
                 beam_size=config[4],
+                require_model_ready=True,
             )
             _LOCAL_WHISPER_SERVICES[config] = service
         return service
