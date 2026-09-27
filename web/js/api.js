@@ -751,7 +751,7 @@ const MockApi = (() => {
     },
     async reburnSubtitles(id /* , payload */) {
       await delay(900);
-      return { ok: true, taskId: id, mode: "hard", outputPath: "output.mp4" };
+      return { ok: true, taskId: id, mode: "hard", outputPath: "output_hard.mp4" };
     },
     subscribeProgress(id, onUpdate) {
       const t = find(id);

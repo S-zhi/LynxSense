@@ -442,8 +442,9 @@ class SubtitleBurningHandler(PipelineHandler):
         tid = context.task_id
         context.emit("BURNING", 85)
         context.resources.video_path = AssetResolver.require_source(tid)
-        if context.artifact_available(AssetResolver.resolve_output_video):
-            context.resources.output_video_path = AssetResolver.require_output_video(tid)
+        resolver = lambda task_id: AssetResolver.resolve_output_video(task_id, params.burn)
+        if context.artifact_available(resolver):
+            context.resources.output_video_path = AssetResolver.require_output_video(tid, params.burn)
             context.emit("BURNING", 100)
         else:
             burn_subtitles(
@@ -453,7 +454,7 @@ class SubtitleBurningHandler(PipelineHandler):
                 mode=params.burn,
                 on_progress=context.step_callback("BURNING"),
             )
-            context.resources.output_video_path = AssetResolver.require_output_video(tid)
+            context.resources.output_video_path = AssetResolver.require_output_video(tid, params.burn)
 
         outputs = {
             "video": str(context.resources.output_video_path),

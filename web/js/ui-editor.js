@@ -109,7 +109,7 @@ function renderList() {
       <span class="editem__thumb" aria-hidden="true"><i class="ph ph-text-aa"></i></span>
       <span class="editem__body">
         <span class="editem__title">${escapeHtml(t.title || "成品视频")}</span>
-        <span class="editem__meta">${LANG_LABEL[t.targetLang] || t.targetLang} · ${t.burn === "hard" ? "硬字幕" : "软字幕"}</span>
+        <span class="editem__meta">${LANG_LABEL[t.targetLang] || t.targetLang} · ${t.burn === "hard" ? "硬字幕" : "软字幕（可开关）"}</span>
       </span>`;
     item.addEventListener("click", () => selectTask(t.id));
     listEl.append(item);
@@ -151,7 +151,7 @@ function renderMain() {
   if (!currentDoc) return;
   const t = state.tasks.find((x) => x.id === currentTaskId);
   titleEl.textContent = t ? (t.title || "字幕编辑") : "字幕编辑";
-  const burn = t ? (t.burn === "hard" ? "硬字幕" : "软字幕") : "";
+  const burn = t ? (t.burn === "hard" ? "硬字幕" : "软字幕（可开关）") : "";
   subEl.textContent = `烧录方式：${burn} · 原文与译文对照编辑 · 共 ${entryCount()} 条`;
   actionsEl.hidden = false;
   renderSubs();
@@ -425,7 +425,7 @@ async function onSave() {
 
 async function onReburn() {
   if (!currentTaskId) return;
-  if (!confirm("将基于当前 translated.srt 重新烧录 output.mp4。确定继续？")) return;
+  if (!confirm("将基于当前 translated.srt 重新烧录并生成带模式标识的成品视频。确定继续？")) return;
   reburnBtn.disabled = true;
   try {
     const res = await Api.reburnSubtitles(currentTaskId, {});

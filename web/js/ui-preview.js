@@ -79,7 +79,7 @@ function renderList(completed) {
       <span class="pvitem__body">
         <span class="pvitem__title">${escapeHtml(t.title || "成品视频")}</span>
         <span class="pvitem__meta">${LANG_LABEL[t.targetLang] || t.targetLang} · ${
-      t.burn === "hard" ? "硬字幕" : "软字幕"
+      t.burn === "hard" ? "硬字幕" : "软字幕（可开关）"
     }</span>
       </span>`;
     item.addEventListener("click", () => setPreviewId(t.id));
@@ -129,7 +129,7 @@ function renderStage(sel) {
     tracks,
     stageTag(`${LANG_LABEL[sel.sourceLang] || sel.sourceLang} → ${LANG_LABEL[sel.targetLang] || sel.targetLang}`),
     stageTag(sel.mode === "bilingual" ? "双语" : "单语"),
-    stageTag(sel.burn === "hard" ? "硬字幕" : "软字幕")
+    stageTag(sel.burn === "hard" ? "硬字幕" : "软字幕（可开关）")
   );
   const actions = el("div", "stage__actions");
   const folder = el("button", "btn btn--ghost btn--sm");

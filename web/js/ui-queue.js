@@ -95,7 +95,7 @@ function buildRow(t) {
     metaBox.append(
       tag(`${LANG_LABEL[t.sourceLang] || t.sourceLang} → ${LANG_LABEL[t.targetLang] || t.targetLang}`),
       tag(t.mode === "bilingual" ? "双语对照" : "仅译文"),
-      tag(t.burn === "hard" ? "硬烧录" : "软字幕"),
+      tag(t.burn === "hard" ? "硬烧录" : "软字幕（可开关）"),
       tag("whisper " + t.model)
     );
   }

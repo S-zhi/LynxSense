@@ -18,7 +18,19 @@ SOURCE_VIDEO_STEM = "source"      # 下载的原始视频 source.mp4
 AUDIO_FILENAME = "audio.wav"      # 提取的音频
 ORIGINAL_SRT = "original.srt"     # 识别出的原文字幕
 TRANSLATED_SRT = "translated.srt"  # 翻译后的字幕
-OUTPUT_VIDEO = "output.mp4"       # 烧录后的成品
+OUTPUT_VIDEO = "output.mp4"       # 旧版烧录成品（仅用于读取兼容）
+OUTPUT_VIDEO_HARD = "output_hard.mp4"
+OUTPUT_VIDEO_SOFT = "output_soft.mp4"
+OUTPUT_VIDEO_NAMES = (OUTPUT_VIDEO_HARD, OUTPUT_VIDEO_SOFT, OUTPUT_VIDEO)
+
+
+def output_video_filename(mode: str) -> str:
+    """Return the mode-specific output filename."""
+    if mode == "hard":
+        return OUTPUT_VIDEO_HARD
+    if mode == "soft":
+        return OUTPUT_VIDEO_SOFT
+    raise ValueError(f"unknown burn mode: {mode}")
 
 
 def _safe_name(name: str) -> str:
@@ -128,5 +140,5 @@ def artifacts_present(task_id: str, *, data_dir: Path, need_subtitle: bool) -> b
     if not d.is_dir():
         return False
     if need_subtitle:
-        return (d / OUTPUT_VIDEO).exists() and (d / TRANSLATED_SRT).exists()
+        return any((d / name).is_file() for name in OUTPUT_VIDEO_NAMES) and (d / TRANSLATED_SRT).is_file()
     return any(d.glob(f"{SOURCE_VIDEO_STEM}.*"))

@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 from src.config import (
     AUDIO_FILENAME,
     OUTPUT_VIDEO,
+    OUTPUT_VIDEO_HARD,
+    OUTPUT_VIDEO_SOFT,
     ORIGINAL_SRT,
     SOURCE_VIDEO_STEM,
     TRANSLATED_SRT,
@@ -325,7 +327,7 @@ def _classify(name: str) -> str:
         return "original_srt"
     if low == TRANSLATED_SRT.lower():
         return "translated_srt"
-    if low == OUTPUT_VIDEO.lower():
+    if low in {OUTPUT_VIDEO.lower(), OUTPUT_VIDEO_HARD.lower(), OUTPUT_VIDEO_SOFT.lower()}:
         return "output"
     return "other"
 

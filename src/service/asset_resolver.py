@@ -11,6 +11,8 @@ from src.config import (
     ArtifactStore,
     AUDIO_FILENAME,
     OUTPUT_VIDEO,
+    OUTPUT_VIDEO_NAMES,
+    output_video_filename,
     SOURCE_VIDEO_STEM,
     TRANSLATED_SRT,
     ORIGINAL_SRT,
@@ -215,16 +217,21 @@ class AssetResolver:
         return ResourceState.AVAILABLE, p, ""
 
     @classmethod
-    def resolve_output_video(cls, task_id: str) -> Tuple[ResourceState, Optional[Path], str]:
-        """解析 output.mp4"""
+    def resolve_output_video(cls, task_id: str, mode: Optional[str] = None) -> Tuple[ResourceState, Optional[Path], str]:
+        """解析模式化成品，兼容旧版 output.mp4。"""
         d = task_dir(task_id)
-        p = d / OUTPUT_VIDEO
-        state = cls.check_file_state(p)
-        if state == ResourceState.DELETED:
-            return ResourceState.DELETED, None, "成品视频文件缺失，资源已删除"
-        elif state == ResourceState.UNREADABLE:
-            return ResourceState.UNREADABLE, p, f"成品视频文件损坏或不可读: {OUTPUT_VIDEO}"
-        return ResourceState.AVAILABLE, p, ""
+        unreadable = None
+        names = (output_video_filename(mode), OUTPUT_VIDEO) if mode in ("hard", "soft") else OUTPUT_VIDEO_NAMES
+        for name in names:
+            p = d / name
+            state = cls.check_file_state(p)
+            if state == ResourceState.AVAILABLE:
+                return ResourceState.AVAILABLE, p, ""
+            if state == ResourceState.UNREADABLE:
+                unreadable = p
+        if unreadable is not None:
+            return ResourceState.UNREADABLE, unreadable, f"成品视频文件损坏或不可读: {unreadable.name}"
+        return ResourceState.DELETED, None, "成品视频文件缺失，资源已删除"
 
     @classmethod
     def require_source(cls, task_id: str) -> Path:
@@ -243,15 +250,15 @@ class AssetResolver:
             return
 
         step_artifacts_map = {
-            "BURNING": [OUTPUT_VIDEO],
-            "TRANSLATING": [TRANSLATED_SRT, OUTPUT_VIDEO],
-            "TRANSCRIBING": [ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
-            "EXTRACTING": [AUDIO_FILENAME, "audio.meta.json", "vocal.wav", "vocal.meta.json", ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
-            "DOWNLOADING": [AUDIO_FILENAME, "audio.meta.json", "vocal.wav", "vocal.meta.json", ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO],
+            "BURNING": list(OUTPUT_VIDEO_NAMES),
+            "TRANSLATING": [TRANSLATED_SRT, *OUTPUT_VIDEO_NAMES],
+            "TRANSCRIBING": [ORIGINAL_SRT, TRANSLATED_SRT, *OUTPUT_VIDEO_NAMES],
+            "EXTRACTING": [AUDIO_FILENAME, "audio.meta.json", "vocal.wav", "vocal.meta.json", ORIGINAL_SRT, TRANSLATED_SRT, *OUTPUT_VIDEO_NAMES],
+            "DOWNLOADING": [AUDIO_FILENAME, "audio.meta.json", "vocal.wav", "vocal.meta.json", ORIGINAL_SRT, TRANSLATED_SRT, *OUTPUT_VIDEO_NAMES],
         }
 
         to_remove_names = set(step_artifacts_map.get(current_step, [
-            AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO
+            AUDIO_FILENAME, ORIGINAL_SRT, TRANSLATED_SRT, *OUTPUT_VIDEO_NAMES
         ]))
 
         to_remove_names.add("tmp_burn.srt")
@@ -314,8 +321,8 @@ class AssetResolver:
         return path
 
     @classmethod
-    def require_output_video(cls, task_id: str) -> Path:
-        state, path, msg = cls.resolve_output_video(task_id)
+    def require_output_video(cls, task_id: str, mode: Optional[str] = None) -> Path:
+        state, path, msg = cls.resolve_output_video(task_id, mode)
         if state != ResourceState.AVAILABLE or path is None:
             raise ResourceError(msg, state)
         return path
