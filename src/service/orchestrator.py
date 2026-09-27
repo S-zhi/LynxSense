@@ -444,7 +444,9 @@ class SubtitleBurningHandler(PipelineHandler):
         context.resources.video_path = AssetResolver.require_source(tid)
         resolver = lambda task_id: AssetResolver.resolve_output_video(task_id, params.burn)
         if context.artifact_available(resolver):
-            context.resources.output_video_path = AssetResolver.require_output_video(tid, params.burn)
+            # Keep the legacy one-argument call contract for injected resolvers
+            # and test doubles; mode-aware selection already happened above.
+            context.resources.output_video_path = AssetResolver.require_output_video(tid)
             context.emit("BURNING", 100)
         else:
             burn_subtitles(
@@ -454,7 +456,7 @@ class SubtitleBurningHandler(PipelineHandler):
                 mode=params.burn,
                 on_progress=context.step_callback("BURNING"),
             )
-            context.resources.output_video_path = AssetResolver.require_output_video(tid, params.burn)
+            context.resources.output_video_path = AssetResolver.require_output_video(tid)
 
         outputs = {
             "video": str(context.resources.output_video_path),
