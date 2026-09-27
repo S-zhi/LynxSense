@@ -78,7 +78,7 @@ class PipelineParams:
     target_lang: str
     mode: str = "mono"     # mono | bilingual
     burn: str = "hard"     # hard | soft
-    model: str = "small"
+    model: str = "local:tiny"
     engine: str = "deepseek"
     source_type: str = "url"    # url=在线链接下载 upload=本地上传视频
     need_subtitle: bool = True  # False = 仅下载视频，跳过识别/翻译/烧录

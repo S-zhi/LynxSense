@@ -70,7 +70,7 @@ curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/instal
 
 这个稳定地址始终下载最新正式版的 `install.sh`，脚本会安装与该 Release 对应的代码版本。
 
-安装器会在终端中静默询问 Replicate 和 DeepSeek 密钥，并自动完成代码下载、FFmpeg、uv、Python 3.12、项目依赖、持久化目录、systemd 服务和健康检查。安装结束后打开 `http://服务器IP:8000/`。
+安装器会在终端中静默询问 DeepSeek API 密钥，并自动完成代码下载、FFmpeg、uv、Python 3.12、项目依赖、持久化目录、systemd 服务和健康检查。安装结束后打开 `http://服务器IP:8000/`。
 
 ```bash
 systemctl status subtitles-ai --no-pager
@@ -87,7 +87,7 @@ journalctl -u subtitles-ai -f
 
 ```bash
 cp .env.example .env
-# 在 .env 中填写 REPLICATE_API_TOKEN 和 SUBTRANS_DEEPSEEK_API_KEY
+# 在 .env 中填写 SUBTRANS_DEEPSEEK_API_KEY；识别默认使用本地 faster-whisper tiny 模型
 docker build -t lynxsense:local .
 ```
 
@@ -137,7 +137,6 @@ cp .env.example .env
 在 `.env` 中填写：
 
 ```ini
-REPLICATE_API_TOKEN=your-replicate-token
 SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 ```
 
@@ -239,7 +238,7 @@ check_subtitle_setup → probe_video → start_subtitle_pipeline
 
 任务进入 `FAILED` 时先向用户展示错误和阶段，只有用户确认后才调用 `retry_task`。如果返回 `TASK_ALREADY_RUNNING`，复用返回的 `task_id`；只有状态为 `SUCCESS` 时才调用 `get_task_artifacts`。`RESOURCE_MISSING` 表示产物已被清理，需要重新运行任务；`HARD_BURN_UNAVAILABLE` 时应询问用户改用 `burn=soft` 或安装带 libass 的 FFmpeg，不能静默改变明确指定的硬字幕选项。
 
-`start_subtitle_pipeline` 的默认参数为 `source_lang=auto`、`target_lang=zh-CN`、`mode=mono`、`burn=hard`、`model=small` 和 `need_subtitle=true`。支持的主要错误码包括 `BUSINESS_UNAVAILABLE`、`NOT_INITIALIZED`、`INVALID_URL`、`PROBE_FAILED`、`INVALID_ARGUMENT`、`TASK_NOT_READY`、`TASK_NOT_FOUND` 和 `RESOURCE_MISSING`。
+`start_subtitle_pipeline` 的默认参数为 `source_lang=auto`、`target_lang=zh-CN`、`mode=mono`、`burn=hard`、`model=local:tiny` 和 `need_subtitle=true`。支持的主要错误码包括 `BUSINESS_UNAVAILABLE`、`NOT_INITIALIZED`、`INVALID_URL`、`PROBE_FAILED`、`INVALID_ARGUMENT`、`TASK_NOT_READY`、`TASK_NOT_FOUND` 和 `RESOURCE_MISSING`。
 
 ### Streamable HTTP：接入远程或共享 Host
 
@@ -299,7 +298,7 @@ flowchart LR
     Runner --> Download["yt-dlp 下载"]
     Download --> Audio["FFmpeg 提取音频"]
     Audio --> Separate["可选：CPU 人声分离"]
-    Separate --> ASR["Replicate Whisper 识别"]
+    Separate --> ASR["本地 faster-whisper tiny 识别"]
     ASR --> Translate["DeepSeek 翻译"]
     Translate --> Burn["FFmpeg 字幕封装"]
     Burn --> Store["视频 + SRT + SQLite 状态"]
@@ -337,7 +336,8 @@ export SUBTRANS_VOCAL_SEPARATION_COMMAND="python -m demucs.separate"
 | `SUBTRANS_DOWNLOAD_WORKERS` | `2` | 同时进行 yt-dlp 媒体下载的任务数 |
 | `SUBTRANS_DL_CONCURRENT_FRAGMENTS` | `4` | 单个 HLS/DASH 下载的分片并发数 |
 | `SUBTRANS_COOKIES` | 空 | 需要登录或验证的网站 cookies 文件 |
-| `SUBTRANS_WHISPER_MODEL` | 锁定版本 | Replicate Whisper 模型 |
+| `SUBTRANS_TRANSCRIBER_BACKEND` | `local_whisper` | 识别后端；`replicate` 为可选兼容路径 |
+| `SUBTRANS_LOCAL_WHISPER_MODEL` | `tiny` | 本地 faster-whisper 模型 |
 | `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | 翻译模型 |
 | `SUBTRANS_API_BASE_URL` | `http://127.0.0.1:8000` | MCP 访问的业务 API 地址 |
 | `SUBTRANS_MCP_TRANSPORT` | `stdio` | `stdio` 或 `streamable-http` |
@@ -351,7 +351,7 @@ export SUBTRANS_VOCAL_SEPARATION_COMMAND="python -m demucs.separate"
 
 ```bash
 uv sync
-uv run pytest -q
+uv run pytest -q  # Python unit tests (CI job: python-unit-test)
 cd web && npm test
 ```
 

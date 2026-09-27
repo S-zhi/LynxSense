@@ -299,15 +299,17 @@ def test_whitespace_api_key_make_engine_client():
     assert client.api_key == "sk-padded"
 
 
-def test_whitespace_api_key_endpoints(tmp_path):
+def test_whitespace_api_key_endpoints(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from src.handler.app import app
     from src.handler.deps import get_store, get_translation_engine_store, reset_singletons
+    from src.handler import tasks as tasks_routes
     from src.store.task_store import TaskStore
 
     db_path = tmp_path / "subtitles.db"
     store = TaskStore(db_path)
     engine_store = TranslationEngineStore(db_path)
+    monkeypatch.setattr(tasks_routes, "_ensure_local_model_ready", lambda model: None)
 
     reset_singletons()
     app.dependency_overrides[get_store] = lambda: store

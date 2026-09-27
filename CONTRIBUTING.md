@@ -135,7 +135,7 @@ docs: update README
 本项目使用 `uv` 包装 `pytest`。在提交前请在根目录下执行：
 
 ```bash
-uv run pytest -q
+uv run pytest -q  # Python unit tests (CI job: python-unit-test)
 ```
 
 如果只测试了特定模块：

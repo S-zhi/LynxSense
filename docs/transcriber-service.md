@@ -1,6 +1,6 @@
 # Transcriber service protocol
 
-The transcription stage accepts either the default Replicate backend or a compatible custom HTTP service. Select the backend with `SUBTRANS_TRANSCRIBER_BACKEND`; the default is `replicate`.
+The transcription stage uses the local `faster-whisper` backend by default. Replicate remains available as an optional compatibility backend, as does a compatible custom HTTP service.
 
 ## Configuration
 
@@ -11,18 +11,18 @@ SUBTRANS_TRANSCRIBER_API_KEY=optional-bearer-token
 SUBTRANS_TRANSCRIBER_TIMEOUT=1800
 ```
 
-Use `replicate` (or omit the setting) to keep the existing Replicate Whisper behavior. `local_whisper` runs the OpenAI open-source Whisper model locally through `faster-whisper`. `http`, `custom`, and `custom_http` select the custom HTTP adapter.
+Use `replicate` explicitly to keep the existing Replicate Whisper behavior. `local_whisper` runs the OpenAI open-source Whisper model locally through `faster-whisper`. `http`, `custom`, and `custom_http` select the custom HTTP adapter.
 
 For the directly embedded local backend:
 
 ```dotenv
 SUBTRANS_TRANSCRIBER_BACKEND=local_whisper
-SUBTRANS_LOCAL_WHISPER_MODEL=small
+SUBTRANS_LOCAL_WHISPER_MODEL=tiny
 SUBTRANS_LOCAL_WHISPER_DEVICE=cpu
 SUBTRANS_LOCAL_WHISPER_COMPUTE_TYPE=int8
 ```
 
-The `faster-whisper` package is already included in this project's dependencies. Run `uv sync --dev` to install them. The first request downloads the selected model from Hugging Face. Use `tiny` for a quick CPU smoke test, `small` for the default quality/speed balance, or `medium`/`large-v3` when the machine has enough memory. GPU users can set `SUBTRANS_LOCAL_WHISPER_DEVICE=cuda` and a CUDA-compatible compute type such as `float16`. A model selected for an individual task overrides `SUBTRANS_LOCAL_WHISPER_MODEL`.
+The `faster-whisper` package is already included in this project's dependencies. Run `uv sync --dev` to install them. The first request downloads the selected model from Hugging Face. The default `tiny` model keeps local startup light; use `small`, `medium`, or `large-v3` when the machine has enough memory. GPU users can set `SUBTRANS_LOCAL_WHISPER_DEVICE=cuda` and a CUDA-compatible compute type such as `float16`. A model selected for an individual task overrides `SUBTRANS_LOCAL_WHISPER_MODEL`.
 
 The same implementation is available as a standalone HTTP service:
 

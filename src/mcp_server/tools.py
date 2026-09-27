@@ -108,7 +108,7 @@ class SubtitleMcpTools:
         target_lang: str = "zh-CN",
         mode: Literal["mono", "bilingual"] = "mono",
         burn: Literal["hard", "soft"] = "hard",
-        model: str = "small",
+        model: str = "local:tiny",
         need_subtitle: bool = True,
     ) -> dict[str, Any]:
         if not _valid_video_url(url):

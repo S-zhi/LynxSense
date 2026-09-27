@@ -303,7 +303,7 @@ def create_upload_task(
     targetLang: str = Form("zh-CN", min_length=1),
     mode: Literal["mono", "bilingual"] = Form("mono"),
     burn: Literal["hard", "soft"] = Form("hard"),
-    model: str = Form("small", min_length=1),
+    model: str = Form("local:tiny", min_length=1),
     engine: str = Form("deepseek", min_length=1),
     needSubtitle: bool = Form(True),
     store: TaskStore = Depends(get_store),

@@ -10,7 +10,7 @@
 curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh | sudo bash
 ```
 
-脚本会静默询问 `REPLICATE_API_TOKEN` 和 `SUBTRANS_DEEPSEEK_API_KEY`，输入内容不会显示在终端；随后会安装 FFmpeg、uv、Python 3.12 和锁定依赖，创建持久化目录、systemd 服务并执行健康检查。重复运行时，密钥输入留空会保留 `.env` 中的现有值。
+脚本会静默询问 `SUBTRANS_DEEPSEEK_API_KEY`，输入内容不会显示在终端；随后会安装 FFmpeg、uv、Python 3.12 和锁定依赖，创建持久化目录、systemd 服务并执行健康检查。重复运行时，密钥输入留空会保留 `.env` 中的现有值。
 
 如果希望执行前先检查脚本，可以下载后再运行：
 
@@ -24,7 +24,6 @@ sudo bash /tmp/subtitles-ai-install.sh
 
 ```bash
 sudo env \
-  REPLICATE_API_TOKEN='your-replicate-token' \
   SUBTRANS_DEEPSEEK_API_KEY='your-deepseek-key' \
   bash /opt/subtitles-ai/install.sh --non-interactive
 ```
@@ -42,7 +41,7 @@ curl http://127.0.0.1:8000/api/health
 - Python 3.10–3.12（推荐 3.12）
 - `uv`
 - FFmpeg、FFprobe；硬字幕还要求 FFmpeg 含 `subtitles`/libass 滤镜
-- 可访问 Replicate 和 DeepSeek API 的网络
+- 可访问 DeepSeek API 的网络；语音识别默认使用本地 faster-whisper tiny 模型
 - 建议至少 2 核 CPU、4 GB 内存，并为视频产物预留足够磁盘空间
 
 安装系统依赖：
@@ -98,7 +97,6 @@ chmod 600 .env
 编辑 `.env`，至少填写下面两个密钥：
 
 ```ini
-REPLICATE_API_TOKEN=你的-replicate-token
 SUBTRANS_DEEPSEEK_API_KEY=你的-deepseek-api-key
 ```
 

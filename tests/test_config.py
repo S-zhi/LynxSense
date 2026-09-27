@@ -127,6 +127,17 @@ def test_transcriber_settings_read_from_env(monkeypatch):
     assert settings.transcriber_timeout == 90
 
 
+def test_transcriber_defaults_use_local_tiny(monkeypatch):
+    monkeypatch.delenv("SUBTRANS_TRANSCRIBER_BACKEND", raising=False)
+    monkeypatch.delenv("SUBTRANS_LOCAL_WHISPER_MODEL", raising=False)
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+
+    settings = config.Settings()
+
+    assert settings.transcriber_backend == "local_whisper"
+    assert settings.local_whisper_model == "tiny"
+
+
 def test_local_whisper_settings_read_from_env(monkeypatch):
     monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_MODEL", "tiny")
     monkeypatch.setenv("SUBTRANS_LOCAL_WHISPER_DEVICE", "cuda")

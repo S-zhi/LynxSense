@@ -32,7 +32,8 @@ def test_readiness_reports_fixed_config_location_and_missing_values(monkeypatch,
     assert result["ok"] is False
     assert result["initialized"] is False
     assert result["config_file"] == str(tmp_path / ".env")
-    assert "REPLICATE_API_TOKEN" in result["missing"]
+    assert "REPLICATE_API_TOKEN" not in result["missing"]
+    assert "REPLICATE_API_TOKEN" not in result["required_environment"]
     assert "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY" in result["missing"]
     assert result["capabilities"]["download"] is False
     assert result["agent_action"] == "ask_user_to_configure"
@@ -128,10 +129,10 @@ def test_readiness_reports_invalid_replicate_token(monkeypatch, tmp_path):
 
     result = runtime_check.build_readiness()
 
-    assert result["ok"] is False
-    assert result["initialized"] is False
+    assert result["ok"] is True
+    assert result["initialized"] is True
     assert result["checks"]["replicate_api_token"] == "invalid"
-    assert "REPLICATE_API_TOKEN（Token 无效或已过期）" in result["missing"]
+    assert "REPLICATE_API_TOKEN（Token 无效或已过期）" not in result["missing"]
 
 
 def test_readiness_reports_cached_replicate_check_metadata(monkeypatch, tmp_path):
@@ -225,7 +226,7 @@ def test_readiness_handles_replicate_query_exception_without_leaking_details(mon
     assert result["checks"]["replicate_api_token"] == "network_error"
     assert result["replicate_checked_at"] is not None
     assert result["replicate_cached"] is False
-    assert "Replicate 服务暂时不可达，请检查网络连接" in result["missing"]
+    assert "Replicate 服务暂时不可达，请检查网络连接" not in result["missing"]
     assert "upstream secret details" not in str(result)
 
 

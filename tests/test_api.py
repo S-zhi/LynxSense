@@ -38,6 +38,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.service.asset_resolver.task_dir", lambda tid: tmp_path / tid)
     # 不在 API 测试里真跑流水线（执行器单独测）
     monkeypatch.setattr(tasks_routes, "enqueue_pipeline", lambda task_id: None)
+    # API tests exercise request validation and persistence; model download
+    # readiness is covered by the local model endpoint tests.
+    monkeypatch.setattr(tasks_routes, "_ensure_local_model_ready", lambda model: None)
     # 默认 mock probe_duration 返回 10 秒，避免单元测试依赖系统 ffprobe 命令
     monkeypatch.setattr(tasks_routes, "probe_duration", lambda path, bin_path: 10.0)
     # 默认 mock 提供 DeepSeek Key 及临时 data_dir，确保其它 Task 创建测试不受影响
