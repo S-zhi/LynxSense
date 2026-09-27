@@ -64,6 +64,10 @@ _DEFAULT_CORS_ORIGINS = (
     "http://localhost:5273", "http://127.0.0.1:5273",
     "http://localhost:8000", "http://127.0.0.1:8000",
 )
+_DEFAULT_REPLICATE_MODEL = (
+    "stayallive/whisper-subtitles:"
+    "b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969"
+)
 
 
 def _bootstrap_env() -> None:
@@ -92,9 +96,9 @@ _bootstrap_env()
 _last_env_mtime: float = -1.0
 
 # Settings are normally sourced from environment variables.  The web UI also
-# needs a safe, persistent runtime override so changing an audio option does
-# not require restarting the process (and does not get lost when the process
-# has already loaded .env into os.environ).
+# needs safe, persistent runtime overrides so changing an audio or Replicate
+# option does not require restarting the process (and does not get lost when
+# the process has already loaded .env into os.environ).
 _RUNTIME_SETTINGS_LOCK = threading.RLock()
 _RUNTIME_SETTINGS_LOADED = False
 _RUNTIME_SETTINGS_SOURCE: Optional[Path] = None
@@ -106,7 +110,14 @@ _RUNTIME_SETTING_KEYS = {
     "vocal_separation_threads",
     "vocal_separation_command",
     "vocal_separation_timeout",
+    "replicate_api_token",
+    "replicate_whisper_model",
+    "replicate_timeout",
+    "replicate_retries",
+    "replicate_retry_interval",
+    "replicate_poll_interval",
 }
+_RUNTIME_SECRET_KEYS = {"replicate_api_token"}
 
 
 def _runtime_settings_path() -> Path:
@@ -139,7 +150,11 @@ def get_runtime_settings() -> dict[str, Any]:
     """Return persisted runtime overrides (never includes secrets)."""
     _load_runtime_settings()
     with _RUNTIME_SETTINGS_LOCK:
-        return dict(_RUNTIME_SETTINGS)
+        return {
+            key: value
+            for key, value in _RUNTIME_SETTINGS.items()
+            if key not in _RUNTIME_SECRET_KEYS
+        }
 
 
 def update_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -147,13 +162,27 @@ def update_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
     _load_runtime_settings()
     clean = {k: values[k] for k in values if k in _RUNTIME_SETTING_KEYS}
     with _RUNTIME_SETTINGS_LOCK:
-        _RUNTIME_SETTINGS.update(clean)
+        for key, value in clean.items():
+            # None removes an override so the corresponding environment value
+            # becomes effective again. Other values are persisted as-is.
+            if value is None:
+                _RUNTIME_SETTINGS.pop(key, None)
+            else:
+                _RUNTIME_SETTINGS[key] = value
         path = _runtime_settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(json.dumps(_RUNTIME_SETTINGS, ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)
-        return dict(_RUNTIME_SETTINGS)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        return {
+            key: value
+            for key, value in _RUNTIME_SETTINGS.items()
+            if key not in _RUNTIME_SECRET_KEYS
+        }
 
 
 def _runtime_value(key: str) -> Any:
@@ -251,6 +280,7 @@ _ALIAS_MAP = {
     "vocal_separation_command": "_vocal_separation_command",
     "vocal_separation_timeout": "_vocal_separation_timeout",
     "replicate_whisper_model": "_replicate_whisper_model",
+    "replicate_api_token": "_replicate_api_token",
     "replicate_timeout": "_replicate_timeout",
     "replicate_retries": "_replicate_retries",
     "replicate_retry_interval": "_replicate_retry_interval",
@@ -309,6 +339,7 @@ class Settings:
     _vocal_separation_command: Any = field(default=_UNSET, repr=False)
     _vocal_separation_timeout: Any = field(default=_UNSET, repr=False)
     _replicate_whisper_model: Any = field(default=_UNSET, repr=False)
+    _replicate_api_token: Any = field(default=_UNSET, repr=False)
     _replicate_timeout: Any = field(default=_UNSET, repr=False)
     _replicate_retries: Any = field(default=_UNSET, repr=False)
     _replicate_retry_interval: Any = field(default=_UNSET, repr=False)
@@ -362,6 +393,7 @@ class Settings:
         _vocal_separation_command: Any = _UNSET,
         _vocal_separation_timeout: Any = _UNSET,
         _replicate_whisper_model: Any = _UNSET,
+        _replicate_api_token: Any = _UNSET,
         _replicate_timeout: Any = _UNSET,
         _replicate_retries: Any = _UNSET,
         _replicate_retry_interval: Any = _UNSET,
@@ -415,6 +447,7 @@ class Settings:
             "_vocal_separation_command": _vocal_separation_command,
             "_vocal_separation_timeout": _vocal_separation_timeout,
             "_replicate_whisper_model": _replicate_whisper_model,
+            "_replicate_api_token": _replicate_api_token,
             "_replicate_timeout": _replicate_timeout,
             "_replicate_retries": _replicate_retries,
             "_replicate_retry_interval": _replicate_retry_interval,
@@ -766,22 +799,44 @@ class Settings:
             return 1800
 
     # --- ③ 语音识别（Replicate-hosted Whisper）---
+    @property
+    def replicate_api_token(self) -> Optional[str]:
+        """Replicate Token，运行时页面配置优先于环境变量。"""
+        if self._replicate_api_token is not _UNSET:
+            value = self._replicate_api_token
+            return str(value).strip() or None
+        runtime = _runtime_value("replicate_api_token")
+        if runtime is not _UNSET:
+            return str(runtime).strip() or None
+        _sync_env_file()
+        value = (os.getenv("REPLICATE_API_TOKEN") or "").strip()
+        return value or None
+
     # Replicate 模型标识（版本锁定）
     @property
     def replicate_whisper_model(self) -> str:
         if self._replicate_whisper_model is not _UNSET:
-            return self._replicate_whisper_model
+            return str(self._replicate_whisper_model).strip() or _DEFAULT_REPLICATE_MODEL
+        runtime = _runtime_value("replicate_whisper_model")
+        if runtime is not _UNSET:
+            return str(runtime).strip() or _DEFAULT_REPLICATE_MODEL
         _sync_env_file()
         return os.getenv(
             "SUBTRANS_WHISPER_MODEL",
-            "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969",
+            _DEFAULT_REPLICATE_MODEL,
         )
 
     # Replicate 单次 HTTP 请求超时；prediction 的排队/运行通过短轮询跟踪
     @property
     def replicate_timeout(self) -> int:
         if self._replicate_timeout is not _UNSET:
-            return self._replicate_timeout
+            return int(self._replicate_timeout)
+        runtime = _runtime_value("replicate_timeout")
+        if runtime is not _UNSET:
+            try:
+                return int(runtime)
+            except (ValueError, TypeError):
+                pass
         _sync_env_file()
         val = os.getenv("SUBTRANS_REPLICATE_TIMEOUT", "1800")
         try:
@@ -793,7 +848,13 @@ class Settings:
     @property
     def replicate_retries(self) -> int:
         if self._replicate_retries is not _UNSET:
-            return self._replicate_retries
+            return int(self._replicate_retries)
+        runtime = _runtime_value("replicate_retries")
+        if runtime is not _UNSET:
+            try:
+                return int(runtime)
+            except (ValueError, TypeError):
+                pass
         _sync_env_file()
         val = os.getenv("SUBTRANS_REPLICATE_RETRIES", "3")
         try:
@@ -805,7 +866,13 @@ class Settings:
     @property
     def replicate_retry_interval(self) -> float:
         if self._replicate_retry_interval is not _UNSET:
-            return self._replicate_retry_interval
+            return float(self._replicate_retry_interval)
+        runtime = _runtime_value("replicate_retry_interval")
+        if runtime is not _UNSET:
+            try:
+                return float(runtime)
+            except (ValueError, TypeError):
+                pass
         _sync_env_file()
         val = os.getenv("SUBTRANS_REPLICATE_RETRY_INTERVAL", "3600")
         try:
@@ -817,7 +884,13 @@ class Settings:
     @property
     def replicate_poll_interval(self) -> float:
         if self._replicate_poll_interval is not _UNSET:
-            return self._replicate_poll_interval
+            return float(self._replicate_poll_interval)
+        runtime = _runtime_value("replicate_poll_interval")
+        if runtime is not _UNSET:
+            try:
+                return float(runtime)
+            except (ValueError, TypeError):
+                pass
         _sync_env_file()
         val = os.getenv("SUBTRANS_REPLICATE_POLL_INTERVAL", "30")
         try:

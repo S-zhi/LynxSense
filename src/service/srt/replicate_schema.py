@@ -20,6 +20,8 @@ from typing import Any
 
 import httpx
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_REF = (
@@ -63,6 +65,13 @@ class TTLCache:
 _schema_cache = TTLCache(ttl_seconds=3600.0)
 _fetch_lock = threading.Lock()
 REPLICATE_API_BASE = "https://api.replicate.com/v1"
+
+
+def _configured_replicate_token() -> str | None:
+    """读取页面运行时 Token；兼容调用方替换配置前的环境变量行为。"""
+    if hasattr(settings, "replicate_api_token"):
+        return settings.replicate_api_token
+    return os.getenv("REPLICATE_API_TOKEN")
 
 
 class ReplicateSchemaError(RuntimeError):
@@ -135,7 +144,7 @@ def fetch_replicate_version_schema(
             return cached
 
         _load_env_file()
-        token = api_token or os.getenv("REPLICATE_API_TOKEN")
+        token = api_token if api_token is not None else _configured_replicate_token()
         if not token:
             raise ReplicateSchemaError(
                 "未设置 REPLICATE_API_TOKEN，请通过环境变量或项目根 .env 提供"
