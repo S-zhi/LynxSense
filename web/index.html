@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="styles/layout.css" />
     <link rel="stylesheet" href="styles/console.css" />
     <link rel="stylesheet" href="styles/queue.css" />
+    <link rel="stylesheet" href="styles/mcp.css" />
     <link rel="stylesheet" href="styles/preview.css" />
     <link rel="stylesheet" href="styles/editor.css" />
     <link rel="stylesheet" href="styles/probe.css" />
@@ -241,6 +242,51 @@
         </section>
 
         <section class="view" data-view="mcp" id="view-mcp">
+          <section class="mcp-guide" aria-labelledby="mcpGuideTitle">
+            <div class="mcp-guide__intro">
+              <div class="mcp-guide__eyebrow"><i class="ph ph-sparkle" aria-hidden="true"></i> MCP 工作台</div>
+              <div>
+                <h1 id="mcpGuideTitle">让 AI 直接调用字幕处理能力</h1>
+                <p>连接 MCP Server 后，AI Agent 可以帮你探测视频、创建翻译任务并跟踪处理进度。下方说明会一直保留在队列上方，随时可以查看。</p>
+              </div>
+              <div class="mcp-guide__status"><span class="mcp-guide__status-dot"></span><span>连接方式清晰 · 任务异步执行</span></div>
+            </div>
+
+            <div class="mcp-guide__columns">
+              <article class="mcp-guide__card">
+                <div class="mcp-guide__card-head">
+                  <span class="mcp-guide__icon"><i class="ph ph-list-checks" aria-hidden="true"></i></span>
+                  <div><h2>使用说明</h2><p>从连接到拿到字幕，只需三步</p></div>
+                  <span class="mcp-guide__step-count">01—03</span>
+                </div>
+                <ol class="mcp-guide__steps">
+                  <li><span>01</span><div><strong>连接 MCP 客户端</strong><p>在 Claude Desktop、Cursor 等支持 MCP 的客户端中添加本项目 Server。</p></div></li>
+                  <li><span>02</span><div><strong>告诉 AI 你要处理的视频</strong><p>提供视频链接和目标语言，AI 会先检查服务配置与视频可访问性。</p></div></li>
+                  <li><span>03</span><div><strong>等待任务完成并下载</strong><p>任务会异步进入下方队列；完成后可在任务详情中查看字幕与产物。</p></div></li>
+                </ol>
+              </article>
+
+              <article class="mcp-guide__card mcp-guide__card--connect">
+                <div class="mcp-guide__card-head">
+                  <span class="mcp-guide__icon mcp-guide__icon--accent"><i class="ph ph-plugs-connected" aria-hidden="true"></i></span>
+                  <div><h2>MCP 服务器如何接入</h2><p>本地 stdio 连接 · 推荐桌面客户端使用</p></div>
+                </div>
+                <div class="mcp-guide__code-wrap">
+                  <div class="mcp-guide__code-label"><span class="mcp-guide__code-dot"></span> claude_desktop_config.json</div>
+                  <pre><code>{
+  "mcpServers": {
+    "lynxsense": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "src.mcp_server.server"],
+      "cwd": "/你的项目绝对路径"
+    }
+  }
+}</code></pre>
+                </div>
+                <p class="mcp-guide__tip"><i class="ph ph-info" aria-hidden="true"></i><span>先启动业务 API，再重启 MCP 客户端。远程部署可使用 <code>streamable-http</code>，默认地址为 <code>http://127.0.0.1:3001/mcp</code>。</span></p>
+              </article>
+            </div>
+          </section>
           <section class="queue">
             <div class="queue__head">
               <h2>MCP 处理队列</h2>
