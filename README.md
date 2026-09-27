@@ -1,4 +1,4 @@
-[English](./README.en.md) | 简体中文
+[English](./docs/en/README.md) | 简体中文
 
 <div align="center">
   <img src="./web/assets/lynxsense-logo.png" width="88" alt="LynxSense Logo" />
@@ -345,7 +345,7 @@ export SUBTRANS_VOCAL_SEPARATION_COMMAND="python -m demucs.separate"
 | `SUBTRANS_MCP_PORT` | `3001` | Streamable HTTP 监听端口 |
 | `SUBTRANS_MCP_PATH` | `/mcp` | Streamable HTTP 路径 |
 
-完整配置项见 [.env.example](./.env.example) 与 [mcp.env.example](./mcp.env.example)。启动后，直连部署可访问 `http://<服务器公网IP>:8000/docs`，反向代理部署则访问 `https://<你的域名>/docs` 查看 API 文档。
+完整配置项见 [.env.example](./.env.example) 与 [mcp.env.example](./src/mcp_server/mcp.env.example)。启动后，直连部署可访问 `http://<服务器公网IP>:8000/docs`，反向代理部署则访问 `https://<你的域名>/docs` 查看 API 文档。
 
 ## 🧪 开发与验证
 
@@ -368,7 +368,7 @@ web/               原生 HTML / CSS / JavaScript 工作台
 tests/             Python 测试
 ```
 
-参与开发前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。安全问题请通过 [SECURITY.md](./SECURITY.md) 中的私密渠道报告，不要创建公开 Issue。
+参与开发前请阅读 [CONTRIBUTING.md](./.github/CONTRIBUTING.md)。安全问题请通过 [SECURITY.md](./.github/SECURITY.md) 中的私密渠道报告，不要创建公开 Issue。
 
 ## ❓ 常见问题
 

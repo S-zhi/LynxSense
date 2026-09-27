@@ -331,7 +331,7 @@ A failed step moves the job to `FAILED` and records the failing stage and error.
 | `SUBTRANS_MCP_PORT` | `3001` | Streamable HTTP port |
 | `SUBTRANS_MCP_PATH` | `/mcp` | Streamable HTTP path |
 
-See [.env.example](./.env.example) and [mcp.env.example](./mcp.env.example) for all options. Once started, API documentation is available at `http://<SERVER_PUBLIC_IP>:8000/docs` for direct deployment or `https://<YOUR_DOMAIN>/docs` behind a reverse proxy.
+See [.env.example](../../.env.example) and [mcp.env.example](../../src/mcp_server/mcp.env.example) for all options. Once started, API documentation is available at `http://<SERVER_PUBLIC_IP>:8000/docs` for direct deployment or `https://<YOUR_DOMAIN>/docs` behind a reverse proxy.
 
 ## 🧪 Development & Verification
 
@@ -354,7 +354,7 @@ web/               Vanilla HTML / CSS / JavaScript workbench
 tests/             Python tests
 ```
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before contributing. Report security issues privately through [SECURITY.md](./SECURITY.md), not through a public Issue.
+Read [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) before contributing. Report security issues privately through [SECURITY.md](../../.github/SECURITY.md), not through a public Issue.
 
 ## ❓ Troubleshooting
 
