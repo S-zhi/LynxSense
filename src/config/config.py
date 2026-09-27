@@ -232,6 +232,9 @@ _ALIAS_MAP = {
     "probe_cache_ttl_sec": "_probe_cache_ttl_sec",
     "cors_allow_origins": "_cors_allow_origins",
     "download_format": "_download_format",
+    "download_quality": "_download_quality",
+    "download_socket_timeout": "_download_socket_timeout",
+    "download_proxy": "_download_proxy",
     "merge_output_format": "_merge_output_format",
     "cookies_file": "_cookies_file",
     "download_retries": "_download_retries",
@@ -287,6 +290,9 @@ class Settings:
     _probe_cache_ttl_sec: Any = field(default=_UNSET, repr=False)
     _cors_allow_origins: Any = field(default=_UNSET, repr=False)
     _download_format: Any = field(default=_UNSET, repr=False)
+    _download_quality: Any = field(default=_UNSET, repr=False)
+    _download_socket_timeout: Any = field(default=_UNSET, repr=False)
+    _download_proxy: Any = field(default=_UNSET, repr=False)
     _merge_output_format: Any = field(default=_UNSET, repr=False)
     _cookies_file: Any = field(default=_UNSET, repr=False)
     _download_retries: Any = field(default=_UNSET, repr=False)
@@ -337,6 +343,9 @@ class Settings:
         _probe_cache_ttl_sec: Any = _UNSET,
         _cors_allow_origins: Any = _UNSET,
         _download_format: Any = _UNSET,
+        _download_quality: Any = _UNSET,
+        _download_socket_timeout: Any = _UNSET,
+        _download_proxy: Any = _UNSET,
         _merge_output_format: Any = _UNSET,
         _cookies_file: Any = _UNSET,
         _download_retries: Any = _UNSET,
@@ -387,6 +396,9 @@ class Settings:
             "_probe_cache_ttl_sec": _probe_cache_ttl_sec,
             "_cors_allow_origins": _cors_allow_origins,
             "_download_format": _download_format,
+            "_download_quality": _download_quality,
+            "_download_socket_timeout": _download_socket_timeout,
+            "_download_proxy": _download_proxy,
             "_merge_output_format": _merge_output_format,
             "_cookies_file": _cookies_file,
             "_download_retries": _download_retries,
@@ -537,13 +549,53 @@ class Settings:
         _sync_env_file()
         return _env_list("SUBTRANS_CORS_ORIGINS", _DEFAULT_CORS_ORIGINS)
 
-    # yt-dlp 格式选择：最高 480P，优先最佳视频+音频，回退到单一最佳流
+    # yt-dlp 默认清晰度策略（best / 1080p / 720p / 480p / 360p / audio_only）
+    @property
+    def download_quality(self) -> str:
+        if self._download_quality is not _UNSET:
+            return self._download_quality
+        _sync_env_file()
+        return os.getenv("SUBTRANS_DL_QUALITY", "480p").strip().lower()
+
+    # yt-dlp 单连接网络超时时间（秒），默认 30 秒
+    @property
+    def download_socket_timeout(self) -> int:
+        if self._download_socket_timeout is not _UNSET:
+            return self._download_socket_timeout
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_DL_SOCKET_TIMEOUT", "30")
+        try:
+            return max(5, int(val))
+        except (ValueError, TypeError):
+            return 30
+
+    # 可选代理配置（例如 http://127.0.0.1:7890）
+    @property
+    def download_proxy(self) -> Optional[str]:
+        if self._download_proxy is not _UNSET:
+            return self._download_proxy
+        _sync_env_file()
+        val = os.getenv("SUBTRANS_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+        return val.strip() if val and val.strip() else None
+
+    # yt-dlp 格式选择：优先读取 SUBTRANS_DL_FORMAT；未显式指定时根据 download_quality 动态映射
     @property
     def download_format(self) -> str:
         if self._download_format is not _UNSET:
             return self._download_format
         _sync_env_file()
-        return os.getenv("SUBTRANS_DL_FORMAT", "bv*[height<=480]+ba/b[height<=480]")
+        explicit = os.getenv("SUBTRANS_DL_FORMAT")
+        if explicit and explicit.strip():
+            return explicit.strip()
+        quality_map = {
+            "best": "bv*+ba/b",
+            "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
+            "720p": "bv*[height<=720]+ba/b[height<=720]",
+            "480p": "bv*[height<=480]+ba/b[height<=480]",
+            "360p": "bv*[height<=360]+ba/b[height<=360]",
+            "audio_only": "ba/b",
+        }
+        return quality_map.get(self.download_quality, "bv*[height<=480]+ba/b[height<=480]")
 
     # 合并后的容器格式
     @property

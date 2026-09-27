@@ -255,6 +255,7 @@ def _run(task_id: str) -> None:
         source_type=rec.source_type,
         need_subtitle=bool(rec.need_subtitle),
         title=rec.title,
+        quality=getattr(rec, "quality", None),
     )
 
     last_state = {
