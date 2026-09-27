@@ -28,6 +28,7 @@ from src.core.transcriber import (
 def _setup(tmp_path, monkeypatch):
     monkeypatch.setattr(transcriber, "ensure_task_dir", lambda tid: tmp_path)
     monkeypatch.setattr(transcriber, "_load_env", lambda: None)
+    monkeypatch.setenv("SUBTRANS_TRANSCRIBER_BACKEND", "replicate")
     monkeypatch.setenv("REPLICATE_API_TOKEN", "fake-token")
 
 

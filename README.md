@@ -351,7 +351,7 @@ export SUBTRANS_VOCAL_SEPARATION_COMMAND="python -m demucs.separate"
 
 ```bash
 uv sync
-uv run pytest -q
+uv run pytest -q  # Python unit tests (CI job: python-unit-test)
 cd web && npm test
 ```
 

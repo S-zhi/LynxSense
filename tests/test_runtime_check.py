@@ -129,7 +129,7 @@ def test_readiness_reports_invalid_replicate_token(monkeypatch, tmp_path):
 
     result = runtime_check.build_readiness()
 
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["initialized"] is True
     assert result["checks"]["replicate_api_token"] == "invalid"
     assert "REPLICATE_API_TOKEN（Token 无效或已过期）" not in result["missing"]

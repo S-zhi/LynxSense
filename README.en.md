@@ -337,7 +337,7 @@ See [.env.example](./.env.example) and [mcp.env.example](./mcp.env.example) for 
 
 ```bash
 uv sync
-uv run pytest -q
+uv run pytest -q  # Python unit tests (CI job: python-unit-test)
 cd web && npm test
 ```
 
