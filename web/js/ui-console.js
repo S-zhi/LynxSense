@@ -136,13 +136,22 @@ function modelLabel(model) {
   return `${backend === "local" ? "本地" : "Replicate"} · ${label}`;
 }
 
-function renderModelWeights(models) {
+function renderModelWeights(models, localStates = []) {
   // 渲染 Whisper 模型权重下拉框。
   const sel = $("#model");
   const current = sel.value || "small";
   sel.innerHTML = "";
+  const states = new Map(localStates.map((item) => [item.name, item]));
   models.forEach((model) => {
-    sel.append(option(model, modelLabel(model)));
+    const item = option(model, modelLabel(model));
+    if (String(model).startsWith("local:")) {
+      const state = states.get(String(model).slice(6));
+      if (state && state.status !== "READY") {
+        item.disabled = true;
+        item.textContent += ` · ${state.status === "DOWNLOADING" ? "下载中" : "未下载"}`;
+      }
+    }
+    sel.append(item);
   });
   const normalizedCurrent = String(current).includes(":") ? current : `replicate:${current}`;
   sel.value = [...sel.options].some((item) => item.value === normalizedCurrent) ? normalizedCurrent : "replicate:small";
@@ -155,14 +164,16 @@ async function initSrtOptions() {
   renderModelWeights(FALLBACK_MODELS);
 
   try {
-    const [languages, targetLanguages, models] = await Promise.all([
+    const [languages, targetLanguages, models, localStates] = await Promise.all([
       Api.listVideoLanguages(),
       Api.listTargetLanguages(),
       Api.listModelWeights(),
+      Api.listLocalModels(),
     ]);
     renderSourceLanguages(languages);
     renderTargetLanguages(targetLanguages);
-    renderModelWeights(models);
+    const localOptions = localStates.map((item) => `local:${item.name}`);
+    renderModelWeights([...models.filter((model) => !String(model).startsWith("local:")), ...localOptions], localStates);
   } catch (err) {
     toast(err.message || "获取识别选项失败，已使用默认选项", "ph-warning-circle");
   }

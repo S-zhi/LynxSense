@@ -26,6 +26,7 @@ import replicate
 
 from src.config import settings, ensure_task_dir, ORIGINAL_SRT
 from src.core.srt_utils import Subtitle, decode_srt_bytes, write_srt
+from src.service.model_manager import MODEL_NAMES, model_manager
 
 logger = logging.getLogger(__name__)
 
@@ -542,14 +543,21 @@ class LocalWhisperTranscriber:
                         "本地 Whisper 需要安装 faster-whisper",
                         code="missing_dependency",
                     ) from exc
+                model_ref = selected_model
                 kwargs = {
                     "device": self.device,
                     "compute_type": self.compute_type,
                 }
-                if self.download_root:
+                if selected_model in MODEL_NAMES:
+                    try:
+                        model_ref = model_manager.resolve_path(selected_model)
+                        kwargs["local_files_only"] = True
+                    except Exception as exc:
+                        raise TranscribeError(str(exc), code="model_not_ready") from exc
+                elif self.download_root:
                     kwargs["download_root"] = self.download_root
                 try:
-                    self._model = WhisperModel(selected_model, **kwargs)
+                    self._model = WhisperModel(model_ref, **kwargs)
                 except Exception as exc:
                     raise TranscribeError(
                         f"本地 Whisper 模型加载失败: {exc}",
