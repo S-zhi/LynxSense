@@ -616,10 +616,10 @@ class LocalWhisperTranscriber:
         )
 
 
-def _build_transcriber_service() -> TranscriberService:
+def _build_transcriber_service(backend: Optional[str] = None) -> TranscriberService:
     # getattr keeps tests and embedders that provide a minimal settings object
     # compatible with the historical Replicate-only configuration.
-    backend = str(getattr(settings, "transcriber_backend", "replicate") or "replicate").strip().lower()
+    backend = str(backend or getattr(settings, "transcriber_backend", "replicate") or "replicate").strip().lower()
     if backend in {"replicate", ""}:
         return ReplicateTranscriber(
             model_ref=getattr(settings, "replicate_whisper_model"),
@@ -669,6 +669,7 @@ def transcribe(
     *,
     language: Optional[str] = None,
     model_name: Optional[str] = None,
+    backend: Optional[str] = None,
     cancel_check: Optional[Callable[[], None]] = None,
     service: Optional[TranscriberService] = None,
 ) -> TranscribeResult:
@@ -702,10 +703,10 @@ def transcribe(
         audio_str = str(p)
 
     _do_cancel_check(cancel_check)
-    service = service if service is not None else _build_transcriber_service()
+    service = service if service is not None else _build_transcriber_service(backend)
     logger.info(
         "开始识别(%s): task=%s model=%s lang=%s",
-        getattr(settings, "transcriber_backend", "replicate"),
+        backend or getattr(settings, "transcriber_backend", "replicate"),
         task_id,
         model_name or "small",
         lang,

@@ -24,9 +24,19 @@ def list_video_languages() -> list[str]:
 
 @router.get("/model-weights", response_model=list[str])
 def list_model_weights() -> list[str]:
-    """返回 Replicate Whisper 支持的模型权重列表。"""
+    """返回 Replicate Whisper 模型权重（兼容旧客户端）。"""
     try:
         return get_whisper_model_weight_options()
+    except ReplicateSchemaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/model-options", response_model=list[str])
+def list_model_options() -> list[str]:
+    """返回带识别后端标识的 Whisper 模型选项。"""
+    try:
+        replicate_models = get_whisper_model_weight_options()
+        return [f"replicate:{model}" for model in replicate_models] + ["local:tiny"]
     except ReplicateSchemaError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
