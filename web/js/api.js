@@ -184,6 +184,20 @@ const RealApi = {
     return res.json();
   },
 
+  async getReplicateSettings() {
+    const res = await request(this.base, "/api/settings/replicate");
+    if (!res.ok) throw new Error(await readError(res, "读取 Replicate 设置失败"));
+    return res.json();
+  },
+
+  async updateReplicateSettings(payload) {
+    const res = await request(this.base, "/api/settings/replicate", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readError(res, "保存 Replicate 设置失败"));
+    return res.json();
+  },
+
   async createTranslationEngine(payload) {
     const res = await request(this.base, "/api/settings/translation-engines", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -622,6 +636,25 @@ const MockApi = (() => {
       const current = await this.getAudioSettings();
       const next = { ...current, ...payload };
       localStorage.setItem("subtrans_mock_audio_settings_v1", JSON.stringify(next));
+      return next;
+    },
+    async getReplicateSettings() {
+      await delay(40);
+      try {
+        return JSON.parse(localStorage.getItem("subtrans_mock_replicate_settings_v1")) || {
+          hasApiToken: false,
+          whisperModel: "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969",
+          timeout: 1800, retries: 3, retryInterval: 3600, pollInterval: 30,
+        };
+      } catch (_) {
+        return { hasApiToken: false, whisperModel: "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969", timeout: 1800, retries: 3, retryInterval: 3600, pollInterval: 30 };
+      }
+    },
+    async updateReplicateSettings(payload) {
+      const current = await this.getReplicateSettings();
+      const next = { ...current, ...payload, hasApiToken: payload.apiToken === "" ? false : (payload.apiToken ? true : current.hasApiToken) };
+      delete next.apiToken;
+      localStorage.setItem("subtrans_mock_replicate_settings_v1", JSON.stringify(next));
       return next;
     },
     async getReplicateBalance() {

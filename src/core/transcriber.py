@@ -6,7 +6,7 @@
 默认通过 Replicate 云端 API 调用 Whisper，也支持符合协议的自定义 HTTP 服务。
 支持本地上传音频文件。进度通过回调透传。
 
-默认 Replicate 后端依赖 replicate（Python SDK）和 REPLICATE_API_TOKEN。
+默认 Replicate 后端依赖 replicate（Python SDK）和页面运行时配置或 REPLICATE_API_TOKEN。
 """
 
 from __future__ import annotations
@@ -63,6 +63,13 @@ class TranscribeResult:
 
 
 ProgressHook = Callable[[TranscribeProgress], None]
+
+
+def _configured_replicate_token() -> Optional[str]:
+    """读取当前 Replicate Token，兼容测试中替换的简化 settings 对象。"""
+    if hasattr(settings, "replicate_api_token"):
+        return settings.replicate_api_token
+    return os.getenv("REPLICATE_API_TOKEN")
 
 
 @dataclass(frozen=True)
@@ -252,7 +259,7 @@ def _run_replicate_with_retry(
     """
     _do_cancel_check(cancel_check)
     client = replicate.Client(
-        api_token=os.getenv("REPLICATE_API_TOKEN"),
+        api_token=_configured_replicate_token(),
         timeout=httpx.Timeout(float(timeout), connect=30.0),
     )
     state = _load_prediction_state(state_dir, model_ref)
@@ -395,7 +402,7 @@ class ReplicateTranscriber:
         on_progress: Optional[ProgressHook] = None,
         cancel_check: Optional[Callable[[], None]] = None,
     ) -> TranscribeResponse:
-        if not os.getenv("REPLICATE_API_TOKEN"):
+        if not _configured_replicate_token():
             raise TranscribeError("未设置 REPLICATE_API_TOKEN（请在 .env 中配置）", code="missing_api_key")
 
         audio_str = str(request.audio_path)

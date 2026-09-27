@@ -21,7 +21,17 @@ from fastapi.staticfiles import StaticFiles
 from src.config import settings
 
 
-from src.handler import audio_settings, health, replicate, srt, subtitle_editor, tasks, storage, translation_engines
+from src.handler import (
+    audio_settings,
+    health,
+    replicate,
+    replicate_settings,
+    srt,
+    subtitle_editor,
+    tasks,
+    storage,
+    translation_engines,
+)
 
 from src.handler.deps import get_store
 
@@ -61,13 +71,17 @@ def create_app() -> FastAPI:
     app.include_router(subtitle_editor.router)
     app.include_router(health.router)
     app.include_router(replicate.router)
+    app.include_router(replicate_settings.router)
     app.include_router(translation_engines.router)
     app.include_router(audio_settings.router)
 
     # SPA 路由需要在静态目录挂载前显式回退到 index.html，否则直接打开
     # /tasks、/preview 等深链接时 StaticFiles 会按目录查找并返回 404。
     if _WEB_DIR.is_dir():
-        spa_routes = ("/tasks", "/preview", "/editor", "/probe", "/storage", "/drive", "/settings")
+        spa_routes = (
+            "/tasks", "/preview", "/editor", "/probe", "/storage",
+            "/drive", "/replicate", "/settings",
+        )
         for route_path in spa_routes:
             app.add_api_route(
                 route_path,

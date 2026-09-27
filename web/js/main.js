@@ -11,6 +11,8 @@ import { initStorage } from "./ui-storage.js";
 import { initDrive } from "./ui-drive.js";
 import { initTranslationSettings } from "./ui-translation-settings.js";
 import { initAudioSettings } from "./ui-audio-settings.js";
+import { initReplicateSettings } from "./ui-replicate-settings.js";
+import { initReplicateBilling } from "./ui-replicate-billing.js";
 import { initAdvancedSettings } from "./ui-advanced-settings.js";
 import { initRouter } from "./router.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
@@ -28,6 +30,8 @@ initStorage();
 initDrive();
 initTranslationSettings();
 initAudioSettings();
+initReplicateSettings();
+initReplicateBilling();
 
 loadTasks();
 

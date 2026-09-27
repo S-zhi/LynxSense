@@ -36,6 +36,13 @@ def _has_value(value: str | None) -> bool:
     return bool(value and value.strip())
 
 
+def _configured_replicate_token() -> str | None:
+    """页面运行时 Token 优先；兼容测试替换的旧 settings 对象。"""
+    if hasattr(settings, "replicate_api_token"):
+        return settings.replicate_api_token
+    return os.getenv("REPLICATE_API_TOKEN")
+
+
 def build_readiness() -> dict[str, Any]:
     """构造业务服务的脱敏 readiness 响应。
 
@@ -44,7 +51,7 @@ def build_readiness() -> dict[str, Any]:
     """
     env_file = settings.backend_dir / ".env"
 
-    replicate_token_configured = _has_value(os.getenv("REPLICATE_API_TOKEN"))
+    replicate_token_configured = _has_value(_configured_replicate_token())
     replicate_token_invalid = False
     replicate_ready = False
     replicate_checked_at: int | None = None
