@@ -901,11 +901,11 @@ class Settings:
     # --- ③ 语音识别服务选择 ---
     @property
     def transcriber_backend(self) -> str:
-        """识别服务标识：replicate（默认）或 http。"""
+        """识别服务标识：local_whisper（默认）或 replicate/http。"""
         if self._transcriber_backend is not _UNSET:
-            return str(self._transcriber_backend).strip().lower() or "replicate"
+            return str(self._transcriber_backend).strip().lower() or "local_whisper"
         _sync_env_file()
-        return (os.getenv("SUBTRANS_TRANSCRIBER_BACKEND", "replicate") or "replicate").strip().lower()
+        return (os.getenv("SUBTRANS_TRANSCRIBER_BACKEND", "local_whisper") or "local_whisper").strip().lower()
 
     @property
     def transcriber_url(self) -> Optional[str]:
@@ -945,7 +945,7 @@ class Settings:
         if self._local_whisper_model is not _UNSET:
             return str(self._local_whisper_model)
         _sync_env_file()
-        return os.getenv("SUBTRANS_LOCAL_WHISPER_MODEL", "small") or "small"
+        return os.getenv("SUBTRANS_LOCAL_WHISPER_MODEL", "tiny") or "tiny"
 
     @property
     def local_whisper_device(self) -> str:

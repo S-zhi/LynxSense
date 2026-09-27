@@ -36,9 +36,12 @@ def list_model_options() -> list[str]:
     """返回带识别后端标识的 Whisper 模型选项。"""
     try:
         replicate_models = get_whisper_model_weight_options()
-        return [f"replicate:{model}" for model in replicate_models] + ["local:tiny"]
+        return ["local:tiny"] + [f"replicate:{model}" for model in replicate_models]
     except ReplicateSchemaError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Local recognition is the default and must remain usable without a
+        # Replicate token or network access. Keep the compatibility option when
+        # Replicate is available, but degrade this listing to local:tiny.
+        return ["local:tiny"]
 
 
 @router.get("/target-languages", response_model=list[str])

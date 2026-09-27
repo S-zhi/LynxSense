@@ -53,7 +53,9 @@ def build_readiness() -> dict[str, Any]:
 
     replicate_token_configured = _has_value(_configured_replicate_token())
     replicate_token_invalid = False
-    replicate_ready = False
+    # Replicate remains an optional compatibility backend. Its account state is
+    # reported when configured, but never blocks the local default pipeline.
+    replicate_ready = True
     replicate_checked_at: int | None = None
     replicate_cached: bool = False
     replicate_check_status = "missing"
@@ -84,7 +86,7 @@ def build_readiness() -> dict[str, Any]:
 
         if status == "error" or error_code == "invalid_api_token":
             replicate_token_invalid = True
-            replicate_ready = False
+            replicate_ready = True
             replicate_check_status = "invalid"
         elif status == "unavailable":
             replicate_token_invalid = False
@@ -120,16 +122,10 @@ def build_readiness() -> dict[str, Any]:
         and data_dir_status == "writable"
         and db_dir_status == "writable"
     )
-    full_pipeline_ready = download_ready and replicate_ready and deepseek_ready
+    full_pipeline_ready = download_ready and deepseek_ready
     hard_pipeline_ready = full_pipeline_ready and hard_burn_ready
 
     missing: list[str] = []
-    if not replicate_token_configured:
-        missing.append("REPLICATE_API_TOKEN")
-    elif replicate_token_invalid:
-        missing.append("REPLICATE_API_TOKEN（Token 无效或已过期）")
-    elif replicate_check_status == "network_error":
-        missing.append("Replicate 服务暂时不可达，请检查网络连接")
     if not deepseek_ready:
         missing.append("SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY")
     if ffmpeg_status != "available":
@@ -170,7 +166,6 @@ def build_readiness() -> dict[str, Any]:
         "config_file": str(env_file),
         "config_file_present": env_file.is_file(),
         "required_environment": [
-            "REPLICATE_API_TOKEN",
             "SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY",
         ],
         "replicate_checked_at": replicate_checked_at,

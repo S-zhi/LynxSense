@@ -43,7 +43,7 @@ class TaskCreate(BaseModel):
     targetLang: str = Field(default="zh-CN", min_length=1)
     mode: Literal["mono", "bilingual"] = "mono"
     burn: Literal["hard", "soft"] = "hard"
-    model: str = Field(default="small", min_length=1)
+    model: str = Field(default="local:tiny", min_length=1)
     # 配置实例 ID；保留 deepseek 以兼容旧版环境变量配置。
     engine: str = Field(default="deepseek", min_length=1)
     needSubtitle: bool = True  # False = 仅下载视频，跳过识别/翻译/烧录

@@ -52,7 +52,7 @@ Agent 不得：
 - `target_lang=zh-CN`：翻译为简体中文；
 - `mode=mono`：单语字幕；
 - `burn=hard`：将字幕烧录进视频，需要 FFmpeg 的 libass；
-- `model=small`：使用 small 语音识别模型；
+- `model=local:tiny`：使用本地 faster-whisper tiny 语音识别模型；
 - `need_subtitle=true`：执行识别和翻译。
 
 用户没有明确指定时使用这些默认值。用户明确指定 `burn=hard` 时，不要在硬字幕不可用时悄悄改成 soft，应先说明并请求确认。

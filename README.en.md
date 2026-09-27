@@ -70,7 +70,7 @@ curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/instal
 
 This stable URL always downloads `install.sh` from the latest production release, and the script installs the code version associated with that release.
 
-The installer securely prompts for the Replicate and DeepSeek credentials, then handles the repository checkout, FFmpeg, uv, Python 3.12, locked dependencies, persistent storage, a systemd service, and a health check. When it finishes, open `http://SERVER_IP:8000/`.
+The installer securely prompts for the DeepSeek API credential, then handles the repository checkout, FFmpeg, uv, Python 3.12, locked dependencies, persistent storage, a systemd service, and a health check. When it finishes, open `http://SERVER_IP:8000/`.
 
 ```bash
 systemctl status subtitles-ai --no-pager
@@ -87,7 +87,7 @@ Prepare the credentials and build the image from the repository root:
 
 ```bash
 cp .env.example .env
-# Set REPLICATE_API_TOKEN and SUBTRANS_DEEPSEEK_API_KEY in .env
+# Set SUBTRANS_DEEPSEEK_API_KEY in .env; transcription defaults to local faster-whisper tiny
 docker build -t lynxsense:local .
 ```
 
@@ -137,7 +137,6 @@ cp .env.example .env
 Fill in the following values in `.env`:
 
 ```ini
-REPLICATE_API_TOKEN=your-replicate-token
 SUBTRANS_DEEPSEEK_API_KEY=your-deepseek-key
 ```
 
@@ -239,7 +238,7 @@ Before the first call, start the business API and check `/api/health/ready`. `ch
 
 When a job reaches `FAILED`, show the stage and error to the user and call `retry_task` only after confirmation. If the result is `TASK_ALREADY_RUNNING`, reuse its returned `task_id`. Call `get_task_artifacts` only for `SUCCESS`. `RESOURCE_MISSING` means that artifacts were cleaned up and the job must be run again. For `HARD_BURN_UNAVAILABLE`, ask whether to use `burn=soft` or install FFmpeg with libass; never silently change an explicitly requested hard-subtitle mode.
 
-The defaults for `start_subtitle_pipeline` are `source_lang=auto`, `target_lang=zh-CN`, `mode=mono`, `burn=hard`, `model=small`, and `need_subtitle=true`. Common error codes include `BUSINESS_UNAVAILABLE`, `NOT_INITIALIZED`, `INVALID_URL`, `PROBE_FAILED`, `INVALID_ARGUMENT`, `TASK_NOT_READY`, `TASK_NOT_FOUND`, and `RESOURCE_MISSING`.
+The defaults for `start_subtitle_pipeline` are `source_lang=auto`, `target_lang=zh-CN`, `mode=mono`, `burn=hard`, `model=local:tiny`, and `need_subtitle=true`. Common error codes include `BUSINESS_UNAVAILABLE`, `NOT_INITIALIZED`, `INVALID_URL`, `PROBE_FAILED`, `INVALID_ARGUMENT`, `TASK_NOT_READY`, `TASK_NOT_FOUND`, and `RESOURCE_MISSING`.
 
 ### Streamable HTTP: connect a remote or shared host
 
@@ -298,7 +297,7 @@ flowchart LR
     API --> Runner["Background job queue"]
     Runner --> Download["yt-dlp download"]
     Download --> Audio["FFmpeg audio extraction"]
-    Audio --> ASR["Replicate Whisper"]
+    Audio --> ASR["Local faster-whisper tiny"]
     ASR --> Translate["DeepSeek translation"]
     Translate --> Burn["FFmpeg subtitle muxing"]
     Burn --> Store["Video + SRT + SQLite state"]
@@ -323,7 +322,8 @@ A failed step moves the job to `FAILED` and records the failing stage and error.
 | `SUBTRANS_DOWNLOAD_WORKERS` | `2` | Number of tasks allowed to download media concurrently |
 | `SUBTRANS_DL_CONCURRENT_FRAGMENTS` | `4` | Concurrent HLS/DASH fragments per media download |
 | `SUBTRANS_COOKIES` | Empty | Cookies file for sites that require login or verification |
-| `SUBTRANS_WHISPER_MODEL` | Pinned version | Replicate Whisper model |
+| `SUBTRANS_TRANSCRIBER_BACKEND` | `local_whisper` | Transcription backend; `replicate` remains optional |
+| `SUBTRANS_LOCAL_WHISPER_MODEL` | `tiny` | Local faster-whisper model |
 | `SUBTRANS_DEEPSEEK_MODEL` | `deepseek-chat` | Translation model |
 | `SUBTRANS_API_BASE_URL` | `http://127.0.0.1:8000` | Business API used by MCP |
 | `SUBTRANS_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |

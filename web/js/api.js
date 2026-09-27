@@ -512,13 +512,13 @@ const MockApi = (() => {
     return [
       {
         id: uid(), url: "https://example.com/watch?v=demo-finished", title: "示例视频 · 已完成",
-        sourceLang: "en", targetLang: "zh-CN", mode: "bilingual", burn: "hard", model: "small",
+        sourceLang: "en", targetLang: "zh-CN", mode: "bilingual", burn: "hard", model: "local:tiny",
         engine: "deepseek", status: "SUCCESS", progress: 100, error: null,
         createdAt: now - 1000 * 60 * 42, outputs: { video: "#", subtitle: "#" }, _sim: false,
       },
       {
         id: uid(), url: "https://example.com/watch?v=demo-running", title: null,
-        sourceLang: "auto", targetLang: "zh-CN", mode: "mono", burn: "hard", model: "small",
+        sourceLang: "auto", targetLang: "zh-CN", mode: "mono", burn: "hard", model: "local:tiny",
         engine: "deepseek", status: "TRANSCRIBING", progress: 48, error: null,
         createdAt: now - 1000 * 90, outputs: null, _sim: true,
       },
@@ -627,7 +627,7 @@ const MockApi = (() => {
       );
     },
     // 示例模式下返回带后端标识的 Whisper 模型权重选项。
-    async listModelWeights() { await delay(80); return ["replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2", "local:tiny"]; },
+    async listModelWeights() { await delay(80); return ["local:tiny", "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2"]; },
     async getAudioSettings() {
       await delay(40);
       try { return JSON.parse(localStorage.getItem("subtrans_mock_audio_settings_v1")) || { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; } catch (_) { return { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; }

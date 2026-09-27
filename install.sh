@@ -50,7 +50,7 @@ usage() {
   -h, --help         显示帮助
 
 可用环境变量：
-  REPLICATE_API_TOKEN             Replicate API Token
+  REPLICATE_API_TOKEN             Optional Replicate compatibility backend token
   SUBTRANS_DEEPSEEK_API_KEY       DeepSeek API Key
   SUBTRANS_INSTALL_DIR            安装目录，默认 /opt/subtitles-ai
   SUBTRANS_DATA_DIR               产物目录，默认 /var/lib/subtitles-ai/data
@@ -230,7 +230,6 @@ update_env_key() {
   chmod 600 "${ENV_FILE}"
 }
 
-prompt_secret REPLICATE_API_TOKEN "请输入 Replicate API Token（输入不会回显）"
 prompt_secret SUBTRANS_DEEPSEEK_API_KEY "请输入 DeepSeek API Key（输入不会回显）"
 
 EXISTING_DATA_DIR="$(read_env_value SUBTRANS_DATA_DIR)"
@@ -258,7 +257,9 @@ fi
 assert_safe_managed_dir "${DATA_DIR}"
 assert_safe_managed_dir "$(dirname "${DB_PATH}")"
 
-update_env_key REPLICATE_API_TOKEN "${REPLICATE_API_TOKEN}"
+if [[ -n "${REPLICATE_API_TOKEN:-}" ]]; then
+  update_env_key REPLICATE_API_TOKEN "${REPLICATE_API_TOKEN}"
+fi
 update_env_key SUBTRANS_DEEPSEEK_API_KEY "${SUBTRANS_DEEPSEEK_API_KEY}"
 update_env_key SUBTRANS_DATA_DIR "${DATA_DIR}"
 update_env_key SUBTRANS_DB "${DB_PATH}"
