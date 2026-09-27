@@ -160,13 +160,6 @@
             <p class="console__hint" id="urlHint">粘贴单个视频页面地址，或把本地视频拖进输入框</p>
 
             <div class="params">
-              <fieldset class="param" style="border:0;margin:0;padding:0">
-                <span class="param__label">是否需要字幕</span>
-                <div class="segmented" role="radiogroup" aria-label="是否需要字幕">
-                  <label class="segmented__opt"><input type="radio" name="needSubtitle" value="on" checked /><span>需要</span></label>
-                  <label class="segmented__opt"><input type="radio" name="needSubtitle" value="off" /><span>仅下载</span></label>
-                </div>
-              </fieldset>
               <div class="param">
                 <span class="param__label">源语言</span>
                 <select class="select" id="sourceLang" name="sourceLang" aria-label="源语言">
@@ -180,40 +173,52 @@
                 </select>
               </div>
               <fieldset class="param" style="border:0;margin:0;padding:0">
-                <span class="param__label">字幕模式</span>
-                <div class="segmented" role="radiogroup" aria-label="字幕模式">
-                  <label class="segmented__opt"><input type="radio" name="mode" value="mono" checked /><span>仅译文</span></label>
-                  <label class="segmented__opt"><input type="radio" name="mode" value="bilingual" /><span>双语</span></label>
-                </div>
-              </fieldset>
-              <fieldset class="param" style="border:0;margin:0;padding:0">
                 <span class="param__label">烧录方式</span>
                 <div class="segmented" role="radiogroup" aria-label="烧录方式">
                   <label class="segmented__opt"><input type="radio" name="burn" value="hard" checked /><span>硬烧录</span></label>
                   <label class="segmented__opt"><input type="radio" name="burn" value="soft" /><span>软字幕</span></label>
                 </div>
               </fieldset>
-              <div class="param">
-                <span class="param__label">Replicate模型</span>
-                <select class="select" id="model" name="model" aria-label="Whisper 模型">
-                  <option value="small" selected>加载中</option>
-                </select>
-              </div>
-              <div class="param">
-                <span class="param__label">翻译引擎</span>
-                <select class="select" id="engine" name="engine" aria-label="翻译引擎"></select>
-              </div>
-              <div class="param" id="qualityParam">
-                <span class="param__label">下载画质</span>
-                <select class="select" id="quality" name="quality" aria-label="下载画质">
-                  <option value="best">原画最佳 (best)</option>
-                  <option value="1080p">1080P 高清</option>
-                  <option value="720p">720P 标清</option>
-                  <option value="480p" selected>480P 省流 (默认)</option>
-                  <option value="360p">360P 极速</option>
-                  <option value="audio_only">仅提取音频 (极速)</option>
-                </select>
-              </div>
+              <details class="advanced-params">
+                <summary><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>高级设置</span><i class="ph ph-caret-down advanced-params__chevron" aria-hidden="true"></i></summary>
+                <div class="advanced-params__body">
+                  <fieldset class="param" style="border:0;margin:0;padding:0">
+                    <span class="param__label">是否需要字幕</span>
+                    <div class="segmented" role="radiogroup" aria-label="是否需要字幕">
+                      <label class="segmented__opt"><input type="radio" name="needSubtitle" value="on" checked /><span>需要</span></label>
+                      <label class="segmented__opt"><input type="radio" name="needSubtitle" value="off" /><span>仅下载</span></label>
+                    </div>
+                  </fieldset>
+                  <fieldset class="param" style="border:0;margin:0;padding:0">
+                    <span class="param__label">字幕模式</span>
+                    <div class="segmented" role="radiogroup" aria-label="字幕模式">
+                      <label class="segmented__opt"><input type="radio" name="mode" value="mono" checked /><span>仅译文</span></label>
+                      <label class="segmented__opt"><input type="radio" name="mode" value="bilingual" /><span>双语</span></label>
+                    </div>
+                  </fieldset>
+                  <div class="param">
+                    <span class="param__label">Replicate模型</span>
+                    <select class="select" id="model" name="model" aria-label="Whisper 模型">
+                      <option value="small" selected>加载中</option>
+                    </select>
+                  </div>
+                  <div class="param">
+                    <span class="param__label">翻译引擎</span>
+                    <select class="select" id="engine" name="engine" aria-label="翻译引擎"></select>
+                  </div>
+                  <div class="param" id="qualityParam">
+                    <span class="param__label">下载画质</span>
+                    <select class="select" id="quality" name="quality" aria-label="下载画质">
+                      <option value="best">原画最佳 (best)</option>
+                      <option value="1080p">1080P 高清</option>
+                      <option value="720p">720P 标清</option>
+                      <option value="480p" selected>480P 省流 (默认)</option>
+                      <option value="360p">360P 极速</option>
+                      <option value="audio_only">仅提取音频 (极速)</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
             </div>
           </form>
 
