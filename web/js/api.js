@@ -153,7 +153,7 @@ const RealApi = {
 
   // 获取 Whisper 模型权重选项。
   async listModelWeights() {
-    const res = await request(this.base, "/api/srt/model-weights");
+    const res = await request(this.base, "/api/srt/model-options");
     if (!res.ok) throw new Error(await readError(res, "获取模型列表失败"));
     return res.json();
   },
@@ -181,6 +181,20 @@ const RealApi = {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await readError(res, "保存音频设置失败"));
+    return res.json();
+  },
+
+  async getReplicateSettings() {
+    const res = await request(this.base, "/api/settings/replicate");
+    if (!res.ok) throw new Error(await readError(res, "读取 Replicate 设置失败"));
+    return res.json();
+  },
+
+  async updateReplicateSettings(payload) {
+    const res = await request(this.base, "/api/settings/replicate", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readError(res, "保存 Replicate 设置失败"));
     return res.json();
   },
 
@@ -612,8 +626,8 @@ const MockApi = (() => {
         Object.keys(LANG_LABEL).filter((k) => k !== "auto" && k !== "zh")
       );
     },
-    // 示例模式下返回 Replicate Whisper 模型权重选项。
-    async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
+    // 示例模式下返回带后端标识的 Whisper 模型权重选项。
+    async listModelWeights() { await delay(80); return ["replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2", "local:tiny"]; },
     async getAudioSettings() {
       await delay(40);
       try { return JSON.parse(localStorage.getItem("subtrans_mock_audio_settings_v1")) || { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; } catch (_) { return { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; }
@@ -622,6 +636,25 @@ const MockApi = (() => {
       const current = await this.getAudioSettings();
       const next = { ...current, ...payload };
       localStorage.setItem("subtrans_mock_audio_settings_v1", JSON.stringify(next));
+      return next;
+    },
+    async getReplicateSettings() {
+      await delay(40);
+      try {
+        return JSON.parse(localStorage.getItem("subtrans_mock_replicate_settings_v1")) || {
+          hasApiToken: false,
+          whisperModel: "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969",
+          timeout: 1800, retries: 3, retryInterval: 3600, pollInterval: 30,
+        };
+      } catch (_) {
+        return { hasApiToken: false, whisperModel: "stayallive/whisper-subtitles:b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969", timeout: 1800, retries: 3, retryInterval: 3600, pollInterval: 30 };
+      }
+    },
+    async updateReplicateSettings(payload) {
+      const current = await this.getReplicateSettings();
+      const next = { ...current, ...payload, hasApiToken: payload.apiToken === "" ? false : (payload.apiToken ? true : current.hasApiToken) };
+      delete next.apiToken;
+      localStorage.setItem("subtrans_mock_replicate_settings_v1", JSON.stringify(next));
       return next;
     },
     async getReplicateBalance() {

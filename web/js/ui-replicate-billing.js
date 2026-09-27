@@ -76,6 +76,7 @@ export function initReplicateBilling() {
   const button = $("#replicateBalanceRefresh");
   if (!root || !button) return;
   button.addEventListener("click", () => refresh(button));
+  document.addEventListener("replicate-settings-saved", () => refresh(button));
   document.addEventListener("viewchange", (event) => {
     if (event.detail?.view === "other-settings" && event.detail?.settingsTab === "replicate") refresh(button);
   });

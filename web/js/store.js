@@ -8,7 +8,7 @@ export const state = {
   tasks: [],
   filter: "all",       // all | active | done | failed
   view: "tasks",       // tasks | preview | editor | storage | other-settings
-  settingsTab: "engines", // engines | audio | probe | drive
+  settingsTab: "engines", // engines | audio | replicate | probe | drive
   previewId: null,
   loading: true,
   loadError: null,
@@ -145,9 +145,10 @@ export function notificationsApi() {
 }
 
 /* ---- 选择器 ---- */
-export function visibleTasks() {
+export function visibleTasks(origin = null) {
   const f = state.filter;
   return state.tasks.filter((t) => {
+    if (origin && (t.taskOrigin || "web") !== origin) return false;
     if (f === "all") return true;
     if (f === "done") return t.status === "SUCCESS";
     if (f === "failed") return t.status === "FAILED" || t.status === "CANCELLED";

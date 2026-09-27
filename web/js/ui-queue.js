@@ -9,40 +9,40 @@ import {
 import { Api, USE_MOCK } from "./api.js";
 import { toast } from "./toast.js";
 
-let listEl;
-const rows = new Map(); // id -> element
-let renderedSpecial = false;
+const queues = new Set();
 
-export function initQueue() {
-  listEl = $("#taskList");
-  subscribe(renderQueue);
-  renderQueue();
+export function initQueue({ listSelector = "#taskList", origin = "web" } = {}) {
+  const queue = { listEl: $(listSelector), rows: new Map(), renderedSpecial: false, origin };
+  queues.add(queue);
+  subscribe(() => renderQueue(queue));
+  renderQueue(queue);
 }
 
 /* ---------- 整体渲染（复用节点） ---------- */
-function renderQueue() {
+function renderQueue(queue) {
+  const { listEl, rows } = queue;
   if (state.loading) {
     listEl.replaceChildren(skeleton());
     rows.clear();
-    renderedSpecial = true;
+    queue.renderedSpecial = true;
     return;
   }
   if (state.loadError) {
     listEl.replaceChildren(loadErrorState());
     rows.clear();
-    renderedSpecial = true;
+    queue.renderedSpecial = true;
     return;
   }
-  const visible = visibleTasks();
+  const visible = visibleTasks(queue.origin);
   if (visible.length === 0) {
     listEl.replaceChildren(emptyState());
     rows.clear();
-    renderedSpecial = true;
+    queue.renderedSpecial = true;
     return;
   }
-  if (renderedSpecial) {
+  if (queue.renderedSpecial) {
     listEl.replaceChildren();
-    renderedSpecial = false;
+    queue.renderedSpecial = false;
   }
 
   // 更新或新建
