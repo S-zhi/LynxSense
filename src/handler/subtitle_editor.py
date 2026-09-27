@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from src.config import (
     ORIGINAL_SRT,
     OUTPUT_VIDEO,
+    OUTPUT_VIDEO_NAMES,
     SOURCE_VIDEO_STEM,
     TRANSLATED_SRT,
     task_dir,
@@ -256,7 +257,7 @@ def save_subtitles(
         target_path, rel_name = _resolve_target_path(d, body.locale, body.version)
 
         # 校验、读取现有编码与写回必须处于同一临界区，避免并发保存时基于过期文件状态写入。
-        if body.version is not None and rel_name in {ORIGINAL_SRT, TRANSLATED_SRT, OUTPUT_VIDEO}:
+        if body.version is not None and rel_name in {ORIGINAL_SRT, TRANSLATED_SRT, *OUTPUT_VIDEO_NAMES}:
             raise HTTPException(status_code=400, detail="非法的版本文件名")
 
         sorted_entries = sorted(body.entries, key=lambda e: (e.start, e.index))

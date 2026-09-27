@@ -17,7 +17,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from src.config import OUTPUT_VIDEO, artifact_name, settings, task_dir
+from src.config import OUTPUT_VIDEO_NAMES, artifact_name, settings, task_dir
 from src.service.orchestrator import (
     PipelineEvent,
     PipelineParams,
@@ -129,13 +129,14 @@ def _cleanup_partial_artifacts(task_id: str) -> None:
     if not d.exists():
         return
 
-    out_video = d / OUTPUT_VIDEO
-    if out_video.exists():
-        try:
-            out_video.unlink()
-            logger.info("已清理取消任务的半截成品视频: task=%s, path=%s", task_id, out_video)
-        except Exception as e:
-            logger.warning("清理半截成品视频失败: task=%s, err=%s", task_id, e)
+    for output_name in OUTPUT_VIDEO_NAMES:
+        out_video = d / output_name
+        if out_video.exists():
+            try:
+                out_video.unlink()
+                logger.info("已清理取消任务的半截成品视频: task=%s, path=%s", task_id, out_video)
+            except Exception as e:
+                logger.warning("清理半截成品视频失败: task=%s, err=%s", task_id, e)
 
     try:
         for p in d.iterdir():

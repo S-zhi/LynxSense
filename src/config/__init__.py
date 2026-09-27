@@ -14,6 +14,10 @@ from .storage import (
     ORIGINAL_SRT,
     TRANSLATED_SRT,
     OUTPUT_VIDEO,
+    OUTPUT_VIDEO_HARD,
+    OUTPUT_VIDEO_SOFT,
+    OUTPUT_VIDEO_NAMES,
+    output_video_filename,
 )
 
 __all__ = [
@@ -32,4 +36,8 @@ __all__ = [
     "ORIGINAL_SRT",
     "TRANSLATED_SRT",
     "OUTPUT_VIDEO",
+    "OUTPUT_VIDEO_HARD",
+    "OUTPUT_VIDEO_SOFT",
+    "OUTPUT_VIDEO_NAMES",
+    "output_video_filename",
 ]

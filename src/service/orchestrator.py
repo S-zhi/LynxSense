@@ -450,7 +450,10 @@ class SubtitleBurningHandler(PipelineHandler):
         tid = context.task_id
         context.emit("BURNING", 85)
         context.resources.video_path = AssetResolver.require_source(tid)
-        if context.artifact_available(AssetResolver.resolve_output_video):
+        resolver = lambda task_id: AssetResolver.resolve_output_video(task_id, params.burn)
+        if context.artifact_available(resolver):
+            # Keep the legacy one-argument call contract for injected resolvers
+            # and test doubles; mode-aware selection already happened above.
             context.resources.output_video_path = AssetResolver.require_output_video(tid)
             context.emit("BURNING", 100)
         else:

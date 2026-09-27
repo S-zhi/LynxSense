@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
     OUTPUT_VIDEO,
+    OUTPUT_VIDEO_NAMES,
     SOURCE_VIDEO_STEM,
     TRANSLATED_SRT,
     artifacts_present,
@@ -585,11 +586,11 @@ def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     if rec.status != "SUCCESS":
         raise HTTPException(status_code=409, detail="成品视频尚未生成")
 
-    path = _resolve_video(task_id)
+    path = _resolve_video(task_id, rec.burn)
     if path is not None:
         state = AssetResolver.check_file_state(path)
         if state == ResourceState.AVAILABLE:
-            return FileResponse(path, media_type="video/mp4", filename=f"{task_id}.mp4")
+            return FileResponse(path, media_type="video/mp4", filename=path.name)
         elif state == ResourceState.UNREADABLE:
             if rec.resource_status == RESOURCE_STATUS_AVAILABLE:
                 _mark_resource_missing(
@@ -607,12 +608,17 @@ def download_video(task_id: str, store: TaskStore = Depends(get_store)):
     )
 
 
-def _resolve_video(task_id: str):
+def _resolve_video(task_id: str, mode: str | None = None):
     """定位可下载的视频：优先烧录成品 output.mp4，仅下载模式回退到 source.*（排除 .part 临时文件）。"""
     d = task_dir(task_id)
-    out = d / OUTPUT_VIDEO
-    if out.exists():
-        return out
+    names = OUTPUT_VIDEO_NAMES
+    if mode in ("hard", "soft"):
+        preferred = "output_hard.mp4" if mode == "hard" else "output_soft.mp4"
+        names = (preferred, OUTPUT_VIDEO)
+    for name in names:
+        out = d / name
+        if out.is_file():
+            return out
     state, source_path, _ = AssetResolver.resolve_source(task_id)
     if state == ResourceState.AVAILABLE and source_path is not None:
         return source_path

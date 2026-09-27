@@ -204,7 +204,9 @@ class SubtitleMcpTools:
                 "message": "任务尚未成功完成，暂时没有可用产物",
             }
 
-        filenames = {"video": f"{task_id}.mp4", "subtitle": f"{task_id}.srt"}
+        burn = status.get("burn")
+        video_name = "output_hard.mp4" if burn == "hard" else "output_soft.mp4" if burn == "soft" else f"{task_id}.mp4"
+        filenames = {"video": video_name, "subtitle": f"{task_id}.srt"}
         artifacts = [
             {
                 "type": kind,
