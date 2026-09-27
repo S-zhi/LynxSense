@@ -170,6 +170,12 @@ const RealApi = {
     return res.json();
   },
 
+  async deleteLocalModel(name) {
+    const res = await request(this.base, `/api/srt/local-models/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readError(res, "删除本地模型失败"));
+    return res.json();
+  },
+
   async getReplicateBalance() {
     const res = await request(this.base, "/api/replicate/balance");
     if (!res.ok) throw new Error(await readError(res, "获取 Replicate 账户状态失败"));
@@ -643,8 +649,11 @@ const MockApi = (() => {
     async listLocalModels() {
       await delay(40);
       let downloaded = [];
-      try { downloaded = JSON.parse(localStorage.getItem("subtrans_mock_local_models_v1") || "[]"); } catch (_) {}
-      const ready = new Set(["tiny", ...(Array.isArray(downloaded) ? downloaded : [])]);
+      try {
+        const saved = localStorage.getItem("subtrans_mock_local_models_v1");
+        downloaded = saved === null ? ["tiny"] : JSON.parse(saved);
+      } catch (_) {}
+      const ready = new Set(Array.isArray(downloaded) ? downloaded : ["tiny"]);
       return ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"].map((name) => ({ name, label: `Whisper ${name}`, size: "", status: ready.has(name) ? "READY" : "NOT_INSTALLED", progress: ready.has(name) ? 100 : 0, phase: ready.has(name) ? "ready" : "idle" }));
     },
     async downloadLocalModel(name) {
@@ -655,6 +664,18 @@ const MockApi = (() => {
       if (!downloaded.includes(name)) downloaded.push(name);
       try { localStorage.setItem("subtrans_mock_local_models_v1", JSON.stringify(downloaded)); } catch (_) {}
       return { name, status: "READY", progress: 100, phase: "ready" };
+    },
+    async deleteLocalModel(name) {
+      await delay(40);
+      let downloaded = [];
+      try {
+        const saved = localStorage.getItem("subtrans_mock_local_models_v1");
+        downloaded = saved === null ? ["tiny"] : JSON.parse(saved);
+      } catch (_) {}
+      if (!Array.isArray(downloaded)) downloaded = [];
+      const remaining = downloaded.filter((item) => item !== name);
+      try { localStorage.setItem("subtrans_mock_local_models_v1", JSON.stringify(remaining)); } catch (_) {}
+      return { name, label: `Whisper ${name}`, size: "", status: "NOT_INSTALLED", phase: "idle", progress: 0 };
     },
     async getAudioSettings() {
       await delay(40);
