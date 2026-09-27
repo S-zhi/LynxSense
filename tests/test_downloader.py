@@ -738,3 +738,88 @@ def test_probe_sniffs_language_from_metadata(monkeypatch):
     downloader.clear_probe_cache()
     result = downloader.probe_video("https://example.com/lang", ttl_sec=0)
     assert result.language == "ja"
+
+
+def test_resolve_download_format_presets():
+    assert downloader.resolve_download_format(quality="best") == "bv*+ba/b"
+    assert downloader.resolve_download_format(quality="1080p") == "bv*[height<=1080]+ba/b[height<=1080]"
+    assert downloader.resolve_download_format(quality="720p") == "bv*[height<=720]+ba/b[height<=720]"
+    assert downloader.resolve_download_format(quality="480p") == "bv*[height<=480]+ba/b[height<=480]"
+    assert downloader.resolve_download_format(quality="audio_only") == "ba/b"
+    assert downloader.resolve_download_format(quality="1440p") == "bv*[height<=1440]+ba/b[height<=1440]"
+    assert downloader.resolve_download_format(format_selector="worst") == "worst"
+
+
+def test_extract_supported_contents():
+    fake_info = {
+        "title": "Sample",
+        "thumbnail": "https://img.example.com/cover.jpg",
+        "uploader": "Sample Creator",
+        "formats": [
+            {"format_id": "1", "ext": "mp4", "height": 1080, "width": 1920, "vcodec": "avc1", "acodec": "mp4a", "tbr": 2500, "filesize": 1000000},
+            {"format_id": "2", "ext": "mp4", "height": 720, "width": 1280, "vcodec": "avc1", "acodec": "mp4a", "tbr": 1200, "filesize": 500000},
+            {"format_id": "3", "ext": "mp4", "height": 480, "width": 854, "vcodec": "avc1", "acodec": "mp4a", "tbr": 600, "filesize": 250000},
+            {"format_id": "audio", "ext": "m4a", "height": None, "vcodec": "none", "acodec": "mp4a", "abr": 128, "filesize": 50000},
+        ],
+    }
+    qualities, formats = downloader.extract_supported_contents(fake_info)
+    assert "best" in qualities
+    assert "1080p" in qualities
+    assert "720p" in qualities
+    assert "480p" in qualities
+    assert "audio_only" in qualities
+    assert len(formats) == 4
+    assert formats[0]["resolution"] == "1080p"
+    assert formats[3]["resolution"] == "音频"
+
+
+def test_download_passes_quality_and_network_options(task_path, monkeypatch):
+    src = task_path / "source.mp4"
+    captured_opts = {}
+
+    def on_extract(url, download, opts):
+        captured_opts.update(opts)
+        src.write_bytes(b"data")
+        return {"requested_downloads": [{"filepath": str(src)}]}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+
+    res = download_video(
+        "http://x",
+        "task1",
+        quality="1080p",
+        proxy="http://127.0.0.1:7890",
+        socket_timeout=45,
+    )
+    assert res.video_path == src
+    assert captured_opts["format"] == "bv*[height<=1080]+ba/b[height<=1080]"
+    assert captured_opts["proxy"] == "http://127.0.0.1:7890"
+    assert captured_opts["socket_timeout"] == 45
+    assert captured_opts["fragment_retries"] == 10
+    assert captured_opts["skip_unavailable_fragments"] is True
+
+
+def test_probe_video_extracts_supported_contents(monkeypatch):
+    fake_info = {
+        "title": "Probe Sample",
+        "thumbnail": "https://img.example.com/thumb.jpg",
+        "uploader": "Test Channel",
+        "formats": [
+            {"format_id": "v1080", "ext": "mp4", "height": 1080, "vcodec": "avc1", "acodec": "mp4a", "tbr": 2000},
+            {"format_id": "a1", "ext": "m4a", "vcodec": "none", "acodec": "mp4a", "abr": 128},
+        ],
+    }
+
+    def on_extract(url, download, opts):
+        return fake_info
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    downloader.clear_probe_cache()
+
+    result = downloader.probe_video("https://example.com/content-test", ttl_sec=0)
+    assert result.ok is True
+    assert result.thumbnail == "https://img.example.com/thumb.jpg"
+    assert result.uploader == "Test Channel"
+    assert "1080p" in result.available_qualities
+    assert "audio_only" in result.available_qualities
+    assert len(result.formats) == 2
