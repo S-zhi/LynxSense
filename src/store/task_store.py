@@ -58,6 +58,7 @@ class TaskRecord:
     engine: str        # 翻译引擎配置 ID；deepseek 为旧版兼容值
     url_hash: Optional[str] = None
     source_type: str = "url"  # url=在线链接下载 upload=本地上传视频
+    task_origin: str = "web"  # web=网页创建 mcp=MCP 创建
     need_subtitle: int = 1  # 1=需要字幕(完整流水线) 0=仅下载视频
     status: str = "PENDING"
     progress: int = 0
@@ -137,6 +138,7 @@ class TaskStore:
                     model TEXT NOT NULL,
                     engine TEXT NOT NULL,
                     source_type TEXT NOT NULL DEFAULT 'url',
+                    task_origin TEXT NOT NULL DEFAULT 'web',
                     need_subtitle INTEGER NOT NULL DEFAULT 1,
                     status TEXT NOT NULL,
                     progress INTEGER NOT NULL,
@@ -169,6 +171,8 @@ class TaskStore:
                 conn.execute("ALTER TABLE tasks ADD COLUMN need_subtitle INTEGER NOT NULL DEFAULT 1")
             if "source_type" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN source_type TEXT NOT NULL DEFAULT 'url'")
+            if "task_origin" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN task_origin TEXT NOT NULL DEFAULT 'web'")
             if "resource_status" not in cols:
                 conn.execute(
                     "ALTER TABLE tasks ADD COLUMN resource_status TEXT NOT NULL DEFAULT 'AVAILABLE'"
@@ -219,6 +223,7 @@ class TaskStore:
         model: str,
         engine: str,
         source_type: str = "url",
+        task_origin: str = "web",
         need_subtitle: bool = True,
         title: Optional[str] = None,
         quality: Optional[str] = "480p",
@@ -234,6 +239,7 @@ class TaskStore:
                 model=model,
                 engine=engine,
                 source_type=source_type,
+                task_origin=task_origin,
                 need_subtitle=need_subtitle,
                 title=title,
                 quality=quality or "480p",
@@ -253,9 +259,10 @@ class TaskStore:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM tasks WHERE url_hash = ? AND created_at >= ? "
+                "AND task_origin = ? "
                 "AND status IN ('PENDING', 'DOWNLOADING', 'EXTRACTING', 'TRANSCRIBING', 'TRANSLATING', 'BURNING') "
                 "ORDER BY created_at DESC LIMIT 1",
-                (url_hash, cutoff),
+                (url_hash, cutoff, kwargs.get("task_origin", "web")),
             ).fetchone()
             if row:
                 return _row_to_record(row), False
@@ -274,6 +281,7 @@ class TaskStore:
             engine=kwargs["engine"],
             url_hash=_calc_url_hash(kwargs["url"]),
             source_type=kwargs.get("source_type", "url"),
+            task_origin=kwargs.get("task_origin", "web"),
             need_subtitle=int(kwargs.get("need_subtitle", True)),
             title=kwargs.get("title"),
             quality=kwargs.get("quality") or "480p",
@@ -301,6 +309,7 @@ class TaskStore:
         offset: int = 0,
         before_id: Optional[str] = None,
         after_id: Optional[str] = None,
+        task_origin: Optional[str] = None,
     ) -> List[TaskRecord]:
         where_clauses = []
         params = []
@@ -318,6 +327,10 @@ class TaskStore:
                 return []
             where_clauses.append("(created_at > ? OR (created_at = ? AND id > ?))")
             params.extend([after_rec.created_at, after_rec.created_at, after_rec.id])
+
+        if task_origin:
+            where_clauses.append("task_origin = ?")
+            params.append(task_origin)
 
         sql = "SELECT * FROM tasks"
         if where_clauses:

@@ -124,6 +124,7 @@ class TaskOut(BaseModel):
     model: str
     engine: str
     sourceType: str
+    taskOrigin: str = "web"
     needSubtitle: bool
     status: str
     progress: int
@@ -166,6 +167,7 @@ def to_out(rec: TaskRecord) -> TaskOut:
         model=rec.model,
         engine=rec.engine,
         sourceType=rec.source_type,
+        taskOrigin=getattr(rec, "task_origin", "web"),
         needSubtitle=need_subtitle,
         status=rec.status,
         progress=rec.progress,

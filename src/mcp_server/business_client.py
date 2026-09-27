@@ -98,10 +98,13 @@ class BusinessApiClient:
         *,
         payload: Mapping[str, Any] | None = None,
         params: Mapping[str, Any] | None = None,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> Any:
         headers = {"Accept": "application/json"}
         if self.config.api_token:
             headers["Authorization"] = f"Bearer {self.config.api_token}"
+        if extra_headers:
+            headers.update(extra_headers)
 
         request_kwargs: dict[str, Any] = {"headers": headers}
         if payload is not None:
@@ -168,7 +171,9 @@ class BusinessApiClient:
         return await self._request("POST", "/api/tasks/probe", payload={"url": url})
 
     async def create_task(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        return await self._request("POST", "/api/tasks", payload=payload)
+        return await self._request(
+            "POST", "/api/tasks", payload=payload, extra_headers={"X-Task-Origin": "mcp"}
+        )
 
     async def list_tasks(
         self,
@@ -178,6 +183,7 @@ class BusinessApiClient:
         after_id: str | None = None,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params["origin"] = "mcp"
         if before_id:
             params["before_id"] = before_id
         if after_id:

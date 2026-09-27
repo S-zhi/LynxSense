@@ -27,6 +27,13 @@ _account_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _active_token_fingerprint: Optional[str] = None
 
 
+def _configured_replicate_token() -> Optional[str]:
+    """读取页面运行时配置；旧的替换 settings 对象仍回退到环境变量。"""
+    if hasattr(settings, "replicate_api_token"):
+        return settings.replicate_api_token
+    return os.getenv("REPLICATE_API_TOKEN")
+
+
 def clear_cache() -> None:
     """清空 Replicate 账户状态缓存。"""
     global _active_token_fingerprint
@@ -193,7 +200,7 @@ def query_replicate_balance(
     支持 TTL 缓存，在 ttl_sec 时间内重复查询同一 Token 会直接返回缓存，
     避免高频调用造成上游 API 429 限流。
     """
-    token = api_token or os.getenv("REPLICATE_API_TOKEN")
+    token = api_token if api_token is not None else _configured_replicate_token()
     if not token or not token.strip():
         res = _unconfigured()
         return res
