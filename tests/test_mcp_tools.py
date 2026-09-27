@@ -78,7 +78,7 @@ def test_start_pipeline_returns_task_id_and_uses_business_contract():
         "targetLang": "ja",
         "mode": "bilingual",
         "burn": "soft",
-        "model": "small",
+        "model": "local:tiny",
         "engine": "deepseek",
         "needSubtitle": True,
     }
@@ -138,7 +138,7 @@ def test_start_pipeline_reports_initialization_failure():
                 "ok": False,
                 "capabilities": {"download": False, "full_pipeline": False},
                 "config_file": "/project/.env",
-                "missing": ["REPLICATE_API_TOKEN"],
+                "missing": ["SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY"],
             }
 
     result = _run(SubtitleMcpTools(NotReadyApi()).start_subtitle_pipeline(
@@ -147,4 +147,4 @@ def test_start_pipeline_reports_initialization_failure():
 
     assert result["ok"] is False
     assert result["error_code"] == "NOT_INITIALIZED"
-    assert result["missing"] == ["REPLICATE_API_TOKEN"]
+    assert result["missing"] == ["SUBTRANS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY"]
