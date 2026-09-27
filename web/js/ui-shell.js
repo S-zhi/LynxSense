@@ -9,9 +9,13 @@ export function initShell() {
     if (item) setView(item.dataset.view);
   });
 
-  $("#filters").addEventListener("click", (e) => {
-    const chip = e.target.closest(".chip");
-    if (chip) setFilter(chip.dataset.filter);
+  ["#filters", "#mcpFilters"].forEach((selector) => {
+    const filters = $(selector);
+    if (!filters) return;
+    filters.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (chip) setFilter(chip.dataset.filter);
+    });
   });
 
   initNotifications();
@@ -60,6 +64,7 @@ function syncShell() {
   $$(".view").forEach((v) => v.classList.toggle("is-active", v.dataset.view === state.view));
   $$(".nav__item").forEach((n) => n.classList.toggle("is-active", n.dataset.view === state.view));
   $$("#filters .chip").forEach((c) => c.classList.toggle("is-active", c.dataset.filter === state.filter));
+  $$("#mcpFilters .chip").forEach((c) => c.classList.toggle("is-active", c.dataset.filter === state.filter));
   // 广播视图切换事件（各 Tab 自取所需）
   document.dispatchEvent(new CustomEvent("viewchange", { detail: { view: state.view, settingsTab: state.settingsTab } }));
 }

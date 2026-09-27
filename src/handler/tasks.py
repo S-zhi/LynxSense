@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from src.config import (
@@ -258,6 +258,7 @@ def create_task(
     body: TaskCreate,
     store: TaskStore = Depends(get_store),
     engines: TranslationEngineStore = Depends(get_translation_engine_store),
+    task_origin: str = Header("web", alias="X-Task-Origin"),
 ) -> TaskOut:
     _ensure_translation_engine(body.engine, body.needSubtitle, engines)
     rec, created = store.create_if_no_recent_active(
@@ -270,6 +271,7 @@ def create_task(
         engine=body.engine,
         need_subtitle=body.needSubtitle,
         quality=body.quality,
+        task_origin="mcp" if task_origin.strip().lower() == "mcp" else "web",
     )
     if not created:
         raise HTTPException(
@@ -406,6 +408,7 @@ def list_tasks(
     limit: int = Query(50, ge=1, le=200, description="单页最大记录数，取值范围 1 到 200，默认 50"),
     before_id: Optional[str] = Query(None, description="游标：仅返回 ID 早于该任务的记录"),
     after_id: Optional[str] = Query(None, description="游标：仅返回 ID 晚于该任务的记录"),
+    origin: Optional[Literal["web", "mcp"]] = Query(None, description="任务来源"),
     store: TaskStore = Depends(get_store),
 ) -> List[TaskOut]:
     return [
@@ -415,6 +418,7 @@ def list_tasks(
             offset=offset,
             before_id=before_id,
             after_id=after_id,
+            task_origin=origin,
         )
     ]
 

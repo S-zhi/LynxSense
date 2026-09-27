@@ -4,6 +4,7 @@ import { state, subscribe, setSettingsTab, setView } from "./store.js";
 
 export const ROUTES = Object.freeze({
   tasks: { path: "/tasks", title: "任务" },
+  mcp: { path: "/mcp", title: "MCP 调用" },
   preview: { path: "/preview", title: "视频预览" },
   editor: { path: "/editor", title: "字幕编辑" },
   storage: { path: "/storage", title: "本地资源" },
