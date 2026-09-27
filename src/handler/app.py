@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     # SPA 路由需要在静态目录挂载前显式回退到 index.html，否则直接打开
     # /tasks、/preview 等深链接时 StaticFiles 会按目录查找并返回 404。
     if _WEB_DIR.is_dir():
-        spa_routes = ("/tasks", "/async-batch", "/preview", "/editor", "/probe", "/storage", "/drive", "/settings")
+        spa_routes = ("/tasks", "/preview", "/editor", "/probe", "/storage", "/drive", "/settings")
         for route_path in spa_routes:
             app.add_api_route(
                 route_path,
