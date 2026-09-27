@@ -39,8 +39,36 @@
 .audio-settings__foot > span { color:var(--text-3); font:11px var(--font-mono); }
 .audio-settings__foot .btn { min-height:40px; padding-inline:17px; }
 .audio-settings__foot .btn:disabled { cursor:wait; opacity:.6; }
+.local-model-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; width:100%; }
+.local-model-card { position:relative; display:flex; flex-direction:column; gap:15px; min-width:0; padding:17px; overflow:hidden; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-row); box-shadow:var(--shadow-1); }
+.local-model-card::before { content:""; position:absolute; inset:0 0 auto; height:3px; background:linear-gradient(90deg,var(--accent),transparent 82%); opacity:.72; }
+.local-model-card.is-downloading { border-color:color-mix(in srgb,var(--accent) 42%,var(--border)); }
+.local-model-card__top, .local-model-card__identity, .local-model-card__meta, .local-model-card__progress-label, .local-model-card__foot { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.local-model-card__identity { justify-content:flex-start; min-width:0; }
+.local-model-card__icon { display:grid; place-items:center; flex:none; width:38px; height:38px; color:var(--accent); background:var(--surface-2); border-radius:12px; font-size:20px; }
+.local-model-card__identity h3 { margin:0; overflow:hidden; color:var(--text); font-size:14px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
+.local-model-card__name { display:block; margin-top:3px; color:var(--text-3); font:10px var(--font-mono); }
+.local-model-card__status { flex:none; padding:4px 8px; border-radius:var(--r-pill); color:var(--text-3); background:var(--surface-2); font-size:10px; }
+.local-model-card__status::before { content:""; display:inline-block; width:6px; height:6px; margin-right:6px; border-radius:50%; background:currentColor; vertical-align:1px; }
+.local-model-card__status--ready { color:var(--ok-text); background:var(--ok-soft); }
+.local-model-card__status--busy { color:var(--accent-text); background:var(--accent-soft); }
+.local-model-card__status--error { color:var(--danger-text); background:var(--danger-soft); }
+.local-model-card__meta { justify-content:flex-start; padding-top:12px; border-top:1px solid var(--border); color:var(--text-3); font-size:11px; }
+.local-model-card__meta strong { color:var(--text-2); font-weight:600; }
+.local-model-card__progress-area { display:grid; gap:7px; min-height:38px; }
+.local-model-card__progress-label { align-items:flex-start; color:var(--text-3); font-size:10px; }
+.local-model-card__progress-label strong { color:var(--text-2); font:10px var(--font-mono); text-align:right; }
+.local-model-card__progress { display:block; width:100%; height:6px; accent-color:var(--accent); }
+.local-model-card__availability, .local-model-card__error { min-height:28px; color:var(--text-2); font-size:11px; line-height:1.5; }
+.local-model-card__error { display:-webkit-box; overflow:hidden; color:var(--danger-text); -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow-wrap:anywhere; }
+.local-model-card__foot { margin-top:auto; padding-top:12px; border-top:1px solid var(--border); }
+.local-model-card__phase { min-width:0; overflow:hidden; color:var(--text-3); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.local-model-card__foot .btn { flex:none; }
+.local-model-card__delete { color:var(--danger-text); }
+.local-model-card__delete:hover { color:var(--danger-text); border-color:color-mix(in srgb,var(--danger-text) 40%,var(--border)); }
 @media (max-width:760px) { .audio-settings__head { flex-direction:column; gap:15px; } .audio-settings__status { width:100%; } .audio-settings__fields { grid-template-columns:1fr 1fr; } .audio-settings__fields .engine-field:first-child { grid-column:1 / -1; } }
 @media (max-width:560px) { .audio-settings__form { padding:14px; } .audio-settings__fields { grid-template-columns:1fr; } .audio-settings__fields .engine-field:first-child { grid-column:auto; } .audio-settings__foot { align-items:flex-start; flex-direction:column; } .audio-settings__foot .btn { width:100%; justify-content:center; } }
+@media (max-width:760px) { .local-model-list { grid-template-columns:1fr; } }
 .advanced-tab-panel { animation:advanced-panel-in .22s ease both; }
 @keyframes advanced-panel-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
 .translation-settings { display:flex; flex-direction:column; gap:16px; }

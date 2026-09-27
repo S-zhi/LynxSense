@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.handler.deps import get_store, require_api_token
 
 from src.service.srt.replicate_schema import (
     ReplicateSchemaError,
@@ -10,6 +12,7 @@ from src.service.srt.replicate_schema import (
     get_whisper_model_weight_options,
 )
 from src.service.model_manager import MODEL_CATALOG, MODEL_NAMES, model_manager
+from src.store import TaskStore
 
 router = APIRouter(prefix="/api/srt", tags=["srt"])
 
@@ -58,6 +61,38 @@ def download_local_model(model_name: str) -> dict:
     if model_name not in MODEL_NAMES:
         raise HTTPException(status_code=404, detail=f"不支持的本地 Whisper 模型: {model_name}")
     return model_manager.download(model_name)
+
+
+@router.delete("/local-models/{model_name}", dependencies=[Depends(require_api_token)])
+def delete_local_model(model_name: str, store: TaskStore = Depends(get_store)) -> dict:
+    """删除已下载的本地模型，避免清理正在使用的模型文件。"""
+    if model_name not in MODEL_NAMES:
+        raise HTTPException(status_code=404, detail=f"不支持的本地 Whisper 模型: {model_name}")
+
+    local_backends = {"local", "local_whisper", "whisper", "faster_whisper"}
+    for task in store.list():
+        if task.status in {"SUCCESS", "FAILED", "CANCELLED"} or not task.need_subtitle:
+            continue
+        backend, separator, selected_model = str(task.model or "").partition(":")
+        if separator and backend.strip().lower() == "replicate":
+            continue
+        if separator and backend.strip().lower() not in local_backends:
+            continue
+        if (selected_model if separator else task.model).strip() == model_name:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "MODEL_IN_USE",
+                    "message": "有未结束的任务选用了这个模型，暂时无法删除",
+                },
+            )
+
+    try:
+        return model_manager.delete(model_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/target-languages", response_model=list[str])

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.handler import tasks as tasks_routes
+from src.handler import srt as srt_routes
 from src.handler.app import app
 from src.handler.deps import get_probe_store, get_store
 from src.store import RESOURCE_STATUS_AVAILABLE, RESOURCE_STATUS_MISSING, TaskStore
@@ -112,7 +113,7 @@ def test_api_token_auth_when_token_configured(client, monkeypatch):
 
 
 def test_api_token_auth_read_and_download_endpoints(client, monkeypatch):
-    """配置 SUBTRANS_API_TOKEN 时，任务列表、详情、媒体下载、SSE 流及存储接口均受保护。"""
+    """配置 SUBTRANS_API_TOKEN 时，数据读取和删除接口均受保护。"""
     monkeypatch.delenv("SUBTRANS_API_TOKEN", raising=False)
     cid = client.post("/api/tasks", json=_payload()).json()["id"]
     client._store.update(cid, status="SUCCESS", progress=100)
@@ -140,12 +141,15 @@ def test_api_token_auth_read_and_download_endpoints(client, monkeypatch):
         f"/api/tasks/{cid}/source",
         f"/api/tasks/{cid}/download",
     ]
+    endpoints_delete = ["/api/srt/local-models/small"]
 
     # 未带 Token 均返回 401
     for ep in endpoints_get:
         assert client.get(ep).status_code == 401, f"{ep} 未拦截 401"
     for ep in endpoints_head:
         assert client.head(ep).status_code == 401, f"HEAD {ep} 未拦截 401"
+    for ep in endpoints_delete:
+        assert client.delete(ep).status_code == 401, f"DELETE {ep} 未拦截 401"
     assert client.post("/api/storage/cleanup_preview", json={}).status_code == 401
 
     # 支持 Header Authorization: Bearer
@@ -549,6 +553,30 @@ def test_srt_model_weights(client, monkeypatch):
     r = client.get("/api/srt/model-weights")
     assert r.status_code == 200
     assert r.json() == ["tiny", "small"]
+
+
+def test_delete_local_model_is_blocked_while_an_active_task_uses_it(client, monkeypatch):
+    class ModelManagerStub:
+        deleted = []
+
+        def delete(self, name):
+            self.deleted.append(name)
+            return {"name": name, "status": "NOT_INSTALLED"}
+
+    manager = ModelManagerStub()
+    monkeypatch.setattr(srt_routes, "model_manager", manager)
+    task_id = client.post("/api/tasks", json=_payload(model="whisper:small")).json()["id"]
+
+    blocked = client.delete("/api/srt/local-models/small")
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "MODEL_IN_USE"
+    assert manager.deleted == []
+
+    client._store.update(task_id, status="SUCCESS")
+    deleted = client.delete("/api/srt/local-models/small")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "NOT_INSTALLED"
+    assert manager.deleted == ["small"]
 
 
 def test_srt_target_languages(client):

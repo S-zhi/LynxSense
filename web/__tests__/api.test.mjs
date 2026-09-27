@@ -78,6 +78,21 @@ test("Api.cancelTask sends POST to /api/tasks/:id/cancel", async () => {
   assert.equal(res.status, "CANCELLED");
 });
 
+test("Api.deleteLocalModel sends DELETE to the model resource", async () => {
+  let requestedUrl = "";
+  let requestedMethod = "";
+  mockFetchHandler = async (url, options) => {
+    requestedUrl = url;
+    requestedMethod = options.method;
+    return { ok: true, json: async () => ({ name: "large-v3", status: "NOT_INSTALLED" }) };
+  };
+
+  const model = await Api.deleteLocalModel("large-v3");
+  assert.equal(requestedUrl, "http://localhost:8000/api/srt/local-models/large-v3");
+  assert.equal(requestedMethod, "DELETE");
+  assert.equal(model.status, "NOT_INSTALLED");
+});
+
 test("Api.subscribeProgress: handles message, end, timeout, and reconnecting", async () => {
   const instances = [];
   class MockEventSource {
