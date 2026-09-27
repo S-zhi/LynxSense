@@ -74,6 +74,7 @@ class TaskRecord:
     downgrade_errno: Optional[int] = None
     downgraded_at: Optional[int] = None
     is_cancelling: int = 0  # 1=取消清理进行中，0=未取消
+    quality: str = "480p"  # 下载清晰度策略：best/1080p/720p/480p/360p/audio_only
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -182,6 +183,8 @@ class TaskStore:
                 conn.execute("ALTER TABLE tasks ADD COLUMN is_cancelling INTEGER NOT NULL DEFAULT 0")
             if "downgraded_at" not in cols:
                 conn.execute("ALTER TABLE tasks ADD COLUMN downgraded_at INTEGER")
+            if "quality" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN quality TEXT NOT NULL DEFAULT '480p'")
             # Older versions persisted absolute output paths. Keep only the
             # task-local name so the database survives volume and OS changes.
             for row in conn.execute(
@@ -218,6 +221,7 @@ class TaskStore:
         source_type: str = "url",
         need_subtitle: bool = True,
         title: Optional[str] = None,
+        quality: Optional[str] = "480p",
     ) -> TaskRecord:
         with self._connect() as conn:
             return self._insert(
@@ -232,6 +236,7 @@ class TaskStore:
                 source_type=source_type,
                 need_subtitle=need_subtitle,
                 title=title,
+                quality=quality or "480p",
             )
 
     def create_if_no_recent_active(
@@ -271,6 +276,7 @@ class TaskStore:
             source_type=kwargs.get("source_type", "url"),
             need_subtitle=int(kwargs.get("need_subtitle", True)),
             title=kwargs.get("title"),
+            quality=kwargs.get("quality") or "480p",
             status="PENDING",
             progress=0,
             created_at=now,

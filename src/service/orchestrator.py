@@ -83,6 +83,7 @@ class PipelineParams:
     source_type: str = "url"    # url=在线链接下载 upload=本地上传视频
     need_subtitle: bool = True  # False = 仅下载视频，跳过识别/翻译/烧录
     title: Optional[str] = None  # 上传模式下用原始文件名作为展示标题
+    quality: Optional[str] = None  # 下载清晰度策略：best/1080p/720p/480p/360p/audio_only
 
 
 @dataclass
@@ -263,6 +264,7 @@ class DownloadHandler(PipelineHandler):
                 params.url,
                 tid,
                 on_progress=context.step_callback("DOWNLOADING"),
+                quality=params.quality,
             )
             context.resources.video_path = AssetResolver.require_source(tid)
             context.title = download.title
