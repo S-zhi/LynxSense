@@ -34,6 +34,9 @@
           <button class="nav__item is-active" type="button" data-view="tasks" data-route="/tasks">
             <i class="ph ph-rows" aria-hidden="true"></i><span>快速开始</span>
           </button>
+          <button class="nav__item" type="button" data-view="mcp" data-route="/mcp">
+            <i class="ph ph-robot" aria-hidden="true"></i><span>MCP 调用</span>
+          </button>
           <button class="nav__item" type="button" data-view="preview" data-route="/preview">
             <i class="ph ph-monitor-play" aria-hidden="true"></i><span>视频预览</span>
           </button>
@@ -234,6 +237,21 @@
               </div>
             </div>
             <div class="queue__list" id="taskList" aria-live="polite"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view="mcp" id="view-mcp">
+          <section class="queue">
+            <div class="queue__head">
+              <h2>MCP 处理队列</h2>
+              <div class="filters" id="mcpFilters" role="tablist" aria-label="按状态筛选">
+                <button class="chip is-active" data-filter="all" role="tab">全部</button>
+                <button class="chip" data-filter="active" role="tab">进行中</button>
+                <button class="chip" data-filter="done" role="tab">已完成</button>
+                <button class="chip" data-filter="failed" role="tab">失败</button>
+              </div>
+            </div>
+            <div class="queue__list" id="mcpTaskList" aria-live="polite"></div>
           </section>
         </section>
 
