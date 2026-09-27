@@ -153,7 +153,7 @@ const RealApi = {
 
   // 获取 Whisper 模型权重选项。
   async listModelWeights() {
-    const res = await request(this.base, "/api/srt/model-weights");
+    const res = await request(this.base, "/api/srt/model-options");
     if (!res.ok) throw new Error(await readError(res, "获取模型列表失败"));
     return res.json();
   },
@@ -612,8 +612,8 @@ const MockApi = (() => {
         Object.keys(LANG_LABEL).filter((k) => k !== "auto" && k !== "zh")
       );
     },
-    // 示例模式下返回 Replicate Whisper 模型权重选项。
-    async listModelWeights() { await delay(80); return ["tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium", "large-v1", "large-v2"]; },
+    // 示例模式下返回带后端标识的 Whisper 模型权重选项。
+    async listModelWeights() { await delay(80); return ["replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2", "local:tiny"]; },
     async getAudioSettings() {
       await delay(40);
       try { return JSON.parse(localStorage.getItem("subtrans_mock_audio_settings_v1")) || { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; } catch (_) { return { enabled: false, backend: "demucs", model: "htdemucs", threads: 1, timeout: 1800, demucsInstalled: true, ffmpegAvailable: true, ready: true, message: null }; }

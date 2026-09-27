@@ -396,11 +396,19 @@ class TranscriptionHandler(PipelineHandler):
             context.emit("TRANSCRIBING", 65)
             return
         try:
+            backend = None
+            model_name = params.model
+            if ":" in model_name:
+                candidate, selected_model = model_name.split(":", 1)
+                if candidate.strip().lower() in {"replicate", "local", "local_whisper", "whisper"}:
+                    backend = "local_whisper" if candidate.strip().lower() != "replicate" else "replicate"
+                    model_name = selected_model.strip()
             transcribe(
                 context.resources.vocal_audio_path or context.resources.audio_path,
                 tid,
                 language=params.source_lang,
-                model_name=params.model,
+                model_name=model_name,
+                backend=backend,
                 on_progress=context.step_callback("TRANSCRIBING"),
                 cancel_check=lambda: _check_cancelled(tid),
             )

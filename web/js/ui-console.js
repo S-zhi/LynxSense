@@ -12,8 +12,9 @@ const FALLBACK_TARGET_LANGUAGES = Object.keys(LANG_LABEL).filter(
   (k) => k !== "auto" && k !== "zh"
 );
 const FALLBACK_MODELS = [
-  "tiny.en", "tiny", "base.en", "base", "small.en",
-  "small", "medium.en", "medium", "large-v1", "large-v2",
+  "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en",
+  "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2",
+  "local:tiny",
 ];
 const DEFAULT_SOURCE_LANGUAGE = "en";
 const URL_RE = /^https?:\/\/.+/i;
@@ -118,6 +119,7 @@ function renderTargetLanguages(languages) {
 
 function modelLabel(model) {
   // 生成 Whisper 模型下拉框展示文案。
+  const [backend, rawModel] = String(model).includes(":") ? String(model).split(":", 2) : ["replicate", model];
   const labels = {
     "tiny.en": "tiny.en · 英语最快",
     tiny: "tiny · 最快",
@@ -130,7 +132,8 @@ function modelLabel(model) {
     "large-v1": "large-v1 · 高精度",
     "large-v2": "large-v2 · 高精度",
   };
-  return labels[model] || model;
+  const label = labels[rawModel] || rawModel;
+  return `${backend === "local" ? "本地" : "Replicate"} · ${label}`;
 }
 
 function renderModelWeights(models) {
@@ -141,7 +144,8 @@ function renderModelWeights(models) {
   models.forEach((model) => {
     sel.append(option(model, modelLabel(model)));
   });
-  sel.value = [...sel.options].some((item) => item.value === current) ? current : "small";
+  const normalizedCurrent = String(current).includes(":") ? current : `replicate:${current}`;
+  sel.value = [...sel.options].some((item) => item.value === normalizedCurrent) ? normalizedCurrent : "replicate:small";
 }
 
 async function initSrtOptions() {
