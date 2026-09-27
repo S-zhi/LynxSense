@@ -16,7 +16,6 @@
     <link rel="stylesheet" href="styles/storage.css" />
     <link rel="stylesheet" href="styles/drive.css" />
     <link rel="stylesheet" href="styles/translation-settings.css" />
-    <link rel="stylesheet" href="styles/async-batch.css" />
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
   </head>
   <body>
@@ -34,9 +33,6 @@
         <nav class="nav" id="nav" aria-label="功能导航">
           <button class="nav__item is-active" type="button" data-view="tasks" data-route="/tasks">
             <i class="ph ph-rows" aria-hidden="true"></i><span>快速开始</span>
-          </button>
-          <button class="nav__item" type="button" data-view="async-batch" data-route="/async-batch">
-            <i class="ph ph-stack" aria-hidden="true"></i><span>异步任务发布</span>
           </button>
           <button class="nav__item" type="button" data-view="preview" data-route="/preview">
             <i class="ph ph-monitor-play" aria-hidden="true"></i><span>视频预览</span>
@@ -239,19 +235,6 @@
             </div>
             <div class="queue__list" id="taskList" aria-live="polite"></div>
           </section>
-        </section>
-
-        <!-- ============ 异步任务发布 ============ -->
-        <section class="view" data-view="async-batch" id="view-async-batch">
-          <div class="async-batch" id="asyncBatch">
-            <header class="async-batch__head"><div><span class="eyebrow">BATCH / ASYNC PIPELINE</span><h2>异步任务发布</h2><p>一次提交多个视频，按责任链顺序处理；任意节点都可以跳过。</p></div><span class="async-batch__status" id="asyncBatchStatus">等待发布</span></header>
-            <form class="async-batch__form" id="asyncBatchForm" novalidate>
-              <section class="async-batch__panel" aria-labelledby="batchSourceTitle"><div class="async-batch__panel-head"><div><span class="eyebrow">01 / INPUT</span><h3 id="batchSourceTitle">批量输入</h3></div><div class="segmented" role="tablist" aria-label="批量输入类型"><label class="segmented__opt"><input type="radio" name="batchSource" value="urls" checked /><span>URL 列表</span></label><label class="segmented__opt"><input type="radio" name="batchSource" value="folder" /><span>本地文件夹</span></label></div></div><div class="async-batch__source" data-batch-source="urls"><label class="field-label" for="batchUrls">视频 URL List</label><textarea class="textarea async-batch__urls" id="batchUrls" rows="7" placeholder="每行一个视频页面地址&#10;https://example.com/video-01&#10;https://example.com/video-02"></textarea><p class="field-hint">支持粘贴多行链接，发布后按行拆分为独立任务。</p></div><div class="async-batch__source" data-batch-source="folder" hidden><label class="async-batch__dropzone" for="batchFolder"><i class="ph ph-folder-open" aria-hidden="true"></i><strong>选择视频文件夹</strong><span id="batchFolderHint">支持多选视频文件，目录结构会保留</span><input id="batchFolder" type="file" webkitdirectory="" directory="" multiple accept="video/*,.mp4,.mov,.mkv,.webm,.avi,.m4v,.flv,.ts,.mpeg,.mpg,.wmv" /></label><div class="async-batch__filelist" id="batchFileList" aria-live="polite">尚未选择文件</div></div></section>
-              <section class="async-batch__panel" aria-labelledby="batchChainTitle"><div class="async-batch__panel-head"><div><span class="eyebrow">02 / CHAIN</span><h3 id="batchChainTitle">责任链节点</h3></div><span class="field-hint">拖动调整顺序 · 关闭即 Skip</span></div><div class="chain" id="batchChain" aria-label="责任链节点列表"></div></section>
-              <section class="async-batch__panel async-batch__options" aria-labelledby="batchOptionsTitle"><div class="async-batch__panel-head"><div><span class="eyebrow">03 / CONFIG</span><h3 id="batchOptionsTitle">任务参数</h3></div></div><div class="async-batch__grid"><label class="field-label">源语言<select class="select" id="batchSourceLang"><option value="auto">自动检测</option></select></label><label class="field-label">目标语言<select class="select" id="batchTargetLang"><option value="zh-CN">简体中文</option></select></label><label class="field-label">翻译引擎<select class="select" id="batchEngine"><option value="deepseek">DeepSeek</option></select></label><label class="field-label">并发任务数<input class="input" id="batchConcurrency" type="number" min="1" max="8" value="2" /></label></div></section>
-              <div class="async-batch__actions"><span id="batchSummary">0 个输入 · 0 个节点启用</span><button class="btn btn--primary" id="batchSubmit" type="submit"><i class="ph ph-rocket-launch" aria-hidden="true"></i><span>发布异步任务</span></button></div>
-            </form><section class="async-batch__runs" aria-labelledby="batchRunsTitle"><div class="async-batch__runs-head"><h3 id="batchRunsTitle">最近批次</h3><button class="btn btn--ghost btn--sm" id="batchClearRuns" type="button"><i class="ph ph-trash" aria-hidden="true"></i><span>清空记录</span></button></div><div id="batchRuns" class="batch-runs" aria-live="polite"></div></section>
-          </div>
         </section>
 
         <!-- ============ 预览 ============ -->
