@@ -11,7 +11,7 @@ from src.service.srt.replicate_schema import (
     get_video_language_options,
     get_whisper_model_weight_options,
 )
-from src.service.model_manager import ModelDependencyError, ModelValidationError, model_manager
+from src.service.model_manager import MODEL_NAMES, ModelDependencyError, ModelValidationError, model_manager
 from src.store import TaskStore
 
 router = APIRouter(prefix="/api/srt", tags=["srt"])
@@ -70,6 +70,14 @@ def import_local_model(
     finally:
         for item in files:
             item.file.close()
+
+
+@router.post("/local-models/{model_name}/download", dependencies=[Depends(require_api_token)])
+def download_local_model(model_name: str) -> dict:
+    """按用户操作下载官方 faster-whisper 模型，并返回可轮询状态。"""
+    if model_name not in MODEL_NAMES:
+        raise HTTPException(status_code=404, detail=f"未知官方模型: {model_name}")
+    return model_manager.download(model_name)
 
 
 def _ensure_model_not_in_use(model_name: str, store: TaskStore) -> None:

@@ -9,6 +9,7 @@ const SIDECARS = new Set([
   "pytorch_model.bin.index.json", "model.safetensors.index.json",
 ]);
 const WEIGHT = /^(pytorch_model(?:-\d{5}-of-\d{5})?\.bin|model(?:-\d{5}-of-\d{5})?\.safetensors)$/;
+let pollTimer = null;
 
 function formatBytes(value) {
   const bytes = Number(value);
@@ -21,27 +22,55 @@ function formatBytes(value) {
 function render(items) {
   const root = $("#localModelsList");
   if (!root) return;
-  const ready = items.filter((item) => item.status === "READY");
-  root.innerHTML = ready.length ? ready.map((item) => {
+  const ready = items.filter((item) => item.status === "READY").length;
+  const summary = $("#localModelSummary");
+  if (summary) summary.textContent = `${items.filter((item) => item.source === "official").length} 款官方模型 · ${ready} 款已安装`;
+  const card = (item) => {
     const name = escapeHtml(item.name);
     const label = escapeHtml(item.label || item.name);
-    return `<article class="local-model-card" aria-label="${label}">
+    const busy = item.status === "DOWNLOADING";
+    const installed = item.status === "READY";
+    const error = item.status === "ERROR";
+    const statusLabel = installed ? "已就绪" : busy ? "下载中" : error ? "下载失败" : "未安装";
+    const statusClass = installed ? "ready" : busy ? "busy" : error ? "error" : "idle";
+    const size = installed && item.installedBytes ? formatBytes(item.installedBytes) : item.size || "大小未知";
+    return `<article class="local-model-card${busy ? " is-downloading" : ""}" aria-label="${label}">
       <div class="local-model-card__top">
         <div class="local-model-card__identity"><span class="local-model-card__icon"><i class="ph ph-cpu" aria-hidden="true"></i></span><div><h3>${label}</h3><span class="local-model-card__name">${name}</span></div></div>
-        <span class="local-model-card__status local-model-card__status--ready">已就绪</span>
+        <span class="local-model-card__status local-model-card__status--${statusClass}">${statusLabel}</span>
       </div>
-      <div class="local-model-card__meta"><span>${item.format === "huggingface" ? "Hugging Face" : "CTranslate2"}</span><strong>${formatBytes(item.size) || escapeHtml(item.size || "")}</strong></div>
+      <div class="local-model-card__meta"><span>${item.source === "imported" ? "本地导入 · Hugging Face" : "官方 · CTranslate2"}</span><strong>${escapeHtml(size)}</strong></div>
+      ${busy ? `<progress class="local-model-card__progress" aria-label="${label} 下载中"></progress>` : ""}
+      ${error ? `<p class="local-model-card__error" title="${escapeHtml(item.error || "")}">${escapeHtml(item.error || "下载失败，请重试")}</p>` : ""}
       <div class="local-model-card__foot">
-        <span class="local-model-card__phase">本地</span>
+        <span class="local-model-card__phase">${busy ? item.phase === "checking" ? "正在验证模型" : "正在获取模型文件" : installed ? "可在任务中使用" : "下载后可在任务中使用"}</span>
         <div class="local-model-actions">
-          ${item.format === "huggingface" ? `<button class="btn btn--ghost btn--sm" type="button" data-model-check="${name}" title="检查模型" aria-label="检查 ${label}"><i class="ph ph-shield-check" aria-hidden="true"></i></button>` : ""}
-          <button class="btn btn--ghost btn--sm local-model-card__delete" type="button" data-model-delete="${name}" title="删除模型" aria-label="删除 ${label}"><i class="ph ph-trash" aria-hidden="true"></i></button>
+          ${installed && item.format === "huggingface" ? `<button class="btn btn--ghost btn--sm" type="button" data-model-check="${name}" title="检查模型" aria-label="检查 ${label}"><i class="ph ph-shield-check" aria-hidden="true"></i></button>` : ""}
+          ${installed ? `<button class="btn btn--ghost btn--sm local-model-card__delete" type="button" data-model-delete="${name}" title="删除模型" aria-label="删除 ${label}"><i class="ph ph-trash" aria-hidden="true"></i><span>删除</span></button>` : item.source === "official" ? `<button class="btn btn--primary btn--sm" type="button" data-model-download="${name}"${busy ? " disabled" : ""}><i class="ph ph-download-simple" aria-hidden="true"></i><span>${busy ? "下载中" : error ? "重试" : "下载"}</span></button>` : ""}
         </div>
       </div>
     </article>`;
-  }).join("") : '<div class="local-model-empty">暂无本地模型</div>';
+  };
+  root.innerHTML = items.filter((item) => item.source === "official").map(card).join("");
+  const importedRoot = $("#importedModelsList");
+  if (importedRoot) {
+    const imported = items.filter((item) => item.source === "imported");
+    importedRoot.innerHTML = imported.length ? imported.map(card).join("") : '<p class="local-model-empty">尚未导入模型。选择本机模型目录后，系统会先检查文件和推理结果。</p>';
+  }
+  const actionsRoot = $("#localModelsSettings");
 
-  root.querySelectorAll("[data-model-check]").forEach((button) => button.addEventListener("click", async () => {
+  actionsRoot.querySelectorAll("[data-model-download]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await Api.downloadLocalModel(button.dataset.modelDownload);
+      await refresh();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || "下载官方模型失败", "ph-warning-circle");
+    }
+  }));
+
+  actionsRoot.querySelectorAll("[data-model-check]").forEach((button) => button.addEventListener("click", async () => {
     button.disabled = true;
     try {
       await Api.checkLocalModel(button.dataset.modelCheck);
@@ -54,7 +83,7 @@ function render(items) {
     }
   }));
 
-  root.querySelectorAll("[data-model-delete]").forEach((button) => button.addEventListener("click", async () => {
+  actionsRoot.querySelectorAll("[data-model-delete]").forEach((button) => button.addEventListener("click", async () => {
     const name = button.dataset.modelDelete;
     if (!window.confirm(`删除 ${name} 并释放本地空间？`)) return;
     button.disabled = true;
@@ -121,6 +150,13 @@ export function initLocalModels() {
     }
   });
   document.addEventListener("viewchange", (event) => {
-    if (event.detail?.view === "other-settings" && event.detail?.settingsTab === "models") void refresh();
+    const visible = event.detail?.view === "other-settings" && event.detail?.settingsTab === "models";
+    if (visible) {
+      void refresh();
+      if (!pollTimer) pollTimer = setInterval(() => void refresh(), 2500);
+    } else if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   });
 }

@@ -1,4 +1,4 @@
-"""管理用户提供的本地 Whisper 模型，绝不从 Hub 下载。"""
+"""管理官方模型的显式下载，以及用户提供的本地 Whisper 模型。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -15,14 +16,20 @@ from src.config import settings
 
 MODEL_CATALOG: tuple[dict[str, Any], ...] = (
     {"name": "tiny", "label": "Whisper Tiny", "size": "~75 MB"},
+    {"name": "tiny.en", "label": "Whisper Tiny · English", "size": "~75 MB"},
     {"name": "base", "label": "Whisper Base", "size": "~145 MB"},
+    {"name": "base.en", "label": "Whisper Base · English", "size": "~145 MB"},
     {"name": "small", "label": "Whisper Small", "size": "~465 MB"},
+    {"name": "small.en", "label": "Whisper Small · English", "size": "~465 MB"},
     {"name": "medium", "label": "Whisper Medium", "size": "~1.5 GB"},
+    {"name": "medium.en", "label": "Whisper Medium · English", "size": "~1.5 GB"},
+    {"name": "large-v1", "label": "Whisper Large V1", "size": "~3 GB"},
+    {"name": "large-v2", "label": "Whisper Large V2", "size": "~3 GB"},
     {"name": "large-v3", "label": "Whisper Large V3", "size": "~3 GB"},
     {"name": "large-v3-turbo", "label": "Whisper Large V3 Turbo", "size": "~1.6 GB"},
 )
 MODEL_NAMES = frozenset(item["name"] for item in MODEL_CATALOG)
-_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 _WEIGHT = re.compile(r"^(pytorch_model(?:-\d{5}-of-\d{5})?\.bin|model(?:-\d{5}-of-\d{5})?\.safetensors)$")
 _SIDECARS = frozenset({
     "config.json", "generation_config.json", "preprocessor_config.json",
@@ -43,7 +50,7 @@ class ModelDependencyError(RuntimeError):
 
 def _safe_name(name: str) -> str:
     if not _NAME.fullmatch(name) or name.startswith(".") or name in MODEL_NAMES:
-        raise ModelValidationError("模型名称只能由字母、数字、下划线和连字符组成，且不能与内置模型重名")
+        raise ModelValidationError("模型名称只能由字母、数字、点、下划线和连字符组成，且不能与内置模型重名")
     return name
 
 
@@ -159,6 +166,8 @@ class LocalModelManager:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._states: dict[str, dict[str, Any]] = {}
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="whisper-model")
 
     @property
     def root(self) -> Path:
@@ -187,7 +196,17 @@ class LocalModelManager:
 
     def list_models(self) -> list[dict[str, Any]]:
         with self._lock:
-            result = [{**item, "status": "READY" if self._disk_ready(item["name"]) else "NOT_INSTALLED", "format": "ctranslate2"} for item in MODEL_CATALOG]
+            result = []
+            for item in MODEL_CATALOG:
+                name = item["name"]
+                state = self._states.get(name, {})
+                ready = self._disk_ready(name)
+                installed = sum(p.stat().st_size for p in (self.root / name).rglob("*") if p.is_file()) if ready else 0
+                result.append({
+                    **item, "status": "READY" if ready else state.get("status", "NOT_INSTALLED"),
+                    "format": "ctranslate2", "source": "official", "installedBytes": installed,
+                    "error": state.get("error"), "phase": state.get("phase"),
+                })
             for path in sorted(self.root.iterdir()):
                 if path.name in MODEL_NAMES or not path.is_dir() or path.is_symlink() or not (path / _HF_MARKER).is_file():
                     continue
@@ -195,8 +214,54 @@ class LocalModelManager:
                     meta = json.loads((path / _HF_MARKER).read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
-                result.append({"name": path.name, "label": meta.get("label", path.name), "size": sum(p.stat().st_size for p in path.iterdir() if p.is_file()), "status": "READY", "format": "huggingface"})
+                installed = sum(p.stat().st_size for p in path.iterdir() if p.is_file())
+                result.append({"name": path.name, "label": meta.get("label", path.name), "size": None, "installedBytes": installed, "status": "READY", "format": "huggingface", "source": "imported"})
             return result
+
+    def download(self, name: str) -> dict[str, Any]:
+        if name not in MODEL_NAMES:
+            raise FileNotFoundError(f"未知官方模型: {name}")
+        with self._lock:
+            if self._disk_ready(name):
+                return next(item for item in self.list_models() if item["name"] == name)
+            if self._states.get(name, {}).get("status") != "DOWNLOADING":
+                self._states[name] = {"status": "DOWNLOADING", "phase": "queued", "error": None}
+                self._executor.submit(self._download_official, name)
+            return next(item for item in self.list_models() if item["name"] == name)
+
+    def _download_official(self, name: str) -> None:
+        stage = None
+        try:
+            from huggingface_hub import snapshot_download
+            from faster_whisper import WhisperModel
+
+            stage = Path(tempfile.mkdtemp(prefix=f".download-{name}-", dir=self.root))
+            with self._lock:
+                self._states[name]["phase"] = "downloading"
+            snapshot_download(
+                repo_id=f"Systran/faster-whisper-{name}",
+                revision="main",
+                local_dir=str(stage),
+            )
+            if not (stage / "model.bin").is_file() or not (stage / "config.json").is_file():
+                raise ModelValidationError("官方模型文件不完整")
+            with self._lock:
+                self._states[name]["phase"] = "checking"
+            WhisperModel(str(stage), device="cpu", compute_type="int8", local_files_only=True)
+            (stage / ".subtrans-ready").touch()
+            with self._lock:
+                destination = self.root / name
+                if destination.exists() or destination.is_symlink():
+                    raise FileExistsError(f"模型目录已存在: {name}")
+                stage.rename(destination)
+                stage = None
+                self._states.pop(name, None)
+        except Exception as exc:
+            with self._lock:
+                self._states[name] = {"status": "ERROR", "phase": "error", "error": str(exc)}
+        finally:
+            if stage is not None and stage.exists():
+                shutil.rmtree(stage)
 
     def import_files(self, name: str, label: str, files: list[tuple[str, BinaryIO]]) -> dict[str, Any]:
         _safe_name(name)
@@ -239,9 +304,12 @@ class LocalModelManager:
 
     def delete(self, name: str) -> dict[str, Any]:
         with self._lock:
+            if self._states.get(name, {}).get("status") == "DOWNLOADING":
+                raise RuntimeError("模型正在下载，暂时无法删除")
             if not _NAME.fullmatch(name) or not self.is_ready(name):
                 raise FileNotFoundError(f"本地模型不存在: {name}")
             shutil.rmtree(self.root / name)
+            self._states.pop(name, None)
         return {"name": name, "status": "NOT_INSTALLED"}
 
 

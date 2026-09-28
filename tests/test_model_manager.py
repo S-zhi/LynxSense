@@ -162,3 +162,47 @@ def test_delete_ready_model(tmp_path):
     (model_dir / ".subtrans-ready").touch()
     assert manager.delete("small")["status"] == "NOT_INSTALLED"
     assert not model_dir.exists()
+
+
+def test_official_download_publishes_only_after_cpu_check(monkeypatch, tmp_path):
+    manager = TempModelManager(tmp_path / "models")
+    observed = {}
+
+    def snapshot_download(*, repo_id, revision, local_dir):
+        observed["repo"] = repo_id
+        observed["revision"] = revision
+        path = Path(local_dir)
+        (path / "model.bin").write_bytes(b"weights")
+        (path / "config.json").write_text("{}", encoding="utf-8")
+
+    def whisper_model(path, **kwargs):
+        observed["kwargs"] = kwargs
+        assert not (manager.root / "tiny.en").exists()
+        assert (Path(path) / "model.bin").exists()
+        return object()
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=snapshot_download))
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=whisper_model))
+    manager._states["tiny.en"] = {"status": "DOWNLOADING", "phase": "queued"}
+    manager._download_official("tiny.en")
+
+    assert observed["repo"] == "Systran/faster-whisper-tiny.en"
+    assert observed["kwargs"] == {"device": "cpu", "compute_type": "int8", "local_files_only": True}
+    assert manager.is_ready("tiny.en")
+    assert manager.delete("tiny.en")["status"] == "NOT_INSTALLED"
+
+
+def test_failed_official_download_cleans_staging(monkeypatch, tmp_path):
+    manager = TempModelManager(tmp_path / "models")
+
+    def snapshot_download(*, local_dir, **_kwargs):
+        (Path(local_dir) / "model.bin").write_bytes(b"incomplete")
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=snapshot_download))
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=lambda *_args, **_kwargs: object()))
+    manager._states["small"] = {"status": "DOWNLOADING", "phase": "queued"}
+    manager._download_official("small")
+
+    assert manager.list_models()[4]["status"] == "ERROR"
+    assert not (manager.root / "small").exists()
+    assert not list(manager.root.glob(".download-*"))

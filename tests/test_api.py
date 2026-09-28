@@ -157,6 +157,7 @@ def test_api_token_auth_read_and_download_endpoints(client, monkeypatch):
         files=[("files", ("model.safetensors", b"weights"))],
     ).status_code == 401
     assert client.post("/api/srt/local-models/external/check").status_code == 401
+    assert client.post("/api/srt/local-models/tiny/download").status_code == 401
     assert client.post("/api/storage/cleanup_preview", json={}).status_code == 401
 
     # 支持 Header Authorization: Bearer
@@ -618,10 +619,16 @@ def test_import_and_check_local_model_api(client, monkeypatch, tmp_path):
     assert not (manager.root / "external-whisper").exists()
 
 
-def test_download_endpoint_is_removed(client):
-    response = client.post("/api/srt/local-models/tiny/download")
-    assert response.status_code == 405
-    assert "/api/srt/local-models/{model_name}/download" not in client.get("/openapi.json").json()["paths"]
+def test_official_model_download_endpoint(client, monkeypatch):
+    class ModelManagerStub:
+        def download(self, name):
+            return {"name": name, "status": "DOWNLOADING", "phase": "queued"}
+
+    monkeypatch.setattr(srt_routes, "model_manager", ModelManagerStub())
+    response = client.post("/api/srt/local-models/tiny.en/download")
+    assert response.status_code == 200
+    assert response.json()["status"] == "DOWNLOADING"
+    assert client.post("/api/srt/local-models/not-official/download").status_code == 404
 
 
 def test_srt_target_languages(client):
