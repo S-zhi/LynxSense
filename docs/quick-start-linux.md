@@ -111,7 +111,7 @@ sudo chown -R "$USER":"$USER" /var/lib/subtitles-ai
 
 ```ini
 SUBTRANS_DATA_DIR=/var/lib/subtitles-ai/data
-SUBTRANS_DB=/var/lib/subtitles-ai/app.db
+SUBTRANS_DB=/var/lib/subtitles-ai/data/db/app.db
 ```
 
 常用的资源参数如下，可先保留默认值，再根据服务器性能调整：
@@ -254,7 +254,7 @@ server {
 
 ```bash
 sudo systemctl stop subtitles-ai
-sudo cp /var/lib/subtitles-ai/app.db /var/lib/subtitles-ai/app.db.bak
+sudo cp /var/lib/subtitles-ai/data/db/app.db /var/lib/subtitles-ai/data/db/app.db.bak
 cd /opt/subtitles-ai
 sudo -u subtitles-ai git pull --ff-only
 sudo -u subtitles-ai /usr/local/bin/uv sync --frozen --no-dev

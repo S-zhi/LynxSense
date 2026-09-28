@@ -492,7 +492,7 @@ class Settings:
         if self._db_path is not _UNSET:
             return self._db_path
         _sync_env_file()
-        return _env_path("SUBTRANS_DB", self.backend_dir / "app.db")
+        return _env_path("SUBTRANS_DB", self.data_dir / "db" / "app.db")
 
     # API 鉴权 Token（动态读取 SUBTRANS_API_TOKEN 或编辑 .env）
     @property

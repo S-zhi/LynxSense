@@ -7,6 +7,23 @@ from pathlib import Path
 from src.config import config
 
 
+def test_database_defaults_under_data_dir(monkeypatch, tmp_path):
+    monkeypatch.delenv("SUBTRANS_DB", raising=False)
+    monkeypatch.delenv("SUBTRANS_DATA_DIR", raising=False)
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+
+    settings = config.Settings(backend_dir=tmp_path)
+    assert settings.db_path == tmp_path / "data" / "db" / "app.db"
+
+    custom_data_dir = tmp_path / "custom-data"
+    monkeypatch.setenv("SUBTRANS_DATA_DIR", str(custom_data_dir))
+    assert settings.db_path == custom_data_dir / "db" / "app.db"
+
+    custom_db = tmp_path / "elsewhere" / "app.db"
+    monkeypatch.setenv("SUBTRANS_DB", str(custom_db))
+    assert settings.db_path == custom_db
+
+
 def test_download_format_defaults_to_480p_cap():
     assert (
         config.Settings().download_format

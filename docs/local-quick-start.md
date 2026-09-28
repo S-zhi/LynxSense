@@ -29,6 +29,8 @@ cp .env.example .env
 
 在 `.env` 中填写 `SUBTRANS_DEEPSEEK_API_KEY`。需要登录或年龄验证的网站，再配置 `SUBTRANS_COOKIES`；完整变量见 [`.env.example`](../.env.example)。
 
+SQLite 数据库默认位于 `data/db/app.db`，SQLite 运行时可能在同一目录创建 `app.db-wal` 和 `app.db-shm`。已有安装如果在 `.env` 中设置了 `SUBTRANS_DB=./app.db`，需要停掉 API 后，将原数据库迁移到新目录并更新该变量。先确认没有进程使用数据库，执行 `mkdir -p data/db`，再把 `app.db` 以及存在的 `app.db-wal`、`app.db-shm` 一起移动到 `data/db/`；不要在服务运行时单独移动这些文件。自定义 `SUBTRANS_DATA_DIR` 时，未设置 `SUBTRANS_DB` 的默认位置是该数据目录下的 `db/app.db`。
+
 启动 API：
 
 ```bash

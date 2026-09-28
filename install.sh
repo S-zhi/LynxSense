@@ -54,7 +54,7 @@ usage() {
   SUBTRANS_DEEPSEEK_API_KEY       DeepSeek API Key
   SUBTRANS_INSTALL_DIR            安装目录，默认 /opt/subtitles-ai
   SUBTRANS_DATA_DIR               产物目录，默认 /var/lib/subtitles-ai/data
-  SUBTRANS_DB                     SQLite 路径，默认 /var/lib/subtitles-ai/app.db
+  SUBTRANS_DB                     SQLite 路径，默认 /var/lib/subtitles-ai/data/db/app.db
   SUBTRANS_API_HOST               监听地址，默认 0.0.0.0
   SUBTRANS_API_PORT               监听端口，默认 8000
   SUBTRANS_SERVICE_USER           systemd 用户，默认 subtitles-ai
@@ -246,7 +246,7 @@ if [[ -n "${SUBTRANS_DB:-}" ]]; then
 elif [[ "${EXISTING_DB_PATH}" = /* ]]; then
   DB_PATH="${EXISTING_DB_PATH}"
 else
-  DB_PATH="${DEFAULT_DATA_ROOT}/app.db"
+  DB_PATH="${DATA_DIR}/db/app.db"
 fi
 [[ "${DATA_DIR}" = /* ]] || die "SUBTRANS_DATA_DIR 必须是绝对路径"
 [[ "${DB_PATH}" = /* ]] || die "SUBTRANS_DB 必须是绝对路径"
