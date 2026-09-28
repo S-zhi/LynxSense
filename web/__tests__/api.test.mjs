@@ -93,6 +93,24 @@ test("Api.deleteLocalModel sends DELETE to the model resource", async () => {
   assert.equal(model.status, "NOT_INSTALLED");
 });
 
+test("Api.importLocalModel uploads provided files without requesting a download", async () => {
+  let requestedUrl = "";
+  let requestedBody;
+  mockFetchHandler = async (url, options) => {
+    requestedUrl = url;
+    requestedBody = options.body;
+    assert.equal(options.method, "POST");
+    return { ok: true, json: async () => ({ name: "external", status: "READY" }) };
+  };
+
+  const file = new File(["weights"], "pytorch_model.bin");
+  const result = await Api.importLocalModel("external", "External", [file]);
+  assert.equal(requestedUrl, "http://localhost:8000/api/srt/local-models/import");
+  assert.equal(requestedBody.get("name"), "external");
+  assert.equal(requestedBody.get("files").name, "pytorch_model.bin");
+  assert.equal(result.status, "READY");
+});
+
 test("Api.subscribeProgress: handles message, end, timeout, and reconnecting", async () => {
   const instances = [];
   class MockEventSource {

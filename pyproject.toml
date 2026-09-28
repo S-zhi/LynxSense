@@ -15,6 +15,14 @@ dependencies = [
     # 后续阶段再加：fastapi, uvicorn, rq, redis ...
 ]
 
+[project.optional-dependencies]
+hf-models = [
+    "numpy>=1.26",
+    "safetensors>=0.4.5",
+    "torch>=2.6",
+    "transformers>=4.48,<5",
+]
+
 [tool.setuptools.packages.find]
 include = ["src*"]
 

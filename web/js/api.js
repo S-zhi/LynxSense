@@ -164,9 +164,19 @@ const RealApi = {
     return res.json();
   },
 
-  async downloadLocalModel(name) {
-    const res = await request(this.base, `/api/srt/local-models/${encodeURIComponent(name)}/download`, { method: "POST" });
-    if (!res.ok) throw new Error(await readError(res, "下载本地模型失败"));
+  async importLocalModel(name, label, files) {
+    const body = new FormData();
+    body.append("name", name);
+    body.append("label", label);
+    for (const file of files) body.append("files", file, file.name);
+    const res = await fetch(`${this.base}/api/srt/local-models/import`, { method: "POST", body });
+    if (!res.ok) throw new Error(await readError(res, "导入本地模型失败"));
+    return res.json();
+  },
+
+  async checkLocalModel(name) {
+    const res = await request(this.base, `/api/srt/local-models/${encodeURIComponent(name)}/check`, { method: "POST" });
+    if (!res.ok) throw new Error(await readError(res, "检查本地模型失败"));
     return res.json();
   },
 
@@ -654,16 +664,20 @@ const MockApi = (() => {
         downloaded = saved === null ? ["tiny"] : JSON.parse(saved);
       } catch (_) {}
       const ready = new Set(Array.isArray(downloaded) ? downloaded : ["tiny"]);
-      return ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"].map((name) => ({ name, label: `Whisper ${name}`, size: "", status: ready.has(name) ? "READY" : "NOT_INSTALLED", progress: ready.has(name) ? 100 : 0, phase: ready.has(name) ? "ready" : "idle" }));
+      return [...ready].map((name) => ({ name, label: `Whisper ${name}`, size: "", status: "READY", format: ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"].includes(name) ? "ctranslate2" : "huggingface" }));
     },
-    async downloadLocalModel(name) {
+    async importLocalModel(name, label) {
       await delay(40);
       let downloaded = [];
       try { downloaded = JSON.parse(localStorage.getItem("subtrans_mock_local_models_v1") || "[]"); } catch (_) {}
       if (!Array.isArray(downloaded)) downloaded = [];
       if (!downloaded.includes(name)) downloaded.push(name);
       try { localStorage.setItem("subtrans_mock_local_models_v1", JSON.stringify(downloaded)); } catch (_) {}
-      return { name, status: "READY", progress: 100, phase: "ready" };
+      return { name, label: label || name, status: "READY", format: "huggingface" };
+    },
+    async checkLocalModel(name) {
+      await delay(40);
+      return { name, status: "READY", format: "huggingface" };
     },
     async deleteLocalModel(name) {
       await delay(40);
