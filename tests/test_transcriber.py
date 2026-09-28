@@ -226,7 +226,7 @@ def test_local_whisper_transcriber_normalizes_segments(monkeypatch, tmp_path):
     (tmp_path / "tiny").mkdir()
     monkeypatch.setattr(transcriber.model_manager, "resolve_path", lambda name: str(tmp_path / name))
     monkeypatch.setattr(transcriber.model_manager, "is_hf", lambda name: False)
-    service = LocalWhisperTranscriber(model_name="tiny", device="cpu", compute_type="int8", beam_size=2)
+    service = LocalWhisperTranscriber(model_name="tiny", device="cuda", compute_type="float16", beam_size=2)
     events = []
     result = service.transcribe(
         TranscribeRequest(audio_path=audio, task_id="t1", language="en", model_name="tiny"),
@@ -235,6 +235,8 @@ def test_local_whisper_transcriber_normalizes_segments(monkeypatch, tmp_path):
 
     assert captured["model"] == str(tmp_path / "tiny")
     assert captured["init"]["local_files_only"] is True
+    assert captured["init"]["device"] == "cpu"
+    assert captured["init"]["compute_type"] == "int8"
     assert captured["kwargs"] == {"language": "en", "beam_size": 2, "vad_filter": True}
     assert result.output["segments"] == [{"text": "hello", "start": 0.0, "end": 1.25}]
     assert result.language == "en" and result.language_probability == 0.91
@@ -264,6 +266,7 @@ def test_huggingface_whisper_transcriber_uses_local_asr_contract(monkeypatch, tm
             return cls()
 
     def pipeline(_task, **_kwargs):
+        captured["pipeline"] = _kwargs
         def recognize(path, **kwargs):
             captured["request"] = kwargs
             return {"text": "hello", "chunks": [{"text": " hello ", "timestamp": (0.0, 1.0)}]}
@@ -273,11 +276,12 @@ def test_huggingface_whisper_transcriber_uses_local_asr_contract(monkeypatch, tm
     monkeypatch.setitem(__import__("sys").modules, "transformers", fake)
     monkeypatch.setattr(transcriber.model_manager, "resolve_path", lambda name: str(model_dir))
     monkeypatch.setattr(transcriber.model_manager, "is_hf", lambda name: True)
-    service = LocalWhisperTranscriber(model_name="external")
+    service = LocalWhisperTranscriber(model_name="external", device="cuda")
     result = service.transcribe(TranscribeRequest(audio_path=audio, task_id="t1", model_name="external", language="en"))
 
     assert captured["processor"]["local_files_only"] is True
     assert captured["model"]["trust_remote_code"] is False
+    assert captured["pipeline"]["device"] == "cpu"
     assert captured["request"]["generate_kwargs"] == {"task": "transcribe", "language": "en"}
     assert result.output["segments"] == [{"text": "hello", "start": 0.0, "end": 1.0}]
 

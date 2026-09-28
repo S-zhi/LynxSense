@@ -620,7 +620,8 @@ def test_import_and_check_local_model_api(client, monkeypatch, tmp_path):
 
 def test_download_endpoint_is_removed(client):
     response = client.post("/api/srt/local-models/tiny/download")
-    assert response.status_code == 404
+    assert response.status_code == 405
+    assert "/api/srt/local-models/{model_name}/download" not in client.get("/openapi.json").json()["paths"]
 
 
 def test_srt_target_languages(client):

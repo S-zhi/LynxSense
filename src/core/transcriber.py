@@ -558,12 +558,12 @@ class LocalWhisperTranscriber:
                             "automatic-speech-recognition", model=model,
                             tokenizer=processor.tokenizer,
                             feature_extractor=processor.feature_extractor,
-                            device=self.device,
+                            device="cpu",
                         )
                     else:
                         from faster_whisper import WhisperModel
                         self._model = WhisperModel(
-                            model_ref, device=self.device, compute_type=self.compute_type,
+                            model_ref, device="cpu", compute_type="int8",
                             local_files_only=True,
                         )
                 except ImportError as exc:

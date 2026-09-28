@@ -24,7 +24,7 @@ SUBTRANS_LOCAL_WHISPER_COMPUTE_TYPE=int8
 
 The application does not download local models. To use a Hugging Face Whisper model, install the optional inference dependencies with `uv sync --extra hf-models`, then import files already on your machine from **Settings > Local Models**. The model must include a Whisper `config.json`, processor/tokenizer files, and either `pytorch_model.bin` or `model.safetensors` (shards of one format are supported with their index). Import checks the model and a short offline inference before making it available; failed imports are removed from the application's model directory. The original files are untouched. The `POST /api/srt/local-models/{name}/check` endpoint rechecks an imported model and removes an invalid managed copy. Existing CTranslate2 models already installed in the managed directory remain usable, but there is no download endpoint. A selected model must already be ready or task creation returns 409.
 
-GPU users can set `SUBTRANS_LOCAL_WHISPER_DEVICE=cuda` and a compatible compute type for existing CTranslate2 models. A model selected for an individual task overrides `SUBTRANS_LOCAL_WHISPER_MODEL`.
+Local model inference always runs on CPU. Existing CTranslate2 models use `int8` compute type; Hugging Face models use the CPU pipeline. The legacy device and compute type settings do not change this behavior. A model selected for an individual task overrides `SUBTRANS_LOCAL_WHISPER_MODEL`.
 
 The same implementation is available as a standalone HTTP service:
 
