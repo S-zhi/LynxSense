@@ -483,7 +483,14 @@
 
             <div class="advanced-tab-panel" id="settings-panel-models" role="tabpanel" aria-labelledby="settings-tab-models" data-settings-panel="models" hidden>
               <div class="audio-settings" id="localModelsSettings">
-                <header class="audio-settings__head"><div class="audio-settings__intro"><span class="eyebrow">LOCAL / FASTER WHISPER</span><h2>本地模型</h2><p>下载后即可在任务页使用本地 Whisper。进度显示实际下载字节；删除模型可释放本机空间。</p></div></header>
+                <header class="audio-settings__head"><div class="audio-settings__intro"><span class="eyebrow">LOCAL / WHISPER</span><h2>本地模型</h2></div></header>
+                <form id="localModelImportForm" class="local-model-import">
+                  <label>模型 ID<input id="localModelName" name="name" type="text" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" maxlength="64" required></label>
+                  <label>显示名称<input id="localModelLabel" name="label" type="text" maxlength="100"></label>
+                  <label>模型目录<input id="localModelFiles" name="files" type="file" webkitdirectory multiple required></label>
+                  <button class="btn btn--primary btn--sm" type="submit"><i class="ph ph-folder-plus" aria-hidden="true"></i><span>导入</span></button>
+                  <span id="localModelImportStatus" class="local-model-import__status" role="status" aria-live="polite"></span>
+                </form>
                 <div id="localModelsList" class="local-model-list" aria-live="polite"></div>
               </div>
             </div>

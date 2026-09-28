@@ -223,6 +223,9 @@ def test_local_whisper_transcriber_normalizes_segments(monkeypatch, tmp_path):
 
     fake_module = SimpleNamespace(WhisperModel=lambda model, **kwargs: (captured.update(model=model, init=kwargs) or FakeModel()))
     monkeypatch.setitem(__import__("sys").modules, "faster_whisper", fake_module)
+    (tmp_path / "tiny").mkdir()
+    monkeypatch.setattr(transcriber.model_manager, "resolve_path", lambda name: str(tmp_path / name))
+    monkeypatch.setattr(transcriber.model_manager, "is_hf", lambda name: False)
     service = LocalWhisperTranscriber(model_name="tiny", device="cpu", compute_type="int8", beam_size=2)
     events = []
     result = service.transcribe(
@@ -230,12 +233,53 @@ def test_local_whisper_transcriber_normalizes_segments(monkeypatch, tmp_path):
         on_progress=events.append,
     )
 
-    assert captured["model"] == "tiny"
+    assert captured["model"] == str(tmp_path / "tiny")
+    assert captured["init"]["local_files_only"] is True
     assert captured["kwargs"] == {"language": "en", "beam_size": 2, "vad_filter": True}
     assert result.output["segments"] == [{"text": "hello", "start": 0.0, "end": 1.25}]
     assert result.language == "en" and result.language_probability == 0.91
     assert result.duration == 2.5
     assert any(event.status == "processing" for event in events)
+
+
+def test_huggingface_whisper_transcriber_uses_local_asr_contract(monkeypatch, tmp_path):
+    audio = make_fake_audio(tmp_path)
+    model_dir = tmp_path / "external"
+    model_dir.mkdir()
+    captured = {}
+
+    class Processor:
+        tokenizer = object()
+        feature_extractor = object()
+
+        @classmethod
+        def from_pretrained(cls, path, **kwargs):
+            captured["processor"] = kwargs
+            return cls()
+
+    class Model:
+        @classmethod
+        def from_pretrained(cls, path, **kwargs):
+            captured["model"] = kwargs
+            return cls()
+
+    def pipeline(_task, **_kwargs):
+        def recognize(path, **kwargs):
+            captured["request"] = kwargs
+            return {"text": "hello", "chunks": [{"text": " hello ", "timestamp": (0.0, 1.0)}]}
+        return recognize
+
+    fake = SimpleNamespace(WhisperProcessor=Processor, WhisperForConditionalGeneration=Model, pipeline=pipeline)
+    monkeypatch.setitem(__import__("sys").modules, "transformers", fake)
+    monkeypatch.setattr(transcriber.model_manager, "resolve_path", lambda name: str(model_dir))
+    monkeypatch.setattr(transcriber.model_manager, "is_hf", lambda name: True)
+    service = LocalWhisperTranscriber(model_name="external")
+    result = service.transcribe(TranscribeRequest(audio_path=audio, task_id="t1", model_name="external", language="en"))
+
+    assert captured["processor"]["local_files_only"] is True
+    assert captured["model"]["trust_remote_code"] is False
+    assert captured["request"]["generate_kwargs"] == {"task": "transcribe", "language": "en"}
+    assert result.output["segments"] == [{"text": "hello", "start": 0.0, "end": 1.0}]
 
 
 def test_local_whisper_requires_local_audio(tmp_path):

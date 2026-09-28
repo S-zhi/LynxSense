@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import errno
+import io
 import pathlib
 
 import pytest
@@ -150,6 +151,12 @@ def test_api_token_auth_read_and_download_endpoints(client, monkeypatch):
         assert client.head(ep).status_code == 401, f"HEAD {ep} 未拦截 401"
     for ep in endpoints_delete:
         assert client.delete(ep).status_code == 401, f"DELETE {ep} 未拦截 401"
+    assert client.post(
+        "/api/srt/local-models/import",
+        data={"name": "external"},
+        files=[("files", ("model.safetensors", b"weights"))],
+    ).status_code == 401
+    assert client.post("/api/srt/local-models/external/check").status_code == 401
     assert client.post("/api/storage/cleanup_preview", json={}).status_code == 401
 
     # 支持 Header Authorization: Bearer
@@ -577,6 +584,43 @@ def test_delete_local_model_is_blocked_while_an_active_task_uses_it(client, monk
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "NOT_INSTALLED"
     assert manager.deleted == ["small"]
+
+
+def test_import_and_check_local_model_api(client, monkeypatch, tmp_path):
+    from src.service import model_manager as models
+
+    class Manager(models.LocalModelManager):
+        @property
+        def root(self):
+            path = tmp_path / "models"
+            path.mkdir(exist_ok=True)
+            return path
+
+    manager = Manager()
+    monkeypatch.setattr(srt_routes, "model_manager", manager)
+    monkeypatch.setattr(models, "validate_hf_model", lambda _path: None)
+    response = client.post(
+        "/api/srt/local-models/import",
+        data={"name": "external-whisper", "label": "External Whisper"},
+        files=[("files", ("pytorch_model.bin", io.BytesIO(b"weights"), "application/octet-stream"))],
+    )
+    assert response.status_code == 200
+    assert response.json()["format"] == "huggingface"
+    assert client.post("/api/srt/local-models/external-whisper/check").status_code == 200
+
+    def invalid(_path):
+        raise models.ModelValidationError("invalid contract")
+
+    monkeypatch.setattr(models, "validate_hf_model", invalid)
+    failed = client.post("/api/srt/local-models/external-whisper/check")
+    assert failed.status_code == 422
+    assert failed.json()["detail"]["cleaned"] is True
+    assert not (manager.root / "external-whisper").exists()
+
+
+def test_download_endpoint_is_removed(client):
+    response = client.post("/api/srt/local-models/tiny/download")
+    assert response.status_code == 404
 
 
 def test_srt_target_languages(client):

@@ -12,7 +12,6 @@ const FALLBACK_TARGET_LANGUAGES = Object.keys(LANG_LABEL).filter(
   (k) => k !== "auto" && k !== "zh"
 );
 const FALLBACK_MODELS = [
-  "local:tiny",
   "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en",
   "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2",
 ];
@@ -139,7 +138,7 @@ function modelLabel(model) {
 function renderModelWeights(models, localStates = []) {
   // 渲染 Whisper 模型权重下拉框。
   const sel = $("#model");
-  const current = sel.value || "local:tiny";
+  const current = sel.value;
   sel.innerHTML = "";
   const states = new Map(localStates.map((item) => [item.name, item]));
   models.forEach((model) => {
@@ -154,7 +153,7 @@ function renderModelWeights(models, localStates = []) {
     sel.append(item);
   });
   const normalizedCurrent = String(current).includes(":") ? current : `local:${current}`;
-  sel.value = [...sel.options].some((item) => item.value === normalizedCurrent) ? normalizedCurrent : "local:tiny";
+  sel.value = [...sel.options].some((item) => item.value === normalizedCurrent) ? normalizedCurrent : (sel.options[0]?.value || "");
 }
 
 async function initSrtOptions() {
@@ -172,7 +171,7 @@ async function initSrtOptions() {
     ]);
     renderSourceLanguages(languages);
     renderTargetLanguages(targetLanguages);
-    const localOptions = localStates.map((item) => `local:${item.name}`);
+    const localOptions = localStates.filter((item) => item.status === "READY").map((item) => `local:${item.name}`);
     renderModelWeights([...models.filter((model) => !String(model).startsWith("local:")), ...localOptions], localStates);
   } catch (err) {
     toast(err.message || "获取识别选项失败，已使用默认选项", "ph-warning-circle");

@@ -50,7 +50,7 @@ from src.handler.schemas import (
 )
 from src.service.runner import _cleanup_partial_artifacts, cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
-from src.service.model_manager import MODEL_NAMES, model_manager
+from src.service.model_manager import model_manager
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
     DOWNGRADE_REASON_UNKNOWN,
@@ -67,10 +67,10 @@ logger = logging.getLogger(__name__)
 
 def _ensure_local_model_ready(model: str) -> None:
     value = str(model or "")
-    if value.startswith("local:"):
-        name = value.split(":", 1)[1]
-        if name not in MODEL_NAMES or not model_manager.is_ready(name):
-            raise HTTPException(status_code=409, detail={"code": "MODEL_NOT_READY", "message": f"本地模型尚未下载完成: {name}"})
+    backend, separator, name = value.partition(":")
+    if separator and backend.strip().lower() in {"local", "local_whisper", "whisper", "faster_whisper"}:
+        if not model_manager.is_ready(name.strip()):
+            raise HTTPException(status_code=409, detail={"code": "MODEL_NOT_READY", "message": f"本地模型未导入或未通过检查: {name}"})
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 

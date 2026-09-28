@@ -36,7 +36,6 @@ from src.handler import (
 from src.handler.deps import get_store
 
 from src.service.retention_scheduler import start_retention_scheduler
-from src.service.model_manager import model_manager
 
 from src.service.runner import recover_interrupted_tasks, shutdown_executor
 from src.store import (
@@ -135,8 +134,6 @@ def create_app() -> FastAPI:
             logger.warning("启动恢复：以下未完成任务已重新入队: %s", recovered)
 
         start_retention_scheduler()
-        # Warm the smallest local model without delaying API startup.
-        model_manager.preload_tiny()
     @app.on_event("shutdown")
     def _shutdown_runner() -> None:
         """关闭应用时通知 runner 线程池退出。"""

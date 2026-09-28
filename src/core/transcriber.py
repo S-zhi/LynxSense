@@ -17,6 +17,7 @@ import math
 import os
 import threading
 import time
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Protocol
@@ -26,7 +27,7 @@ import replicate
 
 from src.config import settings, ensure_task_dir, ORIGINAL_SRT
 from src.core.srt_utils import Subtitle, decode_srt_bytes, write_srt
-from src.service.model_manager import MODEL_NAMES, model_manager
+from src.service.model_manager import model_manager
 
 logger = logging.getLogger(__name__)
 
@@ -512,7 +513,7 @@ class HttpTranscriber:
 
 
 class LocalWhisperTranscriber:
-    """使用 OpenAI 开源 Whisper 模型的本地 faster-whisper 适配器。"""
+    """使用受管目录中的 CTranslate2 或 Hugging Face Whisper 模型。"""
 
     def __init__(
         self,
@@ -529,45 +530,51 @@ class LocalWhisperTranscriber:
         self.compute_type = compute_type
         self.download_root = download_root
         self.beam_size = max(1, int(beam_size))
-        # Direct callers historically allowed faster-whisper to resolve a
-        # model by name. Managed pipeline construction opts into the catalog.
         self.require_model_ready = require_model_ready
         self._model = None
         self._loaded_model_name: Optional[str] = None
+        self._loaded_model_identity: Optional[tuple[int, int]] = None
         self._model_lock = threading.Lock()
 
     def _get_model(self, model_name: Optional[str] = None):
         selected_model = model_name or self.model_name
         with self._model_lock:
-            if self._model is None or self._loaded_model_name != selected_model:
+            try:
+                model_ref = model_manager.resolve_path(selected_model)
+                stat = Path(model_ref).stat()
+                identity = (stat.st_dev, stat.st_ino)
+            except Exception as exc:
+                raise TranscribeError(str(exc), code="model_not_ready") from exc
+            if self._model is None or self._loaded_model_name != selected_model or self._loaded_model_identity != identity:
                 try:
-                    from faster_whisper import WhisperModel
+                    if model_manager.is_hf(selected_model):
+                        from transformers import WhisperForConditionalGeneration, WhisperProcessor, pipeline
+
+                        processor = WhisperProcessor.from_pretrained(model_ref, local_files_only=True, trust_remote_code=False)
+                        model = WhisperForConditionalGeneration.from_pretrained(
+                            model_ref, local_files_only=True, trust_remote_code=False,
+                        )
+                        self._model = pipeline(
+                            "automatic-speech-recognition", model=model,
+                            tokenizer=processor.tokenizer,
+                            feature_extractor=processor.feature_extractor,
+                            device=self.device,
+                        )
+                    else:
+                        from faster_whisper import WhisperModel
+                        self._model = WhisperModel(
+                            model_ref, device=self.device, compute_type=self.compute_type,
+                            local_files_only=True,
+                        )
                 except ImportError as exc:
-                    raise TranscribeError(
-                        "本地 Whisper 需要安装 faster-whisper",
-                        code="missing_dependency",
-                    ) from exc
-                model_ref = selected_model
-                kwargs = {
-                    "device": self.device,
-                    "compute_type": self.compute_type,
-                }
-                if selected_model in MODEL_NAMES and self.require_model_ready:
-                    try:
-                        model_ref = model_manager.resolve_path(selected_model)
-                        kwargs["local_files_only"] = True
-                    except Exception as exc:
-                        raise TranscribeError(str(exc), code="model_not_ready") from exc
-                elif self.download_root:
-                    kwargs["download_root"] = self.download_root
-                try:
-                    self._model = WhisperModel(model_ref, **kwargs)
+                    raise TranscribeError("本地模型推理依赖未安装", code="missing_dependency") from exc
                 except Exception as exc:
                     raise TranscribeError(
                         f"本地 Whisper 模型加载失败: {exc}",
                         code="model_error",
                     ) from exc
                 self._loaded_model_name = selected_model
+                self._loaded_model_identity = identity
             return self._model
 
     def transcribe(
@@ -586,27 +593,50 @@ class LocalWhisperTranscriber:
         if on_progress is not None:
             _safe_callback(on_progress, 5.0, "processing")
         try:
-            segments, info = self._get_model(request.model_name).transcribe(
-                audio_str,
-                language=request.language,
-                beam_size=self.beam_size,
-                vad_filter=True,
-            )
+            selected_model = request.model_name or self.model_name
+            engine = self._get_model(selected_model)
             normalized = []
-            for segment in segments:
-                _do_cancel_check(cancel_check)
-                text = (getattr(segment, "text", "") or "").strip()
-                if not text:
-                    continue
-                normalized.append({
-                    "text": text,
-                    "start": float(segment.start),
-                    "end": float(segment.end),
-                })
-                if on_progress is not None:
-                    # faster-whisper exposes no reliable total while streaming;
-                    # keep progress bounded and leave finalization to transcribe().
-                    _safe_callback(on_progress, min(95.0, 10.0 + len(normalized)), "processing")
+            if model_manager.is_hf(selected_model):
+                kwargs = {"return_timestamps": True, "generate_kwargs": {"task": "transcribe"}}
+                if request.language:
+                    kwargs["generate_kwargs"]["language"] = request.language
+                result = engine(audio_str, **kwargs)
+                if not isinstance(result, dict) or not isinstance(result.get("text"), str):
+                    raise TranscribeError("本地 Whisper 输出格式无效", code="model_error")
+                audio_duration = 0.0
+                try:
+                    with wave.open(audio_str, "rb") as audio_file:
+                        audio_duration = audio_file.getnframes() / audio_file.getframerate()
+                except (OSError, ValueError, wave.Error):
+                    pass
+                for chunk in result.get("chunks", []):
+                    stamp = chunk.get("timestamp")
+                    if not isinstance(stamp, (list, tuple)) or len(stamp) != 2:
+                        raise TranscribeError("本地 Whisper 时间戳无效", code="model_error")
+                    text = str(chunk.get("text") or "").strip()
+                    if text and stamp[0] is not None:
+                        start = float(stamp[0])
+                        end = float(stamp[1]) if stamp[1] is not None else max(start + 0.02, audio_duration)
+                        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+                            raise TranscribeError("本地 Whisper 时间戳无效", code="model_error")
+                        normalized.append({"text": text, "start": start, "end": end})
+                detected_language = request.language
+                probability = None
+                duration = normalized[-1]["end"] if normalized else None
+            else:
+                segments, info = engine.transcribe(
+                    audio_str, language=request.language, beam_size=self.beam_size, vad_filter=True,
+                )
+                for segment in segments:
+                    _do_cancel_check(cancel_check)
+                    text = (getattr(segment, "text", "") or "").strip()
+                    if text:
+                        normalized.append({"text": text, "start": float(segment.start), "end": float(segment.end)})
+                        if on_progress is not None:
+                            _safe_callback(on_progress, min(95.0, 10.0 + len(normalized)), "processing")
+                detected_language = getattr(info, "language", None)
+                probability = getattr(info, "language_probability", None)
+                duration = getattr(info, "duration", None) or (normalized[-1]["end"] if normalized else None)
         except TranscribeCancelledError:
             raise
         except TranscribeError:
@@ -617,9 +647,6 @@ class LocalWhisperTranscriber:
             raise TranscribeError(f"本地 Whisper 转写失败: {exc}", code="model_error") from exc
         if not normalized:
             raise TranscribeError("本地 Whisper 返回空字幕列表", code="empty_response")
-        detected_language = getattr(info, "language", None)
-        probability = getattr(info, "language_probability", None)
-        duration = getattr(info, "duration", None) or normalized[-1]["end"]
         return TranscribeResponse(
             output={"segments": normalized},
             language=detected_language if isinstance(detected_language, str) else request.language,

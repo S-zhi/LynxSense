@@ -1,83 +1,67 @@
 import { $, escapeHtml } from "./utils.js";
 import { Api } from "./api.js";
-import { state } from "./store.js";
 import { toast } from "./toast.js";
 
-let timer = null;
+const SIDECARS = new Set([
+  "config.json", "generation_config.json", "preprocessor_config.json",
+  "tokenizer_config.json", "tokenizer.json", "vocab.json", "merges.txt",
+  "normalizer.json", "special_tokens_map.json", "added_tokens.json",
+  "pytorch_model.bin.index.json", "model.safetensors.index.json",
+]);
+const WEIGHT = /^(pytorch_model(?:-\d{5}-of-\d{5})?\.bin|model(?:-\d{5}-of-\d{5})?\.safetensors)$/;
 
 function formatBytes(value) {
   const bytes = Number(value);
   if (!Number.isFinite(bytes) || bytes <= 0) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
-  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const amount = bytes / (1024 ** unitIndex);
-  return `${amount.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
 function render(items) {
   const root = $("#localModelsList");
   if (!root) return;
-  root.innerHTML = items.map((item) => {
-    const status = item.status || "NOT_INSTALLED";
-    const busy = status === "DOWNLOADING";
-    const ready = status === "READY";
-    const progress = Math.max(0, Math.min(99, Number(item.progress) || 0));
-    const downloaded = Number(item.downloadedBytes) || 0;
-    const total = Number(item.totalBytes) || 0;
+  const ready = items.filter((item) => item.status === "READY");
+  root.innerHTML = ready.length ? ready.map((item) => {
     const name = escapeHtml(item.name);
     const label = escapeHtml(item.label || item.name);
-
-    let stateLabel = "未下载";
-    let progressMarkup = `<div class="local-model-card__availability">下载后约占用 ${escapeHtml(item.size || "未知空间")}</div>`;
-    if (busy) {
-      stateLabel = "下载中";
-      const countLabel = total > 0
-        ? `${formatBytes(downloaded) || "0 B"} / ${formatBytes(total)} · ${progress}%`
-        : downloaded > 0 ? `已写入 ${formatBytes(downloaded)} · 正在获取总大小` : "正在获取模型文件清单";
-      progressMarkup = `<div class="local-model-card__progress-label"><span>${total > 0 ? "下载进度" : "下载数据"}</span><strong>${escapeHtml(countLabel)}</strong></div><progress class="local-model-card__progress" max="100"${total > 0 ? ` value="${progress}"` : ""} aria-label="${name} 下载进度"${total > 0 ? ` aria-valuetext="${progress}%"` : ` aria-valuetext="已写入 ${formatBytes(downloaded) || "0 B"}"`}></progress>`;
-    } else if (ready) {
-      stateLabel = "已就绪";
-      progressMarkup = `<div class="local-model-card__availability">已保存在本机${downloaded > 0 ? ` · 占用 ${formatBytes(downloaded)}` : item.size ? ` · ${escapeHtml(item.size)}` : ""}</div>`;
-    } else if (status === "ERROR") {
-      stateLabel = "下载失败";
-      progressMarkup = `<div class="local-model-card__error" title="${escapeHtml(item.error || "下载失败")}">${escapeHtml(item.error || "下载失败")}</div>`;
-    }
-
-    const action = ready
-      ? `<button class="btn btn--ghost btn--sm local-model-card__delete" type="button" data-model-delete="${name}" aria-label="删除 ${label}"><i class="ph ph-trash" aria-hidden="true"></i><span>删除</span></button>`
-      : `<button class="btn btn--primary btn--sm" type="button" data-model-download="${name}"${busy ? " disabled aria-busy=\"true\"" : ""}><i class="ph ${busy ? "ph-spinner-gap" : "ph-download-simple"}" aria-hidden="true"></i><span>${busy ? `${progress}%` : status === "ERROR" ? "重试" : "下载"}</span></button>`;
-
-    return `<article class="local-model-card${busy ? " is-downloading" : ""}" aria-label="${label}">
+    return `<article class="local-model-card" aria-label="${label}">
       <div class="local-model-card__top">
         <div class="local-model-card__identity"><span class="local-model-card__icon"><i class="ph ph-cpu" aria-hidden="true"></i></span><div><h3>${label}</h3><span class="local-model-card__name">${name}</span></div></div>
-        <span class="local-model-card__status local-model-card__status--${ready ? "ready" : busy ? "busy" : status === "ERROR" ? "error" : "idle"}">${stateLabel}</span>
+        <span class="local-model-card__status local-model-card__status--ready">已就绪</span>
       </div>
-      <div class="local-model-card__meta"><span>预计大小</span><strong>${escapeHtml(item.size || "—")}</strong></div>
-      <div class="local-model-card__progress-area" aria-live="polite">${progressMarkup}</div>
-      <div class="local-model-card__foot">${busy ? `<span class="local-model-card__phase">${item.phase === "checking" ? "正在获取模型文件清单" : "正在下载"}</span>` : ready ? `<span class="local-model-card__phase">可在任务页使用</span>` : status === "ERROR" ? `<span class="local-model-card__phase">可重试，已下载数据会尽量续传</span>` : `<span class="local-model-card__phase">下载不会阻塞其他任务</span>`}${action}</div>
+      <div class="local-model-card__meta"><span>${item.format === "huggingface" ? "Hugging Face" : "CTranslate2"}</span><strong>${formatBytes(item.size) || escapeHtml(item.size || "")}</strong></div>
+      <div class="local-model-card__foot">
+        <span class="local-model-card__phase">本地</span>
+        <div class="local-model-actions">
+          ${item.format === "huggingface" ? `<button class="btn btn--ghost btn--sm" type="button" data-model-check="${name}" title="检查模型" aria-label="检查 ${label}"><i class="ph ph-shield-check" aria-hidden="true"></i></button>` : ""}
+          <button class="btn btn--ghost btn--sm local-model-card__delete" type="button" data-model-delete="${name}" title="删除模型" aria-label="删除 ${label}"><i class="ph ph-trash" aria-hidden="true"></i></button>
+        </div>
+      </div>
     </article>`;
-  }).join("");
+  }).join("") : '<div class="local-model-empty">暂无本地模型</div>';
 
-  root.querySelectorAll("[data-model-download]").forEach((button) => button.addEventListener("click", async () => {
+  root.querySelectorAll("[data-model-check]").forEach((button) => button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await Api.downloadLocalModel(button.dataset.modelDownload);
-      await refresh();
+      await Api.checkLocalModel(button.dataset.modelCheck);
+      toast("模型检查通过", "ph-shield-check");
     } catch (error) {
+      toast(error.message || "模型检查失败", "ph-warning-circle");
+    } finally {
       button.disabled = false;
-      toast(error.message || "下载本地模型失败", "ph-warning-circle");
+      await refresh();
     }
   }));
 
   root.querySelectorAll("[data-model-delete]").forEach((button) => button.addEventListener("click", async () => {
-    const modelName = button.dataset.modelDelete;
-    const item = items.find((model) => model.name === modelName);
-    const modelLabel = item?.label || modelName;
-    if (!window.confirm(`删除 ${modelLabel} 并释放本地空间？下次使用前需要重新下载。`)) return;
+    const name = button.dataset.modelDelete;
+    if (!window.confirm(`删除 ${name} 并释放本地空间？`)) return;
     button.disabled = true;
     try {
-      await Api.deleteLocalModel(modelName);
-      toast(`${modelLabel} 已删除`, "ph-trash");
+      await Api.deleteLocalModel(name);
+      [...($("#model")?.options || [])].find((option) => option.value === `local:${name}`)?.remove();
+      toast("模型已删除", "ph-trash");
       await refresh();
     } catch (error) {
       button.disabled = false;
@@ -87,16 +71,56 @@ function render(items) {
 }
 
 async function refresh() {
-  try { render(await Api.listLocalModels()); } catch (_) {}
+  try {
+    const items = await Api.listLocalModels();
+    render(items);
+    const select = $("#model");
+    if (select) {
+      const ready = new Set(items.filter((item) => item.status === "READY").map((item) => `local:${item.name}`));
+      [...select.options].filter((option) => option.value.startsWith("local:") && !ready.has(option.value)).forEach((option) => option.remove());
+      for (const item of items.filter((model) => model.status === "READY")) {
+        if (![...select.options].some((option) => option.value === `local:${item.name}`)) {
+          select.add(new Option(`本地 · ${item.label || item.name}`, `local:${item.name}`));
+        }
+      }
+    }
+  } catch (error) {
+    toast(error.message || "获取本地模型失败", "ph-warning-circle");
+  }
 }
 
 export function initLocalModels() {
-  document.addEventListener("viewchange", (event) => {
-    if (event.detail?.view === "other-settings" && event.detail?.settingsTab === "models") {
-      void refresh();
-      if (!timer) timer = setInterval(() => {
-        if (state.view === "other-settings" && state.settingsTab === "models") void refresh();
-      }, 2000);
+  const form = $("#localModelImportForm");
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = $("#localModelName").value.trim();
+    const label = $("#localModelLabel").value.trim();
+    const files = [...$("#localModelFiles").files].filter((file) => {
+      const relative = file.webkitRelativePath || file.name;
+      return relative.split("/").length <= 2 && (SIDECARS.has(file.name) || WEIGHT.test(file.name));
+    });
+    const submit = form.querySelector('[type="submit"]');
+    const status = $("#localModelImportStatus");
+    submit.disabled = true;
+    status.textContent = "正在导入并检查";
+    try {
+      const item = await Api.importLocalModel(name, label, files);
+      const select = $("#model");
+      if (select && ![...select.options].some((option) => option.value === `local:${item.name}`)) {
+        select.add(new Option(`本地 · ${item.label || item.name}`, `local:${item.name}`));
+      }
+      form.reset();
+      status.textContent = "检查通过";
+      toast("模型已导入并通过检查", "ph-shield-check");
+      await refresh();
+    } catch (error) {
+      status.textContent = "检查失败";
+      toast(error.message || "导入本地模型失败", "ph-warning-circle");
+    } finally {
+      submit.disabled = false;
     }
+  });
+  document.addEventListener("viewchange", (event) => {
+    if (event.detail?.view === "other-settings" && event.detail?.settingsTab === "models") void refresh();
   });
 }
