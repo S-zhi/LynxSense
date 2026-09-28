@@ -555,13 +555,6 @@
                   </div>
                   <div class="replicate-settings__foot"><span id="replicateSettingsMeta">—</span><button class="btn btn--primary" id="replicateSettingsSave" type="submit"><i class="ph ph-floppy-disk"></i><span>保存设置</span></button></div>
                 </form>
-                <section class="replicate-billing" id="replicateBilling" aria-labelledby="replicateBillingTitle">
-                  <div class="replicate-billing__head">
-                    <div class="replicate-billing__identity"><span class="replicate-billing__icon"><i class="ph ph-wallet"></i></span><div><span class="eyebrow">ACCOUNT</span><h2 id="replicateBillingTitle">账户状态</h2><p>使用当前 Token 查询官方账户信息。</p></div></div>
-                    <button class="btn btn--ghost btn--sm" id="replicateBalanceRefresh" type="button"><i class="ph ph-arrow-clockwise"></i><span>刷新</span></button>
-                  </div>
-                  <div class="replicate-billing__body" id="replicateBalanceBody"><span class="engine-status engine-status--checking">等待查询</span></div>
-                </section>
               </div>
             </div>
 
@@ -614,14 +607,6 @@
                     </div>
                     <p class="probe__hint" id="probeHint">等待输入链接</p>
                   </form>
-
-                  <div class="probe-result is-idle" id="probeResult" aria-live="polite">
-                    <div class="probe-result__icon"><i class="ph ph-link" aria-hidden="true"></i></div>
-                    <div class="probe-result__body">
-                      <div class="probe-result__title">未开始</div>
-                      <div class="probe-result__desc">结果会显示在这里。</div>
-                    </div>
-                  </div>
 
                   <!-- 测试历史：所有 probe 调用都会落库一份，方便回看与排查 -->
                   <section class="probe-history" aria-label="测试历史">
