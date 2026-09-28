@@ -18,7 +18,7 @@ LynxSense 是面向视频与音频的信息理解工作台。当前已交付字�
 ```bash
 cp .env.example .env
 # 在 .env 中填写 SUBTRANS_DEEPSEEK_API_KEY
-docker build -t lynxsense:local . && docker run -d --name lynxsense --restart unless-stopped -p 8000:8000 --env-file .env -e SUBTRANS_DATA_DIR=/data -e SUBTRANS_DB=/data/app.db -v lynxsense-data:/data lynxsense:local
+docker build -t lynxsense:local . && docker run -d --name lynxsense --restart unless-stopped -p 8000:8000 --env-file .env -e SUBTRANS_DATA_DIR=/data -e SUBTRANS_DB=/data/db/app.db -v lynxsense-data:/data lynxsense:local
 ```
 
 打开 <http://localhost:8000/>。本地开发、Linux 部署和容器升级说明见[文档目录](./docs/README.md)。

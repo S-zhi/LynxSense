@@ -18,7 +18,7 @@ Run this from the repository root:
 ```bash
 cp .env.example .env
 # Set SUBTRANS_DEEPSEEK_API_KEY in .env
-docker build -t lynxsense:local . && docker run -d --name lynxsense --restart unless-stopped -p 8000:8000 --env-file .env -e SUBTRANS_DATA_DIR=/data -e SUBTRANS_DB=/data/app.db -v lynxsense-data:/data lynxsense:local
+docker build -t lynxsense:local . && docker run -d --name lynxsense --restart unless-stopped -p 8000:8000 --env-file .env -e SUBTRANS_DATA_DIR=/data -e SUBTRANS_DB=/data/db/app.db -v lynxsense-data:/data lynxsense:local
 ```
 
 Open <http://localhost:8000/>. See the [documentation index](../README.md) for local development, Linux deployment, and extensions.

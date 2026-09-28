@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     SUBTRANS_DATA_DIR=/data \
-    SUBTRANS_DB=/data/app.db
+    SUBTRANS_DB=/data/db/app.db
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg fontconfig fonts-noto-cjk libgomp1 \
