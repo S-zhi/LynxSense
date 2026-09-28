@@ -164,6 +164,12 @@ const RealApi = {
     return res.json();
   },
 
+  async downloadLocalModel(name) {
+    const res = await request(this.base, `/api/srt/local-models/${encodeURIComponent(name)}/download`, { method: "POST" });
+    if (!res.ok) throw new Error(await readError(res, "下载官方模型失败"));
+    return res.json();
+  },
+
   async importLocalModel(name, label, files) {
     const body = new FormData();
     body.append("name", name);
@@ -664,7 +670,21 @@ const MockApi = (() => {
         downloaded = saved === null ? ["tiny"] : JSON.parse(saved);
       } catch (_) {}
       const ready = new Set(Array.isArray(downloaded) ? downloaded : ["tiny"]);
-      return [...ready].map((name) => ({ name, label: `Whisper ${name}`, size: "", status: "READY", format: ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"].includes(name) ? "ctranslate2" : "huggingface" }));
+      const official = ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v1", "large-v2", "large-v3", "large-v3-turbo"];
+      const sizes = ["~75 MB", "~75 MB", "~145 MB", "~145 MB", "~465 MB", "~465 MB", "~1.5 GB", "~1.5 GB", "~3 GB", "~3 GB", "~3 GB", "~1.6 GB"];
+      return [
+        ...official.map((name, i) => ({ name, label: `Whisper ${name}`, size: sizes[i], status: ready.has(name) ? "READY" : "NOT_INSTALLED", format: "ctranslate2", source: "official" })),
+        ...[...ready].filter((name) => !official.includes(name)).map((name) => ({ name, label: name, size: null, status: "READY", format: "huggingface", source: "imported" })),
+      ];
+    },
+    async downloadLocalModel(name) {
+      await delay(40);
+      let downloaded = [];
+      try { downloaded = JSON.parse(localStorage.getItem("subtrans_mock_local_models_v1") || "[]"); } catch (_) {}
+      if (!Array.isArray(downloaded)) downloaded = [];
+      if (!downloaded.includes(name)) downloaded.push(name);
+      localStorage.setItem("subtrans_mock_local_models_v1", JSON.stringify(downloaded));
+      return { name, status: "READY", format: "ctranslate2", source: "official" };
     },
     async importLocalModel(name, label) {
       await delay(40);

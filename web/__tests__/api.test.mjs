@@ -93,6 +93,21 @@ test("Api.deleteLocalModel sends DELETE to the model resource", async () => {
   assert.equal(model.status, "NOT_INSTALLED");
 });
 
+test("Api.downloadLocalModel starts an official model download", async () => {
+  let requestedUrl = "";
+  let requestedMethod = "";
+  mockFetchHandler = async (url, options) => {
+    requestedUrl = url;
+    requestedMethod = options.method;
+    return { ok: true, json: async () => ({ name: "tiny.en", status: "DOWNLOADING" }) };
+  };
+
+  const model = await Api.downloadLocalModel("tiny.en");
+  assert.equal(requestedUrl, "http://localhost:8000/api/srt/local-models/tiny.en/download");
+  assert.equal(requestedMethod, "POST");
+  assert.equal(model.status, "DOWNLOADING");
+});
+
 test("Api.importLocalModel uploads provided files without requesting a download", async () => {
   let requestedUrl = "";
   let requestedBody;

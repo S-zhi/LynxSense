@@ -471,7 +471,7 @@
                 <i class="ph ph-cloud" aria-hidden="true"></i><span>Replicate</span>
               </button>
               <button class="advanced-tab" id="settings-tab-models" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-models" data-settings-tab="models" tabindex="-1">
-                <i class="ph ph-cpu" aria-hidden="true"></i><span>本地模型</span>
+                <i class="ph ph-cpu" aria-hidden="true"></i><span>模型商店（本地）</span>
               </button>
               <button class="advanced-tab" id="settings-tab-probe" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-probe" data-settings-tab="probe" tabindex="-1">
                 <i class="ph ph-pulse" aria-hidden="true"></i><span>下载测试</span>
@@ -483,7 +483,13 @@
 
             <div class="advanced-tab-panel" id="settings-panel-models" role="tabpanel" aria-labelledby="settings-tab-models" data-settings-panel="models" hidden>
               <div class="audio-settings" id="localModelsSettings">
-                <header class="audio-settings__head"><div class="audio-settings__intro"><span class="eyebrow">LOCAL / WHISPER</span><h2>本地模型</h2></div></header>
+                <header class="audio-settings__head local-model-store__head">
+                  <div class="audio-settings__intro"><span class="eyebrow">WHISPER / CPU</span><h2>模型商店（本地）</h2><p>选择官方规格直接下载，或导入已有的 Hugging Face Whisper 文件。所有模型只在本机 CPU 上运行。</p></div>
+                  <span id="localModelSummary" class="local-model-store__summary" aria-live="polite"></span>
+                </header>
+                <div class="local-model-store__section-head"><div><span class="eyebrow">CATALOG</span><h3>官方模型</h3></div><span>预计大小随版本可能略有变化</span></div>
+                <div id="localModelsList" class="local-model-list" aria-live="polite"></div>
+                <div class="local-model-store__section-head local-model-store__section-head--import"><div><span class="eyebrow">YOUR FILES</span><h3>导入本地模型</h3></div><span>仅接受 Whisper 的 .bin 或 .safetensors 权重及必要配置文件</span></div>
                 <form id="localModelImportForm" class="local-model-import">
                   <label>模型 ID<input id="localModelName" name="name" type="text" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" maxlength="64" required></label>
                   <label>显示名称<input id="localModelLabel" name="label" type="text" maxlength="100"></label>
@@ -491,7 +497,7 @@
                   <button class="btn btn--primary btn--sm" type="submit"><i class="ph ph-folder-plus" aria-hidden="true"></i><span>导入</span></button>
                   <span id="localModelImportStatus" class="local-model-import__status" role="status" aria-live="polite"></span>
                 </form>
-                <div id="localModelsList" class="local-model-list" aria-live="polite"></div>
+                <div id="importedModelsList" class="local-model-list" aria-live="polite"></div>
               </div>
             </div>
 
