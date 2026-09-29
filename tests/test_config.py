@@ -64,7 +64,7 @@ def test_dynamic_settings_read_from_env(monkeypatch):
     monkeypatch.setenv("SUBTRANS_DEEPSEEK_MODEL", "deepseek-coder")
     monkeypatch.setenv("SUBTRANS_TRANSLATE_BATCH", "16")
     monkeypatch.setenv("SUBTRANS_TRANSLATE_TIMEOUT", "120")
-    monkeypatch.setenv("SUBTRANS_TARGET_LANGUAGES", "zh-CN,en,th,vi,ar")
+    monkeypatch.setenv("SUBTRANS_TARGET_LANGUAGES", "zh-CN,en,bn,th,ur,vi,ar")
     monkeypatch.setenv("SUBTRANS_MAX_UPLOAD_MB", "4096")
     monkeypatch.setenv("SUBTRANS_MAX_VIDEO_MINUTES", "300")
     monkeypatch.setenv("SUBTRANS_AUDIO_SR", "24000")

@@ -29,7 +29,10 @@ DEFAULT_MODEL_REF = (
     "b97ba81004e7132181864c885a76cae0e56bc61caa4190a395f6d8ba45b7a969"
 )
 
-FALLBACK_LANGUAGES = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"]
+FALLBACK_LANGUAGES = [
+    "en", "zh", "hi", "es", "ar", "fr", "pt", "ru",
+    "de", "ko", "ja",
+]
 FALLBACK_MODELS = [
     "tiny.en", "tiny", "base.en", "base", "small.en",
     "small", "medium.en", "medium", "large-v1", "large-v2",
@@ -253,7 +256,10 @@ def get_video_language_options(
             api_token=api_token,
             timeout=timeout,
         )
-        return _get_enum_values(input_schema, "language")
+        return [
+            code for code in _get_enum_values(input_schema, "language")
+            if code not in {"bn", "ur"}
+        ]
     except Exception as exc:
         logger.warning(
             f"获取 Replicate 语言选项失败，使用内置兜底列表: {exc}"

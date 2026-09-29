@@ -122,6 +122,11 @@
         </section>
 
         <div class="sidebar__foot">
+          <label class="locale-picker" for="localePicker">
+            <i class="ph ph-translate" aria-hidden="true"></i>
+            <span class="sr-only">界面语言</span>
+            <select id="localePicker" aria-label="界面语言"></select>
+          </label>
           <button class="iconbtn" id="themeToggle" type="button" aria-label="切换深色 / 浅色">
             <i class="ph ph-moon" aria-hidden="true"></i>
           </button>
@@ -141,6 +146,7 @@
                 id="url"
                 name="url"
                 type="text"
+                dir="ltr"
                 inputmode="url"
                 autocomplete="off"
                 aria-label="视频链接"

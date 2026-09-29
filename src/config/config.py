@@ -58,6 +58,8 @@ DEFAULT_LANG_NAMES: dict[str, str] = {
     "sw": "Swahili (Kiswahili)",
 }
 
+DISABLED_LANGUAGES = frozenset({"bn", "ur"})
+
 # 项目根目录（本文件位于 src/config/config.py，向上两级）
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _DEFAULT_CORS_ORIGINS = (
@@ -1031,17 +1033,18 @@ class Settings:
     @property
     def target_languages(self) -> tuple[str, ...]:
         if self._target_languages is not _UNSET:
-            return self._target_languages
+            return tuple(code for code in self._target_languages if code not in DISABLED_LANGUAGES)
         _sync_env_file()
-        return _env_list(
+        configured = _env_list(
             "SUBTRANS_TARGET_LANGUAGES",
             (
                 "zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "ru", "it",
                 "pt", "vi", "th", "ar", "id", "hi", "nl", "pl", "tr", "sv",
                 "uk", "cs", "da", "fi", "el", "he", "hu", "no", "ro", "sk",
-                "af", "ca", "bg", "hr", "ms", "fa", "ur", "bn", "ta", "sw",
+                "af", "ca", "bg", "hr", "ms", "fa", "ta", "sw",
             ),
         )
+        return tuple(code for code in configured if code not in DISABLED_LANGUAGES)
 
     # 语言代码到名称的映射字典，可由 SUBTRANS_LANG_NAMES 环境变量（JSON 字符串）覆盖/追加
     @property

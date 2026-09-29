@@ -15,6 +15,9 @@ window.APP_CONFIG = {
   // false = 走真实 REST + SSE 接口
   USE_MOCK: false,
 
+  // 界面语言：auto 跟随浏览器；用户在页面中的选择会保存在 localStorage 并优先生效。
+  UI_LOCALE: "auto",
+
   // 请求超时（毫秒）
   API_TIMEOUT_MS: 15000,
 
@@ -30,7 +33,7 @@ window.APP_CONFIG = {
     "zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "ru", "it",
     "pt", "vi", "th", "ar", "id", "hi", "nl", "pl", "tr", "sv",
     "uk", "cs", "da", "fi", "el", "he", "hu", "no", "ro", "sk",
-    "af", "ca", "bg", "hr", "ms", "fa", "ur", "bn", "ta", "sw",
+    "af", "ca", "bg", "hr", "ms", "fa", "ta", "sw",
   ],
 };
 

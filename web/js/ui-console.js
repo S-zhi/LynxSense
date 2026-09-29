@@ -7,9 +7,13 @@ import { Api } from "./api.js";
 import { LANG_LABEL } from "./constants.js";
 
 const CFG = window.APP_CONFIG;
-const FALLBACK_LANGUAGES = ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"];
+const FALLBACK_LANGUAGES = [
+  "en", "zh", "hi", "es", "ar", "fr", "pt", "ru",
+  "de", "ko", "ja",
+];
+const UNSUPPORTED_LANGUAGES = new Set(["bn", "ur"]);
 const FALLBACK_TARGET_LANGUAGES = Object.keys(LANG_LABEL).filter(
-  (k) => k !== "auto" && k !== "zh"
+  (k) => k !== "auto" && k !== "zh" && !UNSUPPORTED_LANGUAGES.has(k)
 );
 const FALLBACK_MODELS = [
   "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en",
@@ -95,7 +99,7 @@ function renderSourceLanguages(languages) {
   const current = sel.value || DEFAULT_SOURCE_LANGUAGE;
   sel.innerHTML = "";
   sel.append(option("auto", "自动检测"));
-  languages.forEach((code) => {
+  languages.filter((code) => !UNSUPPORTED_LANGUAGES.has(code)).forEach((code) => {
     sel.append(option(code, languageLabel(code)));
   });
   sel.value = [...sel.options].some((item) => item.value === current)
@@ -107,13 +111,14 @@ function renderTargetLanguages(languages) {
   // 渲染目标语言下拉框。
   const sel = $("#targetLang");
   const current = sel.value || "zh-CN";
+  const available = languages.filter((code) => !UNSUPPORTED_LANGUAGES.has(code));
   sel.innerHTML = "";
-  languages.forEach((code) => {
+  available.forEach((code) => {
     sel.append(option(code, languageLabel(code)));
   });
   sel.value = [...sel.options].some((item) => item.value === current)
     ? current
-    : (languages[0] || "zh-CN");
+    : (available[0] || "zh-CN");
 }
 
 function modelLabel(model) {
