@@ -651,14 +651,14 @@ const MockApi = (() => {
     },
     async listTasks() { await delay(300); return tasks.map((t) => ({ ...t })); },
     // 示例模式下返回常用源语言选项。
-    async listVideoLanguages() { await delay(80); return ["en", "zh", "de", "es", "ru", "ko", "fr", "ja"]; },
+    async listVideoLanguages() { await delay(80); return ["en", "zh", "hi", "es", "ar", "fr", "pt", "ru", "de", "ko", "ja"]; },
     // 示例模式下返回目标语言选项。
     async listTargetLanguages() {
       await delay(80);
       return (
         CFG.TARGET_LANGUAGES ||
         Object.keys(LANG_LABEL).filter((k) => k !== "auto" && k !== "zh")
-      );
+      ).filter((k) => k !== "bn" && k !== "ur");
     },
     // 示例模式下返回带后端标识的 Whisper 模型权重选项。
     async listModelWeights() { await delay(80); return ["local:tiny", "local:base", "local:small", "local:medium", "local:large-v3", "local:large-v3-turbo", "replicate:tiny.en", "replicate:tiny", "replicate:base.en", "replicate:base", "replicate:small.en", "replicate:small", "replicate:medium.en", "replicate:medium", "replicate:large-v1", "replicate:large-v2"]; },

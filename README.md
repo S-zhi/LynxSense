@@ -27,6 +27,7 @@ docker build -t translatedsubs:local . && docker run -d --name translatedsubs --
 
 - **字幕流水线**：下载视频、提取音频、语音识别、翻译，并生成软字幕或硬字幕成品，解决视频内容快速理解和跨语言观看问题。
 - **Web 工作台**：提供任务队列、实时进度、视频预览、字幕编辑和结果下载，适合直接在浏览器中处理媒体。
+- **界面国际化**：左侧栏可即时切换简体中文、英语、印地语、西班牙语、阿拉伯语、法语、葡萄牙语和俄语；选择保存在当前浏览器。首次访问默认跟随浏览器语言，也可在 `web/config.js` 中设置 `UI_LOCALE` 作为部署默认值。
 - **MCP 接入**：让 Codex、Claude Desktop 等 AI 客户端通过自然语言创建和跟踪处理任务，适合把媒体处理接入 Agent 工作流。
 - **Google Drive 扩展**：按任务上传、下载和管理云端文件，适合将处理结果接入团队文件流转。
 - **可替换转写后端**：支持本地 faster-whisper、Replicate 和兼容 HTTP 服务，适合在成本、速度、隐私之间选择。
@@ -44,6 +45,8 @@ docker build -t translatedsubs:local . && docker run -d --name translatedsubs --
 ## 开发
 
 项目使用 Python、FastAPI、FFmpeg 和原生 Web 前端。开发规范见 [CONTRIBUTING.md](./.github/CONTRIBUTING.md)，安全问题请通过 [SECURITY.md](./.github/SECURITY.md) 私下报告。
+
+字幕目标语言由后端 `SUBTRANS_TARGET_LANGUAGES` 环境变量动态配置，默认支持 38 种语言，已包含以上 8 种。界面语言和字幕目标语言互相独立；界面文案词典随前端打包，切换时不调用翻译服务。
 
 ## 许可证与合规
 

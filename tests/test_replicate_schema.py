@@ -33,6 +33,15 @@ def test_ttl_cache_basic():
     assert cache.get("non-existent") is None
 
 
+def test_video_languages_exclude_bengali_and_urdu_from_model_schema():
+    schema = {"properties": {"language": {"enum": ["en", "bn", "fr", "ur"]}}}
+    with patch(
+        "src.service.srt.replicate_schema.get_replicate_input_schema",
+        return_value=schema,
+    ):
+        assert get_video_language_options() == ["en", "fr"]
+
+
 def test_ttl_cache_expiration():
     cache = TTLCache(ttl_seconds=5.0)
     with patch("time.time", return_value=100.0):

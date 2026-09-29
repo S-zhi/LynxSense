@@ -1,6 +1,7 @@
 /* 入口：装配各模块并加载数据 */
 
 import { initTheme } from "./theme.js";
+import { initI18n } from "./i18n.js";
 import { initShell } from "./ui-shell.js";
 import { initConsole } from "./ui-console.js";
 import { initQueue } from "./ui-queue.js";
@@ -18,6 +19,7 @@ import { initAdvancedSettings } from "./ui-advanced-settings.js";
 import { initRouter } from "./router.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
 
+initI18n();
 initTheme();
 initAdvancedSettings();
 initRouter();
