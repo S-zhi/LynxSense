@@ -27,7 +27,7 @@ export function pathForView(view) {
 
 function updateDocument(view) {
   const route = ROUTES[view] || ROUTES.tasks;
-  document.title = `${route.title} · LynxSense`;
+  document.title = `${route.title} · TranslatedSubs`;
   document.body.dataset.route = view;
 }
 

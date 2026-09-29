@@ -1,13 +1,15 @@
 # Linux 快速启动与部署
 
-本文面向 Ubuntu/Debian Linux，目标是先启动 LynxSense 的 Web 工作台和业务 API，再按需配置 systemd 与 Nginx。Google Drive sidecar 是可选组件，不影响字幕主流程。
+本文面向 Ubuntu/Debian Linux，目标是先启动 TranslatedSubs 的 Web 工作台和业务 API，再按需配置 systemd 与 Nginx。Google Drive sidecar 是可选组件，不影响字幕主流程。
+
+为了兼容已有安装，脚本默认沿用 `/opt/subtitles-ai`、`/var/lib/subtitles-ai` 和 `subtitles-ai` 服务名；这些是部署标识，不影响产品名称。
 
 ## 一键安装（推荐）
 
 登录 Ubuntu/Debian 服务器后，只需执行：
 
 ```bash
-curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/S-zhi/TranslatedSubs/releases/latest/download/install.sh | sudo bash
 ```
 
 脚本会静默询问 `SUBTRANS_DEEPSEEK_API_KEY`，输入内容不会显示在终端；随后会安装 FFmpeg、uv、Python 3.12 和锁定依赖，创建持久化目录、systemd 服务并执行健康检查。重复运行时，密钥输入留空会保留 `.env` 中的现有值。
@@ -15,9 +17,9 @@ curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/instal
 如果希望执行前先检查脚本，可以下载后再运行：
 
 ```bash
-curl -fsSL https://github.com/S-zhi/Subtitles-AI/releases/latest/download/install.sh -o /tmp/subtitles-ai-install.sh
-less /tmp/subtitles-ai-install.sh
-sudo bash /tmp/subtitles-ai-install.sh
+curl -fsSL https://github.com/S-zhi/TranslatedSubs/releases/latest/download/install.sh -o /tmp/translatedsubs-install.sh
+less /tmp/translatedsubs-install.sh
+sudo bash /tmp/translatedsubs-install.sh
 ```
 
 用于 CI 的非交互模式：
@@ -63,12 +65,12 @@ ffmpeg -hide_banner -filters | grep ' subtitles '
 
 ## 2. 安装项目
 
-项目仓库是 <https://github.com/S-zhi/Subtitles-AI>。以下命令将 `main` 分支部署到 `/opt/subtitles-ai`：
+项目仓库是 <https://github.com/S-zhi/TranslatedSubs>。以下命令将 `main` 分支部署到兼容已有安装的 `/opt/subtitles-ai`：
 
 ```bash
 sudo mkdir -p /opt/subtitles-ai
 sudo chown "$USER":"$USER" /opt/subtitles-ai
-git clone --branch main --single-branch https://github.com/S-zhi/Subtitles-AI.git /opt/subtitles-ai
+git clone --branch main --single-branch https://github.com/S-zhi/TranslatedSubs.git /opt/subtitles-ai
 cd /opt/subtitles-ai
 ```
 
@@ -174,7 +176,7 @@ sudo chmod 600 /opt/subtitles-ai/.env
 
 ```ini
 [Unit]
-Description=LynxSense FastAPI Service
+Description=TranslatedSubs FastAPI Service
 After=network-online.target
 Wants=network-online.target
 

@@ -1,7 +1,7 @@
 [project]
-name = "subtrans-backend"
+name = "translatedsubs-backend"
 version = "1.0.2"
-description = "LynxSense - 视频信息理解与处理工作台"
+description = "TranslatedSubs - 视频与音频字幕处理工作台"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "fastapi>=0.138.2",

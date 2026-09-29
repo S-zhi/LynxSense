@@ -1665,7 +1665,7 @@ wheels = [
 ]
 
 [[package]]
-name = "subtrans-backend"
+name = "translatedsubs-backend"
 version = "1.0.2"
 source = { virtual = "." }
 dependencies = [
