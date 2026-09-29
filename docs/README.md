@@ -1,6 +1,6 @@
 # TranslatedSubs 文档
 
-README 只保留产品概览和 Docker 快速启动。按使用场景阅读以下文档：
+根目录 README 包含产品概览、快速启动、基本使用和关键配置。更详细的说明请按使用场景阅读以下文档：
 
 - [本地快速启动](./local-quick-start.md)：macOS/Linux 本地运行、环境变量和 Google Drive sidecar。
 - [Linux 部署](./quick-start-linux.md)：Ubuntu/Debian 一键安装、systemd、反向代理、更新和排障。
