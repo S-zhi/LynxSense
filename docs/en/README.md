@@ -1,4 +1,4 @@
-English | [简体中文](../../README.md) | [हिन्दी](../hi/README.md) | [Español](../es/README.md) | [Français](../fr/README.md) | [Português](../pt/README.md) | [Русский](../ru/README.md)
+English | [简体中文](../zh/README.md) | [हिन्दी](../hi/README.md) | [Español](../es/README.md) | [Français](../fr/README.md) | [Português](../pt/README.md) | [Русский](../ru/README.md)
 
 <div align="center">
   <img src="../../web/assets/translatedsubs-logo.svg" width="88" alt="TranslatedSubs Logo" />
