@@ -1,15 +1,13 @@
 [English](./docs/en/README.md) | 简体中文
 
 <div align="center">
-  <img src="./web/assets/lynxsense-logo.png" width="88" alt="LynxSense Logo" />
-  <h1>LynxSense</h1>
-  <p><strong>像猞猁一样敏锐，感知媒体里的每一个信号。</strong></p>
-  <p>从字幕到分类、情绪与语调，把视频和音频中的信号提取成可理解、可检索、可供 AI 使用的信息。</p>
+  <img src="./web/assets/translatedsubs-logo.svg" width="88" alt="TranslatedSubs Logo" />
+  <h1>TranslatedSubs</h1>
+  <p><strong>从视频到译文字幕，一站完成。</strong></p>
+  <p>下载、转写、翻译并封装字幕，在 Web 工作台中预览、编辑和下载结果。</p>
 </div>
 
-![LynxSense 可视化工作台](./docs/assets/subtitles-ai-workbench.png)
-
-LynxSense 是面向视频与音频的信息理解工作台。当前已交付字幕下载、语音识别、翻译、字幕封装和 Web 工作台；分类、声音表达和面向大模型的结构化理解能力会逐步扩展。
+TranslatedSubs 是视频与音频字幕处理工作台，支持媒体下载、语音识别、字幕翻译、软硬字幕封装，以及通过 Web 和 MCP 管理任务。
 
 ## Docker 快速启动
 
@@ -18,8 +16,10 @@ LynxSense 是面向视频与音频的信息理解工作台。当前已交付字�
 ```bash
 cp .env.example .env
 # 在 .env 中填写 SUBTRANS_DEEPSEEK_API_KEY
-docker build -t lynxsense:local . && docker run -d --name lynxsense --restart unless-stopped -p 8000:8000 --env-file .env -e SUBTRANS_DATA_DIR=/data -e SUBTRANS_DB=/data/db/app.db -v lynxsense-data:/data lynxsense:local
+docker build -t translatedsubs:local . && docker run -d --name translatedsubs --restart unless-stopped -p 8000:8000 --env-file .env -e SUBTRANS_DATA_DIR=/data -e SUBTRANS_DB=/data/db/app.db -v translatedsubs-data:/data translatedsubs:local
 ```
+
+从旧容器升级时，把 `translatedsubs-data` 换成原有数据卷名，保留任务数据库和产物。现有 `SUBTRANS_*` 环境变量继续使用。
 
 打开 <http://localhost:8000/>。本地开发、Linux 部署和容器升级说明见[文档目录](./docs/README.md)。
 
@@ -30,7 +30,6 @@ docker build -t lynxsense:local . && docker run -d --name lynxsense --restart un
 - **MCP 接入**：让 Codex、Claude Desktop 等 AI 客户端通过自然语言创建和跟踪处理任务，适合把媒体处理接入 Agent 工作流。
 - **Google Drive 扩展**：按任务上传、下载和管理云端文件，适合将处理结果接入团队文件流转。
 - **可替换转写后端**：支持本地 faster-whisper、Replicate 和兼容 HTTP 服务，适合在成本、速度、隐私之间选择。
-- **媒体理解扩展方向**：将内容分类、情绪、语调和关键事件转为带时间轴与置信度的结构化结果，供检索和 AI 使用。
 
 ## 文档
 

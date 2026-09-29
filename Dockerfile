@@ -22,10 +22,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 COPY web/ ./web/
 
-RUN groupadd --system --gid 10001 lynxsense \
-    && useradd --system --uid 10001 --gid lynxsense --home-dir /nonexistent lynxsense \
+RUN groupadd --system --gid 10001 translatedsubs \
+    && useradd --system --uid 10001 --gid translatedsubs --home-dir /nonexistent translatedsubs \
     && mkdir -p /data \
-    && chown lynxsense:lynxsense /data
+    && chown translatedsubs:translatedsubs /data
 
 USER 10001:10001
 

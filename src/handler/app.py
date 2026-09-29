@@ -54,7 +54,7 @@ _WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="LynxSense API", version="0.1.0")
+    app = FastAPI(title="TranslatedSubs API", version="0.1.0")
 
     # 本机工作台：只允许配置中的前端来源访问 API。
     app.add_middleware(

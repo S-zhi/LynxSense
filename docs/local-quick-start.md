@@ -1,6 +1,6 @@
 # 本地快速启动
 
-本文说明如何在本地运行 LynxSense。只需要字幕流水线时启动业务 API；需要 Google Drive 时再启动 sidecar。
+本文说明如何在本地运行 TranslatedSubs。只需要字幕流水线时启动业务 API；需要 Google Drive 时再启动 sidecar。
 
 ## 环境准备
 

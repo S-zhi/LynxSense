@@ -1,6 +1,6 @@
-# LynxSense 贡献指南 (Contributing Guide)
+# TranslatedSubs 贡献指南 (Contributing Guide)
 
-感谢你对 LynxSense 的关注！本指南将帮助你了解如何参与本项目的开发与贡献。无论是报告 Bug、提出新功能建议，还是提交代码，我们都非常欢迎！
+感谢你对 TranslatedSubs 的关注！本指南将帮助你了解如何参与本项目的开发与贡献。无论是报告 Bug、提出新功能建议，还是提交代码，我们都非常欢迎！
 
 ---
 

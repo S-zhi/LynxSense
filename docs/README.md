@@ -1,4 +1,4 @@
-# LynxSense 文档
+# TranslatedSubs 文档
 
 README 只保留产品概览和 Docker 快速启动。按使用场景阅读以下文档：
 
@@ -10,4 +10,4 @@ README 只保留产品概览和 Docker 快速启动。按使用场景阅读以�
 - [Google Drive sidecar](../drive-service/README.md)：OAuth、任务级同步和 sidecar API。
 - [环境变量模板](../.env.example)：完整配置项及默认值。
 
-扩展能力的定位和适用场景见[根目录 README](../README.md)的“能力概览”。
+已交付能力的定位和适用场景见[根目录 README](../README.md)的“能力概览”。
