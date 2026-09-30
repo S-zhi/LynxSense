@@ -18,11 +18,13 @@ import { initReplicateBilling } from "./ui-replicate-billing.js";
 import { initAdvancedSettings } from "./ui-advanced-settings.js";
 import { initRouter } from "./router.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
+import { initDeveloperEntry } from "./developer-entry.js";
 
 initI18n();
 initTheme();
 initAdvancedSettings();
 initRouter();
+initDeveloperEntry();
 initShell();
 initConsole();
 initQueue({ listSelector: "#taskList", origin: "web" });
