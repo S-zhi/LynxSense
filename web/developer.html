@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Developer mode · TranslatedSubs</title>
+    <meta name="description" content="TranslatedSubs 独立开发者调试工作台。" />
+    <link rel="icon" href="assets/translatedsubs-logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles/developer.css" />
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+  </head>
+  <body class="developer-body">
+    <main class="developer-app">
+      <header class="developer-header">
+        <div class="developer-brand">
+          <img class="developer-brand__mark" src="assets/translatedsubs-logo.svg" alt="" />
+          <div class="developer-brand__copy">
+            <span class="developer-brand__title">TranslatedSubs</span>
+            <span class="developer-brand__subtitle">独立开发者工作台</span>
+          </div>
+          <span class="developer-badge">Developer mode</span>
+        </div>
+        <button class="developer-back" id="developerBack" type="button">
+          <i class="ph ph-arrow-left" aria-hidden="true"></i><span>返回主工作台</span>
+        </button>
+      </header>
+
+      <section class="developer-content" aria-labelledby="developerTitle">
+        <div class="developer-intro">
+          <div>
+            <span class="developer-eyebrow">Runtime diagnostics</span>
+            <h1 id="developerTitle">运行日志</h1>
+            <p>查看当前开发者页面的临时调试信息。刷新页面后，日志会重新从内存初始化。</p>
+          </div>
+          <span class="developer-intro__meta" id="developerSession">session —</span>
+        </div>
+
+        <nav class="developer-tabs" aria-label="开发者页面 Tab">
+          <button class="developer-tab" type="button" role="tab" aria-selected="true">
+            <i class="ph ph-terminal-window" aria-hidden="true"></i><span>运行日志</span>
+          </button>
+        </nav>
+
+        <section class="developer-panel" aria-labelledby="logPanelTitle">
+          <div class="developer-panel__head">
+            <div class="developer-panel__title" id="logPanelTitle">
+              <i class="ph ph-list-bullets" aria-hidden="true"></i><span>当前会话输出</span>
+            </div>
+            <div class="developer-panel__actions" role="group" aria-label="日志操作">
+              <button class="developer-filter is-active" type="button" data-level="all">全部</button>
+              <button class="developer-filter" type="button" data-level="info">Info</button>
+              <button class="developer-filter" type="button" data-level="warn">Warn</button>
+              <button class="developer-filter" type="button" data-level="error">Error</button>
+              <button class="developer-clear" id="developerClear" type="button"><i class="ph ph-trash" aria-hidden="true"></i><span>清空</span></button>
+            </div>
+          </div>
+          <div class="developer-log" id="developerLog" aria-live="polite"></div>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="js/developer.js"></script>
+  </body>
+</html>
