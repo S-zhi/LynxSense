@@ -1164,6 +1164,19 @@ def test_delete_probe_record_404_when_missing(client):
     assert res.status_code == 404
 
 
+def test_get_ytdlp_info(client):
+    """GET /api/tasks/probe/ytdlp-info 应返回提取器数量、版本和配置参数。"""
+    res = client.get("/api/tasks/probe/ytdlp-info")
+    assert res.status_code == 200
+    data = res.json()
+    assert "version" in data
+    assert "extractorsCount" in data
+    assert data["extractorsCount"] > 0
+    assert "proxyConfigured" in data
+    assert "cacheTtlSec" in data
+    assert isinstance(data["cacheTtlSec"], (int, float))
+
+
 # ---------- /api/tasks/upload 上传端点边界 ----------
 
 def _upload(client, **fields):

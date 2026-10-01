@@ -3,8 +3,15 @@
 import { TERMINAL, LANG_LABEL } from "./constants.js";
 import { uid, clamp, shortUrl, statusForProgress } from "./utils.js";
 
-const CFG = window.APP_CONFIG;
-export const USE_MOCK = CFG.USE_MOCK;
+const CFG = (typeof window !== "undefined" && window.APP_CONFIG) || {
+  API_BASE_URL:
+    typeof window !== "undefined" && window.location && window.location.origin
+      ? window.location.origin
+      : "http://localhost:8000",
+  USE_MOCK: false,
+  API_TIMEOUT_MS: 15000,
+};
+export const USE_MOCK = Boolean(CFG.USE_MOCK);
 
 // 为普通 REST 请求统一接入超时控制；SSE 订阅保留独立连接策略。
 async function request(base, path, options = {}) {
@@ -101,6 +108,13 @@ const RealApi = {
       body: JSON.stringify({ url }),
     });
     if (!res.ok) throw new Error(await readError(res, "链接校验失败"));
+    return res.json();
+  },
+
+  // 获取 yt-dlp 运行时版本与提取器环境信息。
+  async getYtDlpInfo() {
+    const res = await request(this.base, "/api/tasks/probe/ytdlp-info");
+    if (!res.ok) throw new Error(await readError(res, "获取 yt-dlp 环境信息失败"));
     return res.json();
   },
 
@@ -628,6 +642,17 @@ const MockApi = (() => {
         createdAt: Date.now(),
       });
       return result;
+    },
+    async getYtDlpInfo() {
+      await delay(40);
+      return {
+        version: "2026.06.09",
+        extractorsCount: 1747,
+        proxyConfigured: false,
+        proxyMasked: null,
+        cookiesConfigured: false,
+        cacheTtlSec: 300,
+      };
     },
     // 示例模式下：返回历史记录（按时间倒序，遵守 limit）。
     async listProbeRecords(limit = 50) {
