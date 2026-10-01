@@ -45,6 +45,7 @@ from src.handler.schemas import (
     TaskOut,
     TaskProbeIn,
     TaskProbeOut,
+    YtDlpEnvInfo,
     _probe_record_to_out,
     to_out,
 )
@@ -512,6 +513,41 @@ def delete_probe_record(
     """删除单条下载测试历史；不存在返回 404。"""
     if not probes.delete(record_id):
         raise HTTPException(status_code=404, detail="测试记录不存在")
+
+
+@router.get("/probe/ytdlp-info", response_model=YtDlpEnvInfo, dependencies=[Depends(require_api_token)])
+def get_ytdlp_info() -> YtDlpEnvInfo:
+    """返回 yt-dlp 的版本号、提取器总数与代理/配置状态。"""
+    version = None
+    try:
+        import yt_dlp.version
+        version = getattr(yt_dlp.version, "__version__", None)
+    except Exception:
+        pass
+
+    extractors_count = 0
+    try:
+        from yt_dlp.extractor import list_extractors
+        extractors_count = len(list_extractors())
+    except Exception:
+        pass
+
+    proxy = getattr(settings, "download_proxy", None)
+    proxy_masked = None
+    if proxy:
+        import re
+        proxy_masked = re.sub(r"://[^@]+@", "://***:***@", str(proxy))
+
+    cookies_configured = bool(settings.cookies_file and Path(settings.cookies_file).is_file())
+
+    return YtDlpEnvInfo(
+        version=version,
+        extractorsCount=extractors_count,
+        proxyConfigured=bool(proxy),
+        proxyMasked=proxy_masked,
+        cookiesConfigured=cookies_configured,
+        cacheTtlSec=float(settings.probe_cache_ttl_sec),
+    )
 
 
 @router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_api_token)])

@@ -97,7 +97,7 @@ drive_pid=$!
 
 (
   cd "${ROOT_DIR}"
-  exec uv run uvicorn src.handler.app:app --reload --port "${API_PORT}"
+  exec uv run python -m uvicorn src.handler.app:app --reload --port "${API_PORT}"
 ) &
 api_pid=$!
 
