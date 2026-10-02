@@ -98,6 +98,17 @@ export const DEFAULT_SITES = Object.freeze([
     note: "公开视频样例",
   },
   {
+    id: "bilibili",
+    name: "哔哩哔哩",
+    domain: "bilibili.com",
+    category: "domestic",
+    extractor: "BiliBili",
+    icon: "ph-monitor-play",
+    url: "https://www.bilibili.com/video/BV1xx411c7mu",
+    proxy: false,
+    note: "公开视频样例，可能受地区和登录态影响",
+  },
+  {
     id: "niconico",
     name: "ニコニコ動画",
     domain: "nicovideo.jp",
