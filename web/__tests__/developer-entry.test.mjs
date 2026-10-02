@@ -48,3 +48,11 @@ test("developer state is in memory and each page gets a fresh instance", () => {
   assert.equal(second.logs.length, 1);
   assert.equal(second.level, "all");
 });
+
+test("developer.html includes config.js before developer.js", async () => {
+  const fs = await import("node:fs/promises");
+  const html = await fs.readFile(new URL("../developer.html", import.meta.url), "utf-8");
+  assert.ok(html.includes('<script src="config.js"></script>'));
+  assert.ok(html.indexOf('<script src="config.js"></script>') < html.indexOf('<script type="module" src="js/developer.js"></script>'));
+});
+

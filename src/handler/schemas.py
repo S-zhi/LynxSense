@@ -105,6 +105,17 @@ class ProbeRecordOut(BaseModel):
     uploader: Optional[str] = None
 
 
+class YtDlpEnvInfo(BaseModel):
+    """yt-dlp 运行时环境与提取器诊断信息。"""
+
+    version: Optional[str] = None
+    extractorsCount: int = 0
+    proxyConfigured: bool = False
+    proxyMasked: Optional[str] = None
+    cookiesConfigured: bool = False
+    cacheTtlSec: float = 0.0
+
+
 class ProbeRecordsClearOut(BaseModel):
     """清空历史记录后的响应，便于前端 toast 显示删了多少条。"""
 
