@@ -118,6 +118,16 @@ class ProbeResult:
     uploader: Optional[str] = None
 
 _PROBE_CACHE_MAX_SIZE = 1000
+BROWSER_COOKIE_SOURCES = frozenset({
+    "chrome",
+    "chromium",
+    "edge",
+    "firefox",
+    "brave",
+    "vivaldi",
+    "opera",
+    "safari",
+})
 _probe_cache_lock = threading.Lock()
 _probe_cache: OrderedDict[tuple[str, str, str], tuple[float, ProbeResult]] = OrderedDict()
 
@@ -480,6 +490,7 @@ def probe_video(
     url: str,
     *,
     cookies_file: Optional[Path] = None,
+    cookies_from_browser: Optional[str] = None,
     format_selector: Optional[str] = None,
     ttl_sec: Optional[float] = None,
     force_refresh: bool = False,
@@ -494,16 +505,25 @@ def probe_video(
     if not _is_probe_url(clean_url):
         return ProbeResult(ok=False, reason="请输入有效的视频链接", cached=False)
 
+    browser = None
+    if cookies_from_browser is not None:
+        browser = str(cookies_from_browser).strip().lower()
+        if browser not in BROWSER_COOKIE_SOURCES:
+            return ProbeResult(ok=False, reason="不支持的浏览器 Cookie 来源", cached=False)
+        if not bool(getattr(settings, "allow_cookies_from_browser", False)):
+            return ProbeResult(ok=False, reason="浏览器 Cookie 探测未启用", cached=False)
+
     effective_ttl = ttl_sec if ttl_sec is not None else float(settings.probe_cache_ttl_sec)
-    effective_cookies = cookies_file or settings.cookies_file
+    effective_cookies = None if browser else (cookies_file or settings.cookies_file)
     effective_format = format_selector or settings.download_format
     effective_timeout = getattr(settings, "download_socket_timeout", 30)
     effective_proxy = proxy or getattr(settings, "download_proxy", None)
+    use_cache = browser is None
 
     cache_key = (clean_url, str(effective_cookies or ""), str(effective_format))
     now = time.time()
 
-    if not force_refresh and effective_ttl > 0:
+    if use_cache and not force_refresh and effective_ttl > 0:
         with _probe_cache_lock:
             cached = _probe_cache.get(cache_key)
             if cached is not None:
@@ -527,24 +547,28 @@ def probe_video(
     if effective_proxy:
         ydl_opts["proxy"] = effective_proxy
 
-    if effective_cookies:
+    if browser:
+        ydl_opts["cookiesfrombrowser"] = (browser,)
+    elif effective_cookies:
         ydl_opts["cookiefile"] = str(effective_cookies)
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
     except YtDlpDownloadError as e:
+        message = str(e)
         res = ProbeResult(
             ok=False,
-            reason=_probe_failure_reason(str(e)),
-            detail=_clip_error(str(e)),
+            reason=_probe_failure_reason(message),
+            detail=_probe_error_detail(message, browser=browser is not None),
             cached=False,
         )
     except Exception as e:
+        message = str(e)
         res = ProbeResult(
             ok=False,
             reason="链接探测失败",
-            detail=_clip_error(str(e)),
+            detail=_probe_error_detail(message, browser=browser is not None),
             cached=False,
         )
     else:
@@ -585,7 +609,7 @@ def probe_video(
                 cached=False,
             )
 
-    if effective_ttl > 0:
+    if use_cache and effective_ttl > 0:
         with _probe_cache_lock:
             _probe_cache[cache_key] = (now, res)
             _probe_cache.move_to_end(cache_key)
@@ -685,6 +709,13 @@ def _probe_failure_reason(message: str) -> str:
     if "not available" in text or "404" in text:
         return "视频不可用或链接已失效"
     return "yt-dlp 无法解析这个链接"
+
+
+def _probe_error_detail(message: str, *, browser: bool = False) -> str:
+    """返回探测错误摘要；浏览器登录态错误不暴露本地 profile 信息。"""
+    if browser:
+        return "无法读取所选浏览器登录态，请确认后端与浏览器在同一台可信机器且浏览器配置可访问"
+    return _clip_error(message)
 
 
 def _clip_error(message: str, limit: int = 500) -> str:

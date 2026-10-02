@@ -268,6 +268,8 @@ _ALIAS_MAP = {
     "download_proxy": "_download_proxy",
     "merge_output_format": "_merge_output_format",
     "cookies_file": "_cookies_file",
+    "allow_cookies_from_browser": "_allow_cookies_from_browser",
+    "startup_probe_enabled": "_startup_probe_enabled",
     "download_retries": "_download_retries",
     "max_upload_mb": "_max_upload_mb",
     "max_video_minutes": "_max_video_minutes",
@@ -327,6 +329,8 @@ class Settings:
     _download_proxy: Any = field(default=_UNSET, repr=False)
     _merge_output_format: Any = field(default=_UNSET, repr=False)
     _cookies_file: Any = field(default=_UNSET, repr=False)
+    _allow_cookies_from_browser: Any = field(default=_UNSET, repr=False)
+    _startup_probe_enabled: Any = field(default=_UNSET, repr=False)
     _download_retries: Any = field(default=_UNSET, repr=False)
     _max_upload_mb: Any = field(default=_UNSET, repr=False)
     _max_video_minutes: Any = field(default=_UNSET, repr=False)
@@ -381,6 +385,8 @@ class Settings:
         _download_proxy: Any = _UNSET,
         _merge_output_format: Any = _UNSET,
         _cookies_file: Any = _UNSET,
+        _allow_cookies_from_browser: Any = _UNSET,
+        _startup_probe_enabled: Any = _UNSET,
         _download_retries: Any = _UNSET,
         _max_upload_mb: Any = _UNSET,
         _max_video_minutes: Any = _UNSET,
@@ -435,6 +441,8 @@ class Settings:
             "_download_proxy": _download_proxy,
             "_merge_output_format": _merge_output_format,
             "_cookies_file": _cookies_file,
+            "_allow_cookies_from_browser": _allow_cookies_from_browser,
+            "_startup_probe_enabled": _startup_probe_enabled,
             "_download_retries": _download_retries,
             "_max_upload_mb": _max_upload_mb,
             "_max_video_minutes": _max_video_minutes,
@@ -647,6 +655,26 @@ class Settings:
             return self._cookies_file
         _sync_env_file()
         return _opt_env_path("SUBTRANS_COOKIES")
+
+    # 仅允许显式发起的探测从受限浏览器来源读取 Cookie，默认关闭
+    @property
+    def allow_cookies_from_browser(self) -> bool:
+        if self._allow_cookies_from_browser is not _UNSET:
+            return bool(self._allow_cookies_from_browser)
+        _sync_env_file()
+        return (os.getenv("SUBTRANS_ALLOW_COOKIES_FROM_BROWSER", "0") or "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+
+    # 启动时自动探测固定站点目录，默认开启；测试和受限部署可关闭
+    @property
+    def startup_probe_enabled(self) -> bool:
+        if self._startup_probe_enabled is not _UNSET:
+            return bool(self._startup_probe_enabled)
+        _sync_env_file()
+        return (os.getenv("SUBTRANS_STARTUP_PROBE_ENABLED", "1") or "1").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
 
     # 下载失败重试次数
     @property

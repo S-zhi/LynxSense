@@ -41,6 +41,7 @@ from src.handler.schemas import (
     ErrorDetail,
     ProbeRecordOut,
     ProbeRecordsClearOut,
+    ProbeBatchStatusOut,
     TaskCreate,
     TaskOut,
     TaskProbeIn,
@@ -51,6 +52,7 @@ from src.handler.schemas import (
 )
 from src.service.runner import _cleanup_partial_artifacts, cancel_pipeline, enqueue_pipeline
 from src.service.asset_resolver import AssetResolver, ResourceState
+from src.service.probe_batch import probe_batch_manager
 from src.service.model_manager import model_manager
 from src.store import (
     DOWNGRADE_REASON_DISK_FAILURE,
@@ -451,9 +453,19 @@ def probe_task(
     排查"链接换格式还是不可下载"等问题。失败也会记录（含 reason/detail），
     错误信息不会因为页面刷新而丢失。
     """
-    result = probe_video(body.url)
+    if body.cookiesFromBrowser and not settings.allow_cookies_from_browser:
+        raise HTTPException(
+            status_code=409,
+            detail=ErrorDetail(
+                code="BROWSER_COOKIES_DISABLED",
+                message="浏览器 Cookie 探测未启用",
+                suggestion="请在后端同一台可信机器上设置 SUBTRANS_ALLOW_COOKIES_FROM_BROWSER=1 后重试。",
+            ).model_dump(exclude_none=True),
+        )
+
+    result = probe_video(body.url, cookies_from_browser=body.cookiesFromBrowser)
     # 探测本身失败不影响响应；同时把 ok=False 的记录也存下来，方便回看错误
-    probes.record(
+    record = probes.record(
         url=body.url,
         ok=result.ok,
         title=result.title,
@@ -469,6 +481,7 @@ def probe_task(
         thumbnail=result.thumbnail,
         uploader=result.uploader,
     )
+    probe_batch_manager.record_manual_probe(body.url, result, record.created_at)
     return TaskProbeOut(
         ok=result.ok,
         title=result.title,
@@ -485,6 +498,12 @@ def probe_task(
         thumbnail=result.thumbnail,
         uploader=result.uploader,
     )
+
+
+@router.get("/probe/startup-status", response_model=ProbeBatchStatusOut, dependencies=[Depends(require_api_token)])
+def get_probe_startup_status() -> ProbeBatchStatusOut:
+    """返回固定十站点启动探测与开发者页重测的当前状态。"""
+    return ProbeBatchStatusOut.model_validate(probe_batch_manager.status())
 
 
 @router.get("/probe/records", response_model=List[ProbeRecordOut], dependencies=[Depends(require_api_token)])
@@ -546,6 +565,7 @@ def get_ytdlp_info() -> YtDlpEnvInfo:
         proxyConfigured=bool(proxy),
         proxyMasked=proxy_masked,
         cookiesConfigured=cookies_configured,
+        browserCookiesEnabled=bool(settings.allow_cookies_from_browser),
         cacheTtlSec=float(settings.probe_cache_ttl_sec),
     )
 

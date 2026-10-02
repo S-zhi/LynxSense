@@ -33,9 +33,10 @@ from src.handler import (
     translation_engines,
 )
 
-from src.handler.deps import get_store
+from src.handler.deps import get_probe_store, get_store
 
 from src.service.retention_scheduler import start_retention_scheduler
+from src.service.probe_batch import start_startup_probe, stop_startup_probe
 
 from src.service.runner import recover_interrupted_tasks, shutdown_executor
 from src.store import (
@@ -134,9 +135,11 @@ def create_app() -> FastAPI:
             logger.warning("启动恢复：以下未完成任务已重新入队: %s", recovered)
 
         start_retention_scheduler()
+        start_startup_probe(get_probe_store(), enabled=settings.startup_probe_enabled)
     @app.on_event("shutdown")
     def _shutdown_runner() -> None:
         """关闭应用时通知 runner 线程池退出。"""
+        stop_startup_probe()
         shutdown_executor(wait=False)
 
     return app

@@ -19,6 +19,7 @@ import { initAdvancedSettings } from "./ui-advanced-settings.js";
 import { initRouter } from "./router.js";
 import { loadTasks, stopAll, setView, setFilter } from "./store.js";
 import { initDeveloperEntry } from "./developer-entry.js";
+import { initSupportedSitesView } from "./supported-sites.js";
 
 initI18n();
 initTheme();
@@ -39,6 +40,7 @@ initAudioSettings();
 initReplicateSettings();
 initLocalModels();
 initReplicateBilling();
+initSupportedSitesView();
 
 loadTasks();
 
