@@ -492,18 +492,37 @@
               <div class="audio-settings" id="localModelsSettings">
                 <header class="audio-settings__head local-model-store__head">
                   <div class="audio-settings__intro"><span class="eyebrow">WHISPER / CPU</span><h2>模型商店（本地）</h2><p>选择官方规格直接下载，或导入已有的 Hugging Face Whisper 文件。所有模型只在本机 CPU 上运行。</p></div>
-                  <span id="localModelSummary" class="local-model-store__summary" aria-live="polite"></span>
+                  <div class="local-model-store__summary-wrap"><span class="local-model-store__summary-label">模型库状态</span><span id="localModelSummary" class="local-model-store__summary" aria-live="polite"></span></div>
                 </header>
                 <div class="local-model-store__section-head"><div><span class="eyebrow">CATALOG</span><h3>官方模型</h3></div><span>预计大小随版本可能略有变化</span></div>
                 <div id="localModelsList" class="local-model-list" aria-live="polite"></div>
-                <div class="local-model-store__section-head local-model-store__section-head--import"><div><span class="eyebrow">YOUR FILES</span><h3>导入本地模型</h3></div><span>仅接受 Whisper 的 .bin 或 .safetensors 权重及必要配置文件</span></div>
-                <form id="localModelImportForm" class="local-model-import">
-                  <label>模型 ID<input id="localModelName" name="name" type="text" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" maxlength="64" required></label>
-                  <label>显示名称<input id="localModelLabel" name="label" type="text" maxlength="100"></label>
-                  <label>模型目录<input id="localModelFiles" name="files" type="file" webkitdirectory multiple required></label>
-                  <button class="btn btn--primary btn--sm" type="submit"><i class="ph ph-folder-plus" aria-hidden="true"></i><span>导入</span></button>
-                  <span id="localModelImportStatus" class="local-model-import__status" role="status" aria-live="polite"></span>
-                </form>
+                <div class="local-model-store__section-head local-model-store__section-head--import"><div><span class="eyebrow">YOUR FILES</span><h3>导入本地模型</h3></div><span>导入前会检查目录结构，模型内容由后端完成最终验证</span></div>
+                <div class="local-model-import-panel">
+                  <div class="local-model-import-panel__head">
+                    <span class="local-model-import-panel__icon"><i class="ph ph-folder-notch-open" aria-hidden="true"></i></span>
+                    <div><strong>添加你的本地 Whisper 模型</strong><p>选择包含权重和配置文件的模型目录，导入后即可在任务中使用。</p></div>
+                    <span class="local-model-import-panel__hint">仅支持 .bin / .safetensors</span>
+                  </div>
+                  <form id="localModelImportForm" class="local-model-import" novalidate>
+                    <div class="local-model-import__fields">
+                      <label class="local-model-import__field" for="localModelName"><span>模型 ID <em>必填</em></span><input id="localModelName" name="name" type="text" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" maxlength="64" required aria-describedby="localModelNameHint localModelNameError"><small id="localModelNameHint">用于任务配置，只能使用字母、数字、下划线和短横线。</small><small class="local-model-import__error" id="localModelNameError" hidden></small></label>
+                      <label class="local-model-import__field" for="localModelLabel"><span>显示名称 <em>必填</em></span><input id="localModelLabel" name="label" type="text" maxlength="100" required aria-describedby="localModelLabelHint localModelLabelError"><small id="localModelLabelHint">输入名称后会自动生成一个可修改的模型 ID。</small><small class="local-model-import__error" id="localModelLabelError" hidden></small></label>
+                    </div>
+                    <label class="local-model-dropzone" id="localModelDropzone" for="localModelFiles" tabindex="0" aria-describedby="localModelDropzoneHint">
+                      <span class="local-model-dropzone__icon"><i class="ph ph-upload-simple" aria-hidden="true"></i></span>
+                      <span class="local-model-dropzone__copy"><strong id="localModelDropzoneTitle">拖入模型目录，或点击选择</strong><small id="localModelDropzoneHint">保留原生文件夹选择器作为兼容入口，不支持压缩包或单个权重文件。</small></span>
+                      <span class="local-model-dropzone__action">选择目录</span>
+                      <input id="localModelFiles" name="files" type="file" webkitdirectory multiple aria-describedby="localModelDropzoneHint">
+                    </label>
+                    <div class="local-model-file-summary" id="localModelFileSummary" aria-live="polite" hidden>
+                      <div class="local-model-file-summary__top"><div><span class="local-model-file-summary__eyebrow">预检结果</span><strong id="localModelFileSummaryTitle">尚未选择模型目录</strong></div><span class="local-model-file-summary__count" id="localModelFileSummaryCount"></span></div>
+                      <div class="local-model-file-summary__checks" id="localModelFileChecks"></div>
+                      <details id="localModelFileDetails" class="local-model-file-details" hidden><summary>查看文件检查详情</summary><ul id="localModelFileList"></ul></details>
+                    </div>
+                    <div class="local-model-import__feedback" id="localModelImportFeedback" hidden><i id="localModelImportFeedbackIcon" class="ph ph-info" aria-hidden="true"></i><span id="localModelImportStatus" role="status" aria-live="polite"></span></div>
+                    <div class="local-model-import__foot"><span class="local-model-import__requirements" id="localModelImportRequirements">选择模型目录后将自动检查结构</span><button class="btn btn--primary" id="localModelImportSubmit" type="submit" disabled><i class="ph ph-folder-plus" aria-hidden="true"></i><span>导入模型</span></button></div>
+                  </form>
+                </div>
                 <div id="importedModelsList" class="local-model-list" aria-live="polite"></div>
               </div>
             </div>
