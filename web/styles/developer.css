@@ -232,6 +232,64 @@
   flex-wrap: wrap;
 }
 
+.ytdlp-cookie-control {
+  display: grid;
+  grid-template-columns: auto minmax(132px, 156px);
+  align-items: center;
+  gap: 4px 9px;
+  min-width: 250px;
+  padding: 7px 10px;
+  border: 1px solid var(--dev-border);
+  border-radius: 9px;
+  background: rgba(12, 9, 20, 0.58);
+}
+.ytdlp-cookie-control__label {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dev-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ytdlp-cookie-control__label input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--dev-purple);
+}
+.ytdlp-cookie-control select {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--dev-border);
+  border-radius: 7px;
+  background: var(--dev-surface);
+  color: var(--dev-text);
+  font: inherit;
+  font-size: 11px;
+}
+.ytdlp-cookie-control select:disabled,
+.ytdlp-cookie-control__label input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.ytdlp-cookie-control__help {
+  grid-column: 1 / -1;
+  color: var(--dev-text-dim);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.ytdlp-cookie-control__help.is-enabled { color: var(--dev-green); }
+.ytdlp-cookie-control__help.is-disabled { color: var(--dev-amber); }
+
+.ytdlp-history-status {
+  min-height: 16px;
+  margin: -6px 0 12px;
+  color: var(--dev-text-dim);
+  font-size: 11px;
+}
+.ytdlp-history-status.is-error { color: var(--dev-amber); }
+
 .ytdlp-btn {
   display: inline-flex;
   align-items: center;
@@ -319,6 +377,7 @@
 }
 
 .ytdlp-site-card {
+  min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--dev-border);
   border-radius: 14px;
@@ -347,11 +406,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .ytdlp-site-card__select {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   cursor: pointer;
   user-select: none;
 }
@@ -365,22 +427,39 @@
   display: flex;
   align-items: center;
   gap: 9px;
+  min-width: 0;
 }
 .ytdlp-site-card__icon {
   width: 28px;
   height: 28px;
+  flex: 0 0 28px;
   border-radius: 8px;
   background: var(--dev-surface-raised);
   border: 1px solid var(--dev-border);
   display: grid;
   place-items: center;
+  overflow: hidden;
   color: var(--dev-purple-bright);
   font-size: 15px;
+}
+.ytdlp-site-card__logo {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+.ytdlp-site-card__logo-fallback {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--dev-purple-bright);
 }
 .ytdlp-site-card__naming {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
 }
 .ytdlp-site-card__name {
   font-size: 13px;
@@ -391,12 +470,16 @@
   font-size: 11px;
   color: var(--dev-text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ytdlp-site-card__badges {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -418,6 +501,14 @@
 .ytdlp-tag--direct {
   background: rgba(104, 211, 145, 0.1);
   color: var(--dev-green);
+}
+.ytdlp-tag--cookie {
+  background: rgba(246, 199, 110, 0.12);
+  color: var(--dev-amber);
+}
+.ytdlp-tag--cookie.is-required {
+  background: rgba(255, 127, 154, 0.12);
+  color: var(--dev-red);
 }
 
 .ytdlp-status-pill {
@@ -455,6 +546,7 @@
   display: flex;
   align-items: center;
   flex: 1;
+  min-width: 0;
   border: 1px solid var(--dev-border);
   border-radius: 9px;
   background: #0d0915;
@@ -462,6 +554,7 @@
 }
 .ytdlp-url-input {
   flex: 1;
+  min-width: 0;
   border: 0;
   background: transparent;
   color: var(--dev-text);
@@ -756,6 +849,8 @@
   .ytdlp-toolbar { flex-direction: column; align-items: stretch; }
   .ytdlp-toolbar__primary, .ytdlp-toolbar__secondary { justify-content: stretch; }
   .ytdlp-toolbar .ytdlp-btn { flex: 1; justify-content: center; }
+  .ytdlp-cookie-control { width: 100%; min-width: 0; }
+  .ytdlp-cookie-control select { width: 100%; }
   .ytdlp-search-box { width: 100%; min-width: 0; }
 }
 

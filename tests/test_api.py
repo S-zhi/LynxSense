@@ -1049,6 +1049,74 @@ def test_probe_returns_probe_result_shape(client, monkeypatch):
     assert records[0].uploader == "Test Creator"
 
 
+def test_manual_probe_updates_shared_startup_status(client, monkeypatch):
+    fake = ProbeResult(ok=True, title="Manual YouTube", formats_count=1)
+    monkeypatch.setattr(tasks_routes, "probe_video", lambda url, **kw: fake)
+
+    response = client.post(
+        "/api/tasks/probe",
+        json={"url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ"},
+    )
+    assert response.status_code == 200
+
+    status = client.get("/api/tasks/probe/startup-status").json()
+    youtube = next(site for site in status["sites"] if site["id"] == "youtube")
+    assert youtube["status"] == "ok"
+    assert youtube["source"] == "manual"
+    assert youtube["result"]["title"] == "Manual YouTube"
+
+
+def test_probe_forwards_whitelisted_browser_cookie_source(client, monkeypatch):
+    import dataclasses
+
+    captured = {}
+    fake = ProbeResult(ok=True, title="P", formats_count=1)
+    monkeypatch.setattr(
+        tasks_routes,
+        "settings",
+        dataclasses.replace(tasks_routes.settings, _allow_cookies_from_browser=True),
+    )
+
+    def fake_probe(url, **kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr(tasks_routes, "probe_video", fake_probe)
+    r = client.post(
+        "/api/tasks/probe",
+        json={"url": "https://x/v", "cookiesFromBrowser": "chrome"},
+    )
+    assert r.status_code == 200
+    assert captured == {"cookies_from_browser": "chrome"}
+    assert "cookiesFromBrowser" not in r.json()
+    assert "profile" not in r.text.lower()
+
+
+def test_probe_rejects_invalid_browser_cookie_source(client):
+    r = client.post(
+        "/api/tasks/probe",
+        json={"url": "https://x/v", "cookiesFromBrowser": "/tmp/profile"},
+    )
+    assert r.status_code == 422
+
+
+def test_probe_rejects_browser_cookies_when_disabled(client, monkeypatch):
+    import dataclasses
+
+    monkeypatch.setattr(
+        tasks_routes,
+        "settings",
+        dataclasses.replace(tasks_routes.settings, _allow_cookies_from_browser=False),
+    )
+    r = client.post(
+        "/api/tasks/probe",
+        json={"url": "https://x/v", "cookiesFromBrowser": "chrome"},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["code"] == "BROWSER_COOKIES_DISABLED"
+    assert "profile" not in r.text.lower()
+
+
 def test_create_task_with_custom_quality(client):
     """POST /api/tasks 支持指定 quality 参数。"""
     payload = _payload(quality="1080p")
@@ -1164,6 +1232,19 @@ def test_delete_probe_record_404_when_missing(client):
     assert res.status_code == 404
 
 
+def test_get_probe_startup_status(client):
+    res = client.get("/api/tasks/probe/startup-status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["state"] in {"idle", "disabled", "running", "completed"}
+    assert data["total"] == 10
+    assert len(data["sites"]) == 10
+    assert {site["id"] for site in data["sites"]} == {
+        "youtube", "vimeo", "dailymotion", "twitch", "tiktok",
+        "twitter", "instagram", "acfun", "niconico", "pornhub",
+    }
+
+
 def test_get_ytdlp_info(client):
     """GET /api/tasks/probe/ytdlp-info 应返回提取器数量、版本和配置参数。"""
     res = client.get("/api/tasks/probe/ytdlp-info")
@@ -1175,6 +1256,7 @@ def test_get_ytdlp_info(client):
     assert "proxyConfigured" in data
     assert "cacheTtlSec" in data
     assert isinstance(data["cacheTtlSec"], (int, float))
+    assert isinstance(data["browserCookiesEnabled"], bool)
 
 
 # ---------- /api/tasks/upload 上传端点边界 ----------

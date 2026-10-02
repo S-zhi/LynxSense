@@ -70,7 +70,7 @@
               <strong class="ytdlp-metric-value" id="statTotal">0</strong>
             </div>
             <div class="ytdlp-metric-card ytdlp-metric-card--ok">
-              <span class="ytdlp-metric-label">解析可用</span>
+              <span class="ytdlp-metric-label">最近可抓取</span>
               <strong class="ytdlp-metric-value" id="statOk">0</strong>
             </div>
             <div class="ytdlp-metric-card ytdlp-metric-card--fail">
@@ -78,7 +78,7 @@
               <strong class="ytdlp-metric-value" id="statFail">0</strong>
             </div>
             <div class="ytdlp-metric-card ytdlp-metric-card--idle">
-              <span class="ytdlp-metric-label">待探测</span>
+              <span class="ytdlp-metric-label">尚未验证</span>
               <strong class="ytdlp-metric-value" id="statIdle">0</strong>
             </div>
             <div class="ytdlp-metric-card ytdlp-metric-card--env">
@@ -107,6 +107,24 @@
                 <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i><span>重置状态</span>
               </button>
             </div>
+            <div class="ytdlp-cookie-control" aria-describedby="browserCookiesHelp">
+              <label class="ytdlp-cookie-control__label" for="browserCookiesCheck">
+                <input type="checkbox" id="browserCookiesCheck" />
+                <span>本次探测使用浏览器 Cookie</span>
+              </label>
+              <select id="browserCookiesSelect" disabled aria-label="选择 Cookie 来源浏览器">
+                <option value="">选择浏览器…</option>
+                <option value="chrome">Chrome</option>
+                <option value="chromium">Chromium</option>
+                <option value="edge">Edge</option>
+                <option value="firefox">Firefox</option>
+                <option value="brave">Brave</option>
+                <option value="vivaldi">Vivaldi</option>
+                <option value="opera">Opera</option>
+                <option value="safari">Safari</option>
+              </select>
+              <span class="ytdlp-cookie-control__help" id="browserCookiesHelp">正在读取后端 Cookie 能力…</span>
+            </div>
             <div class="ytdlp-toolbar__secondary">
               <button type="button" class="ytdlp-btn ytdlp-btn--secondary" id="btnAddCustomModal">
                 <i class="ph ph-plus" aria-hidden="true"></i><span>添加自定义链接</span>
@@ -127,6 +145,7 @@
               <input type="search" id="sitesSearchInput" placeholder="搜索网站名称、域名或提取器..." />
             </div>
           </div>
+          <p class="ytdlp-history-status" id="sitesHistoryStatus" aria-live="polite"></p>
 
           <!-- 网站网格卡片容器 -->
           <div class="ytdlp-sites-grid" id="sitesGrid" aria-live="polite">

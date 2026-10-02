@@ -5,11 +5,22 @@ import {
 } from "./developer-sites-data.js";
 
 const STATUS_LABELS = Object.freeze({
-  idle: "待探测",
+  idle: "尚未验证",
   testing: "测试中",
-  ok: "解析可用",
+  ok: "最近可抓取",
   fail: "异常 / 拦截",
 });
+
+export const BROWSER_COOKIE_SOURCES = Object.freeze([
+  "chrome",
+  "chromium",
+  "edge",
+  "firefox",
+  "brave",
+  "vivaldi",
+  "opera",
+  "safari",
+]);
 
 const STATUS_ICONS = Object.freeze({
   idle: "ph-minus-circle",
@@ -21,6 +32,80 @@ const STATUS_ICONS = Object.freeze({
 function finiteNumber(value, fallback = null) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+export function normalizeHostname(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const candidate = raw.includes("://") ? raw : `https://${raw}`;
+    return new URL(candidate).hostname.toLowerCase().replace(/\.$/, "");
+  } catch (_) {
+    return "";
+  }
+}
+
+function probeRecordTimestamp(record) {
+  const value = record && typeof record === "object" ? record.createdAt : null;
+  if (typeof value === "number") {
+    const timestamp = finiteNumber(value);
+    return timestamp !== null && timestamp >= 0 ? timestamp : null;
+  }
+  if (typeof value !== "string" || !value.trim()) return null;
+  const numeric = finiteNumber(value.trim());
+  if (numeric !== null) return numeric >= 0 ? numeric : null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function recordHostname(record) {
+  if (!record || typeof record !== "object" || !isHttpUrl(record.url)) return "";
+  return normalizeHostname(record.url);
+}
+
+function hostnameMatchesAlias(hostname, alias) {
+  return Boolean(hostname && alias && (hostname === alias || hostname.endsWith(`.${alias}`)));
+}
+
+export function siteMatchesHostname(site, hostname) {
+  const normalized = normalizeHostname(hostname);
+  if (!normalized || !site || typeof site !== "object") return false;
+  const aliases = Array.isArray(site.probeHostnames) && site.probeHostnames.length
+    ? site.probeHostnames
+    : [site.domain];
+  return aliases
+    .map(normalizeHostname)
+    .filter(Boolean)
+    .some((alias) => hostnameMatchesAlias(normalized, alias));
+}
+
+export function findLatestProbeRecord(site, records = []) {
+  let latest = null;
+  let latestTimestamp = null;
+  for (const record of Array.isArray(records) ? records : []) {
+    const timestamp = probeRecordTimestamp(record);
+    if (timestamp === null || !recordHostname(record) || !siteMatchesHostname(site, record.url)) continue;
+    if (latest === null || timestamp > latestTimestamp) {
+      latest = record;
+      latestTimestamp = timestamp;
+    }
+  }
+  return latest;
+}
+
+export function restoreProbeHistory(sites = [], records = []) {
+  return (Array.isArray(sites) ? sites : []).map((site) => {
+    const next = { ...site, result: site.result ? { ...site.result } : null };
+    if (site.status === "testing") return next;
+    const latest = findLatestProbeRecord(site, records);
+    if (!latest) return next;
+    const result = normalizeProbeResult(latest);
+    return {
+      ...next,
+      status: result.ok ? "ok" : "fail",
+      result,
+    };
+  });
 }
 
 export function isHttpUrl(value) {
@@ -103,6 +188,39 @@ function addIcon(doc, parent, iconName) {
   icon.setAttribute("aria-hidden", "true");
   parent.append(icon);
   return icon;
+}
+
+function renderSiteLogo(doc, parent, site) {
+  const fallback = createElement(doc, "span", "ytdlp-site-card__logo-fallback");
+  addIcon(doc, fallback, site.icon || "ph-link");
+  const logoUrl = typeof site.logoUrl === "string" && isHttpUrl(site.logoUrl)
+    ? site.logoUrl
+    : "";
+  if (!logoUrl) {
+    parent.append(fallback);
+    return;
+  }
+
+  const image = createElement(doc, "img", "ytdlp-site-card__logo");
+  image.alt = `${site.name} 网站图标`;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.referrerPolicy = "no-referrer";
+  image.src = logoUrl;
+  image.addEventListener("error", () => image.replaceWith(fallback), { once: true });
+  parent.append(image);
+}
+
+function renderCookieTag(doc, site) {
+  if (!site.cookieRequired && !site.cookieRecommended) return null;
+  const tag = createElement(
+    doc,
+    "span",
+    `ytdlp-tag ytdlp-tag--cookie${site.cookieRequired ? " is-required" : ""}`,
+    site.cookieRequired ? "可能需要 Cookie" : "建议 Cookie",
+  );
+  tag.title = site.cookieNote || "可在本次探测中显式使用浏览器 Cookie";
+  return tag;
 }
 
 function setText(root, selector, value) {
@@ -224,7 +342,7 @@ function renderSiteCard(doc, site, handlers) {
 
   const identity = createElement(doc, "span", "ytdlp-site-card__identity");
   const icon = createElement(doc, "span", "ytdlp-site-card__icon");
-  addIcon(doc, icon, site.icon);
+  renderSiteLogo(doc, icon, site);
   const naming = createElement(doc, "span", "ytdlp-site-card__naming");
   naming.append(
     createElement(doc, "strong", "ytdlp-site-card__name", site.name),
@@ -236,6 +354,8 @@ function renderSiteCard(doc, site, handlers) {
   const badges = createElement(doc, "div", "ytdlp-site-card__badges");
   badges.append(createElement(doc, "span", "ytdlp-tag ytdlp-tag--extractor", site.extractor));
   badges.append(createElement(doc, `span`, `ytdlp-tag ${site.proxy ? "ytdlp-tag--proxy" : "ytdlp-tag--direct"}`, site.proxy ? "需代理" : "直连"));
+  const cookieTag = renderCookieTag(doc, site);
+  if (cookieTag) badges.append(cookieTag);
   badges.append(renderStatus(doc, site));
   header.append(selectLabel, badges);
   card.append(header);
@@ -313,6 +433,37 @@ export function initDeveloperSitesView({ root = typeof document !== "undefined" 
     const categoryMatches = activeCategory === "all" || site.category === activeCategory;
     return categoryMatches && siteMatchesQuery(site, search);
   });
+
+  const updateCookieControls = () => {
+    const checkbox = root.querySelector("#browserCookiesCheck");
+    const select = root.querySelector("#browserCookiesSelect");
+    const help = root.querySelector("#browserCookiesHelp");
+    const enabled = Boolean(environment?.browserCookiesEnabled);
+    if (checkbox) {
+      checkbox.disabled = !enabled;
+      if (!enabled) checkbox.checked = false;
+    }
+    if (select) {
+      select.disabled = !enabled || !checkbox?.checked;
+      if (!enabled) select.value = "";
+    }
+    if (help) {
+      help.textContent = enabled
+        ? "仅影响当前 probe；Cookie 不会上传或保存"
+        : "后端未启用浏览器 Cookie，默认不会读取本机登录态";
+      help.classList.toggle("is-enabled", enabled);
+      help.classList.toggle("is-disabled", !enabled);
+    }
+  };
+
+  const getProbeOptions = () => {
+    const checkbox = root.querySelector("#browserCookiesCheck");
+    if (!checkbox?.checked) return {};
+    if (!environment?.browserCookiesEnabled) return null;
+    const browser = root.querySelector("#browserCookiesSelect")?.value;
+    if (!BROWSER_COOKIE_SOURCES.includes(browser)) return null;
+    return { cookiesFromBrowser: browser };
+  };
 
   const renderStats = () => {
     const stats = deriveSiteStats(sites);
@@ -396,13 +547,23 @@ export function initDeveloperSitesView({ root = typeof document !== "undefined" 
       return site.result;
     }
 
+    const probeOptions = getProbeOptions();
+    if (probeOptions === null) {
+      const help = root.querySelector("#browserCookiesHelp");
+      if (help) {
+        help.textContent = "已勾选浏览器 Cookie，请先选择来源浏览器";
+        help.classList.add("is-disabled");
+      }
+      return null;
+    }
+
     site.status = "testing";
     site.result = null;
     renderStats();
     renderSites();
     try {
       if (typeof client.probeVideo !== "function") throw new Error("探测 API 不可用");
-      const result = normalizeProbeResult(await client.probeVideo(url));
+      const result = normalizeProbeResult(await client.probeVideo(url, probeOptions));
       site.result = result;
       site.status = result.ok ? "ok" : "fail";
     } catch (error) {
@@ -461,7 +622,78 @@ export function initDeveloperSitesView({ root = typeof document !== "undefined" 
       if (versionNode) versionNode.textContent = "读取失败";
       if (proxyNode) proxyNode.textContent = "环境未知";
     }
+    updateCookieControls();
     return environment;
+  };
+
+  const applyStartupStatus = (startup) => {
+    if (!startup || !Array.isArray(startup.sites)) return false;
+    const fixedSites = new Map(sites.filter((site) => !site.id.startsWith("custom-")).map((site) => [site.id, site]));
+    for (const item of startup.sites) {
+      const site = fixedSites.get(item.id);
+      if (!site) continue;
+      if (item.status === "ok" || item.status === "fail") {
+        const result = normalizeProbeResult(item.result || { ok: item.status === "ok" });
+        site.status = result.ok ? "ok" : "fail";
+        site.result = result;
+      } else if (startup.state === "running") {
+        site.status = "testing";
+        site.result = null;
+      } else {
+        site.status = "idle";
+        site.result = null;
+      }
+    }
+    return true;
+  };
+
+  const loadProbeHistory = async () => {
+    const statusNode = root.querySelector("#sitesHistoryStatus");
+    let records = [];
+    let historyLoaded = false;
+    try {
+      if (typeof client.listProbeRecords !== "function") throw new Error("探测历史 API 不可用");
+      records = await client.listProbeRecords(500);
+      const restored = restoreProbeHistory(sites, records);
+      sites.splice(0, sites.length, ...restored);
+      historyLoaded = true;
+    } catch (_) {
+      if (statusNode) {
+        statusNode.textContent = "暂时无法读取主验证页探测历史，当前仅显示本次页面状态。";
+        statusNode.classList.add("is-error");
+      }
+    }
+
+    let startup = null;
+    try {
+      if (typeof client.getProbeStartupStatus === "function") {
+        startup = await client.getProbeStartupStatus();
+      }
+    } catch (_) {
+      startup = null;
+    }
+
+    const startupApplied = applyStartupStatus(startup);
+    if (statusNode && startupApplied) {
+      if (startup.state === "running") {
+        statusNode.textContent = `启动探测进行中：${startup.completed || 0} / ${startup.total || sites.length} 个站点已完成。`;
+      } else if (startup.state === "completed") {
+        statusNode.textContent = `已同步当前启动批次：${startup.successful || 0} / ${startup.total || sites.length} 个站点当前可抓取。`;
+      } else if (startup.state === "disabled") {
+        statusNode.textContent = "后端已关闭自动启动探测，当前显示历史结果。";
+      }
+      statusNode.classList.remove("is-error");
+    } else if (statusNode && historyLoaded) {
+      const count = Array.isArray(records) ? records.length : 0;
+      statusNode.textContent = count
+        ? `已同步主验证页最近 ${count} 条探测记录，卡片状态以最新结果为准。`
+        : "主验证页暂无探测记录；运行测试后会显示最近可抓取状态。";
+      statusNode.classList.remove("is-error");
+    }
+
+    renderStats();
+    renderSites();
+    updateBatchControls();
   };
 
   const openModal = () => {
@@ -479,6 +711,12 @@ export function initDeveloperSitesView({ root = typeof document !== "undefined" 
     setValidity(root.querySelector("#customUrlInput"), "");
   };
 
+  root.querySelector("#browserCookiesCheck")?.addEventListener("change", () => {
+    updateCookieControls();
+  });
+  root.querySelector("#browserCookiesSelect")?.addEventListener("change", () => {
+    updateCookieControls();
+  });
   root.querySelector("#btnBatchRun")?.addEventListener("click", () => { void runSelected(); });
   root.querySelector("#btnBatchStop")?.addEventListener("click", () => { stopRequested = true; });
   root.querySelector("#btnSelectAll")?.addEventListener("click", () => {
@@ -522,6 +760,7 @@ export function initDeveloperSitesView({ root = typeof document !== "undefined" 
       id: `custom-${Date.now()}-${suffix}`,
       name: String(nameInput?.value || "").trim() || parsed.hostname,
       domain: parsed.hostname,
+      probeHostnames: [parsed.hostname],
       category: categoryInput?.value || "international",
       extractor: "Custom",
       icon: "ph-link",
@@ -579,6 +818,7 @@ export function initDeveloperSitesView({ root = typeof document !== "undefined" 
     stop() { stopRequested = true; },
   };
   view.refresh();
-  view.ready = loadEnvironment();
+  updateCookieControls();
+  view.ready = Promise.all([loadEnvironment(), loadProbeHistory()]);
   return view;
 }

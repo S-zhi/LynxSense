@@ -63,6 +63,18 @@ class TaskProbeIn(BaseModel):
     """POST /api/tasks/probe 的请求体。"""
 
     url: str = Field(min_length=1)
+    cookiesFromBrowser: Optional[
+        Literal[
+            "chrome",
+            "chromium",
+            "edge",
+            "firefox",
+            "brave",
+            "vivaldi",
+            "opera",
+            "safari",
+        ]
+    ] = None
 
 
 class TaskProbeOut(BaseModel):
@@ -113,7 +125,35 @@ class YtDlpEnvInfo(BaseModel):
     proxyConfigured: bool = False
     proxyMasked: Optional[str] = None
     cookiesConfigured: bool = False
+    browserCookiesEnabled: bool = False
     cacheTtlSec: float = 0.0
+
+
+class ProbeBatchSiteOut(BaseModel):
+    """固定站点在当前启动批次中的状态。"""
+
+    id: str
+    name: str
+    domain: str
+    url: str
+    status: Literal["pending", "testing", "ok", "fail"]
+    source: Optional[Literal["startup", "manual"]] = None
+    updatedAt: Optional[int] = None
+    result: Optional[dict[str, Any]] = None
+
+
+class ProbeBatchStatusOut(BaseModel):
+    """固定十站点启动探测批次的实时状态。"""
+
+    runId: Optional[str] = None
+    state: Literal["idle", "disabled", "running", "completed"]
+    total: int = 0
+    completed: int = 0
+    successful: int = 0
+    failed: int = 0
+    runStartedAt: Optional[int] = None
+    updatedAt: Optional[int] = None
+    sites: list[ProbeBatchSiteOut] = Field(default_factory=list)
 
 
 class ProbeRecordsClearOut(BaseModel):

@@ -580,7 +580,68 @@ def test_probe_passes_cookies_file(monkeypatch, tmp_path):
     assert captured["opts"]["cookiefile"] == str(cookies)
 
 
-def test_probe_passes_format_selector(monkeypatch):
+def test_probe_uses_browser_cookies_without_cookiefile_or_cache(monkeypatch):
+    """浏览器 Cookie 只用于显式 probe，不与文件 Cookie 合并，也不写入缓存。"""
+    import dataclasses
+
+    captured = {}
+    calls = []
+    monkeypatch.setattr(
+        downloader,
+        "settings",
+        dataclasses.replace(downloader.settings, _allow_cookies_from_browser=True),
+    )
+
+    def on_extract(url, download, opts):
+        calls.append(url)
+        captured["opts"] = opts
+        return {"title": "T", "url": "https://x"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    first = probe_video("https://x/v", cookies_from_browser="chrome", ttl_sec=60)
+    second = probe_video("https://x/v", cookies_from_browser="chrome", ttl_sec=60)
+
+    assert first.ok is True and second.ok is True
+    assert second.cached is False
+    assert len(calls) == 2
+    assert captured["opts"]["cookiesfrombrowser"] == ("chrome",)
+    assert "cookiefile" not in captured["opts"]
+
+
+def test_probe_rejects_unsupported_browser_cookie_source(monkeypatch):
+    called = False
+
+    def on_extract(url, download, opts):
+        nonlocal called
+        called = True
+        return {"title": "T", "url": "https://x"}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    result = probe_video("https://x/v", cookies_from_browser="/tmp/profile")
+    assert result.ok is False
+    assert result.reason == "不支持的浏览器 Cookie 来源"
+    assert called is False
+
+
+def test_probe_browser_cookie_errors_do_not_expose_profile_path(monkeypatch):
+    import dataclasses
+
+    monkeypatch.setattr(
+        downloader,
+        "settings",
+        dataclasses.replace(downloader.settings, _allow_cookies_from_browser=True),
+    )
+
+    def on_extract(url, download, opts):
+        raise YtDlpDownloadError("Could not open /Users/alice/Library/Cookies.sqlite")
+
+    monkeypatch.setattr(downloader, "YoutubeDL", make_fake_ydl(on_extract))
+    result = probe_video("https://x/v", cookies_from_browser="chrome", ttl_sec=0)
+    assert result.ok is False
+    assert "/Users/alice" not in (result.detail or "")
+    assert "Cookies.sqlite" not in (result.detail or "")
+
+
     """format_selector 覆盖 settings.download_format。"""
     captured = {}
 

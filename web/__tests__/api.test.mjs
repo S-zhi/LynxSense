@@ -21,6 +21,58 @@ globalThis.fetch = async (url, options) => {
 // Use dynamic import to prevent ESM hoisting from running the import before global setup
 const { Api } = await import("../js/api.js");
 
+test("Api.probeVideo sends only the URL by default", async () => {
+  let requestBody;
+  mockFetchHandler = async (url, options) => {
+    requestBody = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  await Api.probeVideo("https://example.com/video");
+  assert.deepEqual(requestBody, { url: "https://example.com/video" });
+});
+
+test("Api.probeVideo sends only a whitelisted browser cookie source when selected", async () => {
+  let requestBody;
+  mockFetchHandler = async (url, options) => {
+    requestBody = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  await Api.probeVideo("https://example.com/video", {
+    cookiesFromBrowser: "chrome",
+    cookieFile: "/private/profile/cookies.txt",
+    cookies: "secret",
+  });
+  assert.deepEqual(requestBody, {
+    url: "https://example.com/video",
+    cookiesFromBrowser: "chrome",
+  });
+});
+
+test("Api.probeVideo drops an invalid browser cookie source", async () => {
+  let requestBody;
+  mockFetchHandler = async (url, options) => {
+    requestBody = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  await Api.probeVideo("https://example.com/video", { cookiesFromBrowser: "profile/path" });
+  assert.deepEqual(requestBody, { url: "https://example.com/video" });
+});
+
+test("Api.getProbeStartupStatus reads the shared startup batch endpoint", async () => {
+  let requestedUrl = "";
+  mockFetchHandler = async (url) => {
+    requestedUrl = url;
+    return { ok: true, json: async () => ({ state: "running", total: 10 }) };
+  };
+
+  const status = await Api.getProbeStartupStatus();
+  assert.equal(requestedUrl, "http://localhost:8000/api/tasks/probe/startup-status");
+  assert.equal(status.total, 10);
+});
+
 test("Api.openFolder: JSON response with detail", async () => {
   mockFetchHandler = async (url, options) => {
     return {

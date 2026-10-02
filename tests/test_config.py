@@ -24,6 +24,30 @@ def test_database_defaults_under_data_dir(monkeypatch, tmp_path):
     assert settings.db_path == custom_db
 
 
+def test_browser_cookie_probe_setting_defaults_off_and_reads_boolean_env(monkeypatch):
+    monkeypatch.delenv("SUBTRANS_ALLOW_COOKIES_FROM_BROWSER", raising=False)
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+    settings = config.Settings()
+    assert settings.allow_cookies_from_browser is False
+
+    monkeypatch.setenv("SUBTRANS_ALLOW_COOKIES_FROM_BROWSER", "yes")
+    assert settings.allow_cookies_from_browser is True
+    replaced = dataclasses.replace(settings, _allow_cookies_from_browser=False)
+    assert replaced.allow_cookies_from_browser is False
+
+
+def test_startup_probe_setting_defaults_on_and_can_be_disabled(monkeypatch):
+    monkeypatch.delenv("SUBTRANS_STARTUP_PROBE_ENABLED", raising=False)
+    monkeypatch.setattr(config, "_sync_env_file", lambda: None)
+    settings = config.Settings()
+    assert settings.startup_probe_enabled is True
+
+    monkeypatch.setenv("SUBTRANS_STARTUP_PROBE_ENABLED", "0")
+    assert settings.startup_probe_enabled is False
+    replaced = dataclasses.replace(settings, _startup_probe_enabled=True)
+    assert replaced.startup_probe_enabled is True
+
+
 def test_download_format_defaults_to_480p_cap():
     assert (
         config.Settings().download_format

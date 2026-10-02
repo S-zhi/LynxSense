@@ -1,6 +1,7 @@
 /* 数据层：真实接口（REST + SSE）与 mock，按 config 切换。契约与后端一致。 */
 
 import { TERMINAL, LANG_LABEL } from "./constants.js";
+import { DEFAULT_SITES } from "./developer-sites-data.js";
 import { uid, clamp, shortUrl, statusForProgress } from "./utils.js";
 
 const CFG = (typeof window !== "undefined" && window.APP_CONFIG) || {
@@ -12,6 +13,28 @@ const CFG = (typeof window !== "undefined" && window.APP_CONFIG) || {
   API_TIMEOUT_MS: 15000,
 };
 export const USE_MOCK = Boolean(CFG.USE_MOCK);
+
+const BROWSER_COOKIE_SOURCES = new Set([
+  "chrome",
+  "chromium",
+  "edge",
+  "firefox",
+  "brave",
+  "vivaldi",
+  "opera",
+  "safari",
+]);
+
+function probeRequestBody(url, options = {}) {
+  const body = { url };
+  const browser = options && typeof options === "object"
+    ? options.cookiesFromBrowser
+    : null;
+  if (typeof browser === "string" && BROWSER_COOKIE_SOURCES.has(browser)) {
+    body.cookiesFromBrowser = browser;
+  }
+  return body;
+}
 
 // 为普通 REST 请求统一接入超时控制；SSE 订阅保留独立连接策略。
 async function request(base, path, options = {}) {
@@ -101,11 +124,11 @@ const RealApi = {
   },
 
   // 探测链接是否能被 yt-dlp 解析并找到可下载格式。
-  async probeVideo(url) {
+  async probeVideo(url, options = {}) {
     const res = await request(this.base, "/api/tasks/probe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(probeRequestBody(url, options)),
     });
     if (!res.ok) throw new Error(await readError(res, "链接校验失败"));
     return res.json();
@@ -125,6 +148,13 @@ const RealApi = {
       `/api/tasks/probe/records?limit=${encodeURIComponent(limit)}`,
     );
     if (!res.ok) throw new Error(await readError(res, "获取测试历史失败"));
+    return res.json();
+  },
+
+  // 获取固定十站点启动探测与开发者页重测的实时状态。
+  async getProbeStartupStatus() {
+    const res = await request(this.base, "/api/tasks/probe/startup-status");
+    if (!res.ok) throw new Error(await readError(res, "获取站点可用性状态失败"));
     return res.json();
   },
 
@@ -615,7 +645,8 @@ const MockApi = (() => {
       tasks.unshift(t); persist(); await delay(180); return { ...t };
     },
     // 示例模式下模拟链接探测成功，同时写入历史。
-    async probeVideo(url) {
+    async probeVideo(url, options = {}) {
+      void options;
       await delay(180);
       const ok = /^https?:\/\/.+/i.test(url);
       const result = {
@@ -651,6 +682,7 @@ const MockApi = (() => {
         proxyConfigured: false,
         proxyMasked: null,
         cookiesConfigured: false,
+        browserCookiesEnabled: false,
         cacheTtlSec: 300,
       };
     },
@@ -660,6 +692,41 @@ const MockApi = (() => {
       const arr = _loadProbe();
       const n = Math.max(1, Math.min(500, Number(limit) || 50));
       return arr.slice(0, n);
+    },
+    async getProbeStartupStatus() {
+      await delay(20);
+      const now = Date.now();
+      return {
+        runId: "mock_startup",
+        state: "completed",
+        total: DEFAULT_SITES.length,
+        completed: DEFAULT_SITES.length,
+        successful: DEFAULT_SITES.length,
+        failed: 0,
+        runStartedAt: now,
+        updatedAt: now,
+        sites: DEFAULT_SITES.map((site) => ({
+          id: site.id,
+          name: site.name,
+          domain: site.domain,
+          url: site.url,
+          status: "ok",
+          source: "startup",
+          updatedAt: now,
+          result: {
+            ok: true,
+            title: `示例视频 · ${site.name}`,
+            extractor: site.extractor,
+            formatsCount: 3,
+            webpageUrl: site.url,
+            reason: null,
+            detail: null,
+            availableQualities: ["best"],
+            formats: [],
+            createdAt: now,
+          },
+        })),
+      };
     },
     // 示例模式下：一键清空历史。
     async clearProbeRecords() {
